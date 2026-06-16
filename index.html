@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>水务造价数据库 · 企业定额与指标平台</title>
+
+<!-- 依赖：Tailwind(CDN) / SheetJS(Excel 解析导出) / Chart.js(图表) / idb-keyval(IndexedDB) -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6.2.1/dist/umd.js"></script>
+
+<style>
+  :root {
+    --brand: #00514b;
+    --brand-container: #0d6b64;
+    --brand-soft: #a2f1e7;
+    --secondary: #00658e;
+    --bg: #f6f8fb;
+    --surface: #ffffff;
+    --surface-low: #eff4ff;
+    --line: #dbe4ef;
+    --line-strong: #cbd5e1;
+    --text: #0b1c30;
+    --muted: #64748b;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    letter-spacing: 0;
+  }
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+    line-height: 1;
+  }
+  .brand-bg { background: var(--brand-container); }
+  .brand-text { color: var(--brand); }
+  .nav-item {
+    border-radius: 8px;
+    color: #94a3b8;
+    transition: background .18s ease, color .18s ease;
+  }
+  .nav-item:hover { background: rgba(30, 41, 59, .86); color: #f8fafc; }
+  .nav-item.active {
+    background: #0f766e;
+    color: #fff;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  .table-fixed th {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    z-index: 1;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+  }
+  .scroll-y { overflow-y: auto; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+  .scroll-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .badge-green { background: #dcfce7; color: #166534; }
+  .badge-blue { background: #dbeafe; color: #1e40af; }
+  .badge-yellow { background: #fef3c7; color: #92400e; }
+  .badge-gray { background: #e2e8f0; color: #475569; }
+  .modal-mask { background: rgba(15,23,42,0.45); backdrop-filter: blur(3px); }
+  .kbd { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 1px 6px; border: 1px solid #d1d5db; border-bottom-width: 2px; border-radius: 4px; background: #fff; }
+  .tab-active { border-bottom: 2px solid var(--brand); color: var(--brand); font-weight: 600; }
+  .tabular-nums, .font-data, input[type="number"] { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  input, select, textarea {
+    border-color: var(--line-strong) !important;
+    border-radius: 8px !important;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none !important;
+    border-color: var(--brand) !important;
+    box-shadow: 0 0 0 3px rgba(10, 182, 253, .16) !important;
+  }
+  button { border-radius: 8px; transition: background .18s ease, color .18s ease, border-color .18s ease, transform .12s ease; }
+  button:active { transform: translateY(1px); }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] > summary .chev { transform: rotate(90deg); }
+  .chev { transition: transform .15s; }
+  .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+  .ai-bubble-user { background: var(--brand-container); color: #fff; }
+  .ai-bubble-assistant { background: #f1f5f9; color: #0f172a; }
+</style>
+</head>
+<body class="overflow-hidden">
+
+<div class="flex h-screen">
+  <!-- 侧边栏 -->
+  <aside class="bg-slate-900 text-white w-[240px] flex flex-col flex-shrink-0 border-r border-slate-800">
+    <div class="px-5 py-6">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-2xl text-teal-100">S</div>
+        <div>
+          <div class="font-semibold leading-tight">水务造价库</div>
+          <div class="text-[11px] text-slate-400">企业定额 · 指标 · 报价</div>
+        </div>
+      </div>
+    </div>
+    <nav id="nav" class="flex-1 px-3 py-2 space-y-3 scroll-y scroll-thin"></nav>
+    <div class="px-5 py-4 text-[11px] text-slate-500 border-t border-slate-800">
+      v2.8 · ES Module<br>IndexedDB 本地数据
+    </div>
+  </aside>
+
+  <!-- 主体 -->
+  <div class="flex-1 flex flex-col min-w-0 bg-slate-50">
+    <header class="bg-white border-b border-slate-200 h-14 px-6 flex items-center gap-3 shrink-0">
+      <div class="text-sm text-slate-500" id="crumb">仪表盘</div>
+      <div class="flex-1"></div>
+      <div class="relative">
+        <input id="globalSearch" type="text" placeholder="全局搜索：定额 / 项目 / 指标…"
+          class="w-80 pl-9 pr-3 py-2 text-sm border bg-slate-50 text-slate-800 placeholder:text-slate-400" />
+        <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+      </div>
+      <button onclick="window.__app.openAI()" class="px-4 py-2 text-sm brand-bg text-white flex items-center gap-1.5">
+        <span class="material-symbols-outlined text-[16px]">auto_awesome</span> AI 助手
+      </button>
+      <button onclick="window.__app.exportAll()" class="p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700" title="导出备份">
+        <span class="material-symbols-outlined text-[20px]">download</span>
+      </button>
+    </header>
+
+    <main id="workspace" class="flex-1 overflow-auto scroll-thin p-6"></main>
+  </div>
+</div>
+
+<!-- 通用弹窗 -->
+<div id="modal" class="hidden fixed inset-0 z-50 modal-mask flex items-center justify-center p-6">
+  <div class="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+      <div id="modalTitle" class="font-semibold"></div>
+      <button onclick="document.getElementById('modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-1">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <div id="modalBody" class="flex-1 overflow-auto scroll-thin p-5 bg-slate-50"></div>
+    <div id="modalFoot" class="px-5 py-4 border-t border-slate-200 flex justify-end gap-2 shrink-0 bg-white"></div>
+  </div>
+</div>
+
+<!-- AI 抽屉 -->
+<div id="aiDrawer" class="hidden fixed right-0 top-0 bottom-0 w-[460px] bg-white z-40 flex flex-col border-l border-slate-200">
+  <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+    <div class="font-semibold flex items-center gap-2">
+      <span class="material-symbols-outlined text-[18px] text-teal-700">smart_toy</span> AI 造价助手
+    </div>
+    <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1">
+      <span class="material-symbols-outlined text-[20px]">close</span>
+    </button>
+  </div>
+  <div id="aiMsgs" class="flex-1 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50"></div>
+  <div class="border-t border-slate-200 p-3 space-y-2">
+    <div class="flex gap-2">
+      <input id="aiInput" type="text" placeholder="问点啥：5万m³/d 水池造价区间 / 推荐防水定额 …"
+        class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-teal-600" />
+      <button onclick="window.__app.sendAI()" class="px-4 py-2 text-sm brand-bg text-white">发送</button>
+    </div>
+    <div class="text-[11px] text-gray-400">提示：在「设置」中配置国内大模型 API Key。数据仅在本机与所配置 AI 间传输。</div>
+  </div>
+</div>
+
+<!-- 应用入口（ES Module） -->
+<script type="module" src="./app.js?v=2.8"></script>
+</body>
+</html>
