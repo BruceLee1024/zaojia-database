@@ -1,10 +1,10 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=4.0';
+import * as dashboard from './assets/views/dashboard.js?v=4.1';
 import * as quota     from './assets/views/quota.js?v=3.9';
-import * as projects  from './assets/views/projects.js?v=3.9';
-import * as boq       from './assets/views/boq.js?v=3.9';
+import * as projects  from './assets/views/projects.js?v=4.2';
+import * as boq       from './assets/views/boq.js?v=4.2';
 import * as indicators from './assets/views/indicators.js?v=3.9';
-import * as experience from './assets/views/experience.js?v=3.9';
+import * as experience from './assets/views/experience.js?v=4.3';
 import * as settings  from './assets/views/settings.js?v=3.9';
 import * as ai        from './assets/views/ai.js?v=3.9';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';

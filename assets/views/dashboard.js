@@ -83,9 +83,15 @@ export async function render() {
             </section>
 
             <section class="card p-0 overflow-hidden min-h-[260px] flex flex-col">
-              ${panelHeader('TOP 分类造价', '按清单名称推断分类，辅助判断成本集中度。')}
-              <div class="p-3 space-y-3 overflow-auto scroll-thin flex-1 min-h-0">
-                ${stats.categoryCost.length ? stats.categoryCost.slice(0, 7).map(c => categoryBar(c, stats.categoryCost[0].amount || 1)).join('') : emptyBlock('添加清单后展示分类造价')}
+              <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="font-semibold text-slate-800">最近报价版本</div>
+                  <div class="mt-1 text-xs text-slate-500">关键调整后保留版本，便于复盘和回退。</div>
+                </div>
+                <span class="badge badge-gray shrink-0">${stats.recentVersions.length} 个</span>
+              </div>
+              <div class="p-3 space-y-2 overflow-auto scroll-thin flex-1 min-h-0">
+                ${stats.recentVersions.length ? stats.recentVersions.map(v => versionItem(v, projects)).join('') : emptyBlock('保存报价版本后展示')}
               </div>
             </section>
           </div>
@@ -155,10 +161,10 @@ export async function render() {
             </div>
           </section>
 
-          <section class="card p-0 overflow-hidden">
-            ${panelHeader('最近报价版本', '关键调整后保留版本，便于复盘和回退。')}
-            <div class="p-3 space-y-2 max-h-[190px] overflow-auto scroll-thin">
-              ${stats.recentVersions.length ? stats.recentVersions.map(v => versionItem(v, projects)).join('') : emptyBlock('保存报价版本后展示')}
+          <section class="card p-0 overflow-hidden flex flex-col min-h-[220px]">
+            ${panelHeader('TOP 分类造价', '按清单名称推断分类，辅助判断成本集中度。')}
+            <div class="p-3 space-y-3 overflow-auto scroll-thin flex-1 min-h-0">
+              ${stats.categoryCost.length ? stats.categoryCost.slice(0, 7).map(c => categoryBar(c, stats.categoryCost[0].amount || 1)).join('') : emptyBlock('添加清单后展示分类造价')}
             </div>
           </section>
         </aside>

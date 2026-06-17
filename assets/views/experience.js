@@ -89,12 +89,18 @@ export async function render() {
           <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
             <div>
               <div class="font-semibold text-slate-800">经验知识库</div>
-              <div class="mt-1 text-xs text-slate-500">显示 ${kb.items.length} / ${kb.stats.total} 张知识卡。</div>
+              <div class="mt-1 text-xs text-slate-500">按条目逐条沉淀、复核和复用经验。显示 ${kb.items.length} / ${kb.stats.total} 张知识卡。</div>
             </div>
             <button id="expResetFilters" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">清除筛选</button>
           </div>
-          <div class="p-3 grid grid-cols-1 2xl:grid-cols-2 gap-3 overflow-auto scroll-thin">
-            ${kb.items.length ? kb.items.map(card => cardItem(card, selected?.id === card.id)).join('') : emptyState('没有匹配的知识卡。可以放宽筛选，或从右侧项目发起一次复盘。')}
+          <div class="grid grid-cols-[minmax(0,1fr)_92px_82px_96px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-[11px] font-medium text-slate-500">
+            <div>经验条目</div>
+            <div class="text-center">状态</div>
+            <div class="text-right">复用</div>
+            <div class="text-right">有效期</div>
+          </div>
+          <div class="overflow-auto scroll-thin flex-1 min-h-0">
+            ${kb.items.length ? `<div class="divide-y divide-slate-100">${kb.items.map(card => cardItem(card, selected?.id === card.id)).join('')}</div>` : emptyKnowledgeList()}
           </div>
         </main>
 
@@ -129,66 +135,82 @@ export async function openSession(sessionId) {
 function renderReview(session, draft = null) {
   openModal('报价复盘经验萃取', `
     <div class="space-y-4 text-sm text-slate-700">
-      <div class="rounded border border-slate-200 bg-white p-3">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <div class="font-semibold text-slate-900">${esc(session.projectNameSnapshot || '当前项目')}</div>
-            <div class="mt-1 text-xs text-slate-500">${esc(session.versionNameSnapshot || sourceLabel(session.sourceType))}</div>
+      <section class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+        <div class="px-4 py-3 flex items-start justify-between gap-4">
+          <div class="flex items-start gap-3 min-w-0">
+            <div class="h-10 w-10 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-[22px]">psychology_alt</span>
+            </div>
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="font-semibold text-slate-900 truncate">${esc(session.projectNameSnapshot || '当前项目')}</div>
+                <span class="badge badge-blue">${esc(sourceLabel(session.sourceType))}</span>
+              </div>
+              <div class="mt-1 text-xs leading-5 text-slate-500">${esc(session.versionNameSnapshot || '当前工作稿')} · 追问只生成草稿，确认后才进入知识库</div>
+            </div>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 shrink-0">
             <span class="badge ${session.questionSource === 'ai' ? 'badge-green' : 'badge-gray'}">${session.questionSource === 'ai' ? 'AI 追问' : '本地兜底'}</span>
             ${(session.questions || []).some(q => q.level === 'L2') ? `<span class="badge ${session.followUpSource === 'ai' ? 'badge-green' : 'badge-gray'}">L2 补问</span>` : ''}
-            <span class="badge badge-blue">${esc(sourceLabel(session.sourceType))}</span>
           </div>
         </div>
-        <div class="mt-3 grid grid-cols-4 gap-2">
-          ${metric('清单', session.context?.lineCount || 0, '条')}
-          ${metric('缺单价', session.context?.missingPriceCount || 0, '条')}
-          ${metric('0 工程量', session.context?.zeroQtyCount || 0, '条')}
-          ${metric('系数异常', session.context?.factorRiskCount || 0, '条')}
+        <div class="border-t border-slate-200 bg-slate-50 px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+          ${reviewMetric('清单', session.context?.lineCount || 0, '条', 'list_alt')}
+          ${reviewMetric('缺单价', session.context?.missingPriceCount || 0, '条', 'priority_high', session.context?.missingPriceCount ? 'amber' : 'teal')}
+          ${reviewMetric('0 工程量', session.context?.zeroQtyCount || 0, '条', 'exposure_zero', session.context?.zeroQtyCount ? 'amber' : 'teal')}
+          ${reviewMetric('系数异常', session.context?.factorRiskCount || 0, '条', 'tune', session.context?.factorRiskCount ? 'amber' : 'teal')}
         </div>
-      </div>
+      </section>
 
-      <div class="grid grid-cols-2 gap-3">
-        <section class="rounded border border-slate-200 bg-white p-3">
-          <div class="mb-2 flex items-center justify-between">
-            <div class="font-medium text-slate-800">追问卡片</div>
-            <span class="text-xs text-slate-500">${questionSourceText(session)}</span>
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.05fr)_minmax(340px,.95fr)] gap-4 items-start">
+        <section class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-200 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-800">AI 追问卡片</div>
+              <div class="mt-1 text-xs leading-5 text-slate-500">${questionSourceText(session)}</div>
+            </div>
+            <span class="badge badge-gray shrink-0">${(session.questions || []).length} 问</span>
           </div>
-          <div class="mb-3 grid grid-cols-3 gap-2">
-            ${stepPill('L0', '事实背景', '项目/清单/版本')}
-            ${stepPill('L1', '首轮追问', session.questionSource === 'ai' ? 'AI 生成' : '本地模板')}
-            ${stepPill('L2', '递进补问', (session.questions || []).some(q => q.level === 'L2') ? (session.followUpSource === 'ai' ? 'AI 已补问' : '本地已补问') : '回答后生成')}
+          <div class="px-4 py-3 border-b border-slate-100 grid grid-cols-3 gap-2 bg-slate-50/70">
+            ${reviewStep('L0', '事实背景', '项目/清单/版本', 'done')}
+            ${reviewStep('L1', '首轮追问', session.questionSource === 'ai' ? 'AI 生成' : '本地模板', 'done')}
+            ${reviewStep('L2', '递进补问', (session.questions || []).some(q => q.level === 'L2') ? (session.followUpSource === 'ai' ? 'AI 已补问' : '本地已补问') : '回答后生成', (session.questions || []).some(q => q.level === 'L2') ? 'done' : 'pending')}
           </div>
-          <div class="space-y-3">
-            ${(session.questions || []).map(q => `
-              <label class="block text-xs font-medium text-slate-500">
-                <span class="inline-flex items-center gap-1">${q.level === 'L2' ? '<span class="badge badge-blue">L2</span>' : ''}${esc(q.label)}</span>
-                <div class="mt-1 text-slate-600 font-normal leading-5">${esc(q.prompt)}</div>
-                <textarea data-exp-answer="${esc(q.id)}" rows="2" class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm" placeholder="写下这次判断、依据或边界...">${esc((session.answers || {})[q.id] || '')}</textarea>
-              </label>
-            `).join('')}
+          <div class="p-3 space-y-3 max-h-[430px] overflow-auto scroll-thin">
+            ${(session.questions || []).map((q, idx) => questionCard(q, idx, (session.answers || {})[q.id] || '')).join('')}
           </div>
         </section>
 
-        <section class="rounded border border-slate-200 bg-slate-50 p-3">
-          <div class="mb-2 flex items-center justify-between">
-            <div class="font-medium text-slate-800">经验卡草稿</div>
-            <span class="text-xs text-slate-500">确认后进入知识库</span>
-          </div>
-          ${draft ? draftForm(draft) : `
-            <div class="flex h-full min-h-[320px] items-center justify-center rounded border border-dashed border-slate-300 bg-white px-6 text-center text-sm text-slate-500">
-              先回答左侧追问，再生成结构化经验卡。
+        <section class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-200 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-800">经验卡草稿</div>
+              <div class="mt-1 text-xs leading-5 text-slate-500">确认后写入知识库，并可被 AI 查询引用。</div>
             </div>
-          `}
+            <span class="badge ${draft ? 'badge-green' : 'badge-gray'} shrink-0">${draft ? '已生成' : '待生成'}</span>
+          </div>
+          <div class="p-3 max-h-[520px] overflow-auto scroll-thin bg-slate-50/70">
+            ${draft ? draftForm(draft) : draftEmptyState()}
+          </div>
         </section>
       </div>
     </div>
   `, `
-    <button id="expRefine" class="px-3 py-1.5 text-sm border rounded text-slate-700 border-slate-300">AI 补问</button>
-    <button id="expDraft" class="px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300">生成草稿</button>
-    <button id="expConfirm" class="px-3 py-1.5 text-sm brand-bg text-white rounded ${draft ? '' : 'opacity-50'}">确认入库</button>
-    <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">关闭</button>
+    <div class="w-full flex items-center justify-between gap-3">
+      <div class="text-xs text-slate-500">流程：回答追问 → 生成草稿 → 用户确认入库</div>
+      <div class="flex items-center gap-2">
+        <button id="expRefine" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded text-slate-700 border-slate-300 bg-white hover:bg-slate-50">
+          <span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 补问
+        </button>
+        <button id="expDraft" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100">
+          <span class="material-symbols-outlined text-[16px]">edit_note</span>生成草稿
+        </button>
+        <button id="expConfirm" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm brand-bg text-white rounded ${draft ? '' : 'opacity-50'}">
+          <span class="material-symbols-outlined text-[16px]">inventory_2</span>确认入库
+        </button>
+        <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border border-slate-300 bg-white rounded">关闭</button>
+      </div>
+    </div>
   `);
   document.getElementById('expRefine').onclick = async () => {
     const answers = collectAnswers();
@@ -303,17 +325,65 @@ function currentFilters() {
 }
 
 function cardItem(card, active) {
-  return `<button data-exp-card="${card.id}" class="rounded border ${active ? 'border-teal-300 bg-teal-50/50' : 'border-slate-200 bg-white'} p-3 text-left hover:bg-slate-50">
-    <div class="flex items-start justify-between gap-2">
-      <div class="font-semibold text-slate-800 truncate">${esc(card.title || '未命名经验')}</div>
-      <span class="badge ${statusBadgeClass(card.reviewStatus)} shrink-0">${statusLabel(card.reviewStatus)}</span>
+  const tags = (card.keywords || card.tags || []).slice(0, 4);
+  const expired = isExpiredDate(card.expiresAt);
+  return `<button data-exp-card="${card.id}" class="w-full grid grid-cols-[minmax(0,1fr)_92px_82px_96px] gap-3 px-4 py-3 text-left border-l-2 ${active ? 'border-l-teal-600 bg-teal-50/70' : 'border-l-transparent bg-white hover:bg-slate-50'} transition-colors">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="material-symbols-outlined text-[17px] ${active ? 'text-teal-700' : 'text-slate-400'} shrink-0">article</span>
+        <span class="font-semibold text-slate-900 truncate">${esc(card.title || '未命名经验')}</span>
+      </div>
+      <div class="mt-1 text-xs text-slate-500 truncate">
+        ${esc(card.projectNameSnapshot || '未知项目')} · ${esc(card.costCategory || card.domainCategory || '未分类')} · ${esc(card.processType || card.projectType || '未标注')}
+      </div>
+      <div class="mt-1.5 text-sm leading-5 text-slate-700 line-clamp-2">${esc(card.lesson || '暂无经验结论')}</div>
+      <div class="mt-2 flex flex-wrap gap-1">
+        ${tags.length ? tags.map(tag => `<span class="badge badge-blue">${esc(tag)}</span>`).join('') : '<span class="badge badge-gray">未标记</span>'}
+      </div>
     </div>
-    <div class="mt-2 text-xs text-slate-500 truncate">${esc(card.projectNameSnapshot || '未知项目')} · ${esc(card.costCategory || '未分类')} · 复用 ${fmt(card.reuseCount || 0)} 次</div>
-    <div class="mt-2 text-sm leading-6 text-slate-700 line-clamp-2">${esc(card.lesson || '暂无经验结论')}</div>
-    <div class="mt-2 flex flex-wrap gap-1">
-      ${(card.keywords || card.tags || []).slice(0, 5).map(tag => `<span class="badge badge-blue">${esc(tag)}</span>`).join('') || '<span class="badge badge-gray">未标记</span>'}
+    <div class="flex flex-col items-center justify-start gap-1 pt-0.5">
+      <span class="badge ${statusBadgeClass(card.reviewStatus)} shrink-0">${statusLabel(card.reviewStatus)}</span>
+      <span class="text-[11px] text-slate-400">${esc(card.confidence || '可信度-')}</span>
+    </div>
+    <div class="pt-0.5 text-right">
+      <div class="font-semibold tabular-nums text-slate-800">${fmt(card.reuseCount || 0)}</div>
+      <div class="mt-1 text-[11px] text-slate-500">次引用</div>
+    </div>
+    <div class="pt-0.5 text-right">
+      <div class="font-medium tabular-nums ${expired ? 'text-amber-700' : 'text-slate-800'}">${esc(card.expiresAt || '-')}</div>
+      <div class="mt-1 text-[11px] ${expired ? 'text-amber-700' : 'text-slate-500'}">${expired ? '已过期' : '有效'}</div>
     </div>
   </button>`;
+}
+
+function emptyKnowledgeList() {
+  return `<div class="p-4 space-y-2">
+    <div class="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
+      <div class="flex items-start gap-3">
+        <div class="h-9 w-9 rounded border border-slate-200 bg-white text-slate-400 flex items-center justify-center shrink-0">
+          <span class="material-symbols-outlined text-[20px]">view_list</span>
+        </div>
+        <div class="min-w-0">
+          <div class="font-medium text-slate-800">暂无经验条目</div>
+          <div class="mt-1 text-xs leading-5 text-slate-500">生成并确认复盘后，知识卡会在这里按一条一条的列表展示，方便快速扫描和打开维护。</div>
+        </div>
+      </div>
+    </div>
+    ${emptyKnowledgeRow('待沉淀经验', '项目 / 分类 / 结论摘要', '正式', '0', '-')}
+    ${emptyKnowledgeRow('防水报价口径示例', '项目归档后自动形成条目', '需复核', '0', '-')}
+  </div>`;
+}
+
+function emptyKnowledgeRow(title, meta, status, reuse, expiresAt) {
+  return `<div class="grid grid-cols-[minmax(0,1fr)_92px_82px_96px] gap-3 rounded border border-slate-200 bg-white px-4 py-3 opacity-60">
+    <div class="min-w-0">
+      <div class="font-medium text-slate-700 truncate">${esc(title)}</div>
+      <div class="mt-1 text-xs text-slate-500 truncate">${esc(meta)}</div>
+    </div>
+    <div class="text-center"><span class="badge badge-gray">${esc(status)}</span></div>
+    <div class="text-right tabular-nums text-slate-500">${esc(reuse)}</div>
+    <div class="text-right tabular-nums text-slate-500">${esc(expiresAt)}</div>
+  </div>`;
 }
 
 function detailPanel(card) {
@@ -531,14 +601,72 @@ function draftForm(draft) {
 
 function input(label, id, value) {
   return `<label class="block text-xs font-medium text-slate-500">${label}
-    <input id="${id}" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(value || '')}" />
+    <input id="${id}" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(value || '')}" />
   </label>`;
 }
 
 function area(label, id, value, rows) {
   return `<label class="block text-xs font-medium text-slate-500">${label}
-    <textarea id="${id}" rows="${rows}" class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm">${esc(value || '')}</textarea>
+    <textarea id="${id}" rows="${rows}" class="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm">${esc(value || '')}</textarea>
   </label>`;
+}
+
+function reviewMetric(label, value, unit, icon, tone = 'teal') {
+  return `<div class="rounded border border-slate-200 bg-white px-3 py-2">
+    <div class="flex items-center justify-between gap-2">
+      <div class="text-[11px] text-slate-500">${label}</div>
+      <span class="material-symbols-outlined text-[16px] ${toneText(tone)}">${icon}</span>
+    </div>
+    <div class="mt-1 font-semibold tabular-nums text-slate-900">${fmt(value)}<span class="ml-1 text-[11px] font-normal text-slate-500">${unit}</span></div>
+  </div>`;
+}
+
+function reviewStep(level, title, desc, status = 'pending') {
+  const done = status === 'done';
+  return `<div class="rounded border ${done ? 'border-teal-200 bg-white' : 'border-slate-200 bg-white'} px-2.5 py-2">
+    <div class="flex items-center gap-1.5">
+      <span class="inline-flex h-5 w-5 items-center justify-center rounded-full ${done ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-500'} text-[10px] font-semibold">${level}</span>
+      <span class="text-xs font-medium text-slate-700">${title}</span>
+    </div>
+    <div class="mt-1 truncate text-[11px] text-slate-500">${esc(desc)}</div>
+  </div>`;
+}
+
+function questionCard(q, index, answer) {
+  const isFollowUp = q.level === 'L2';
+  return `<label class="block rounded-lg border ${isFollowUp ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200 bg-white'} p-3">
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="inline-flex h-6 w-6 items-center justify-center rounded border ${isFollowUp ? 'border-blue-200 bg-white text-blue-700' : 'border-teal-200 bg-teal-50 text-teal-700'} text-[11px] font-semibold">${isFollowUp ? 'L2' : `Q${index + 1}`}</span>
+        <span class="font-semibold text-slate-800 truncate">${esc(q.label)}</span>
+      </div>
+      ${isFollowUp ? '<span class="badge badge-blue shrink-0">递进</span>' : ''}
+    </div>
+    <div class="mt-2 text-xs leading-5 text-slate-600">${esc(q.prompt)}</div>
+    <textarea data-exp-answer="${esc(q.id)}" rows="3" class="mt-2 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm leading-5" placeholder="写下这次判断、依据或适用边界...">${esc(answer || '')}</textarea>
+  </label>`;
+}
+
+function draftEmptyState() {
+  return `<div class="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white px-6 text-center">
+    <div class="h-11 w-11 rounded-lg border border-slate-200 bg-slate-50 text-slate-500 flex items-center justify-center">
+      <span class="material-symbols-outlined text-[22px]">edit_document</span>
+    </div>
+    <div class="mt-3 font-medium text-slate-800">等待生成经验卡草稿</div>
+    <div class="mt-1 max-w-[280px] text-xs leading-5 text-slate-500">先回答左侧关键追问，再点击“生成草稿”。AI 内容会保持草稿状态，确认后才会进入知识库。</div>
+    <div class="mt-4 grid grid-cols-3 gap-2 w-full max-w-[320px]">
+      ${miniProcessPill('结论', 'lesson')}
+      ${miniProcessPill('边界', 'rule')}
+      ${miniProcessPill('证据', 'fact_check')}
+    </div>
+  </div>`;
+}
+
+function miniProcessPill(label, icon) {
+  return `<div class="rounded border border-slate-200 bg-slate-50 px-2 py-2">
+    <span class="material-symbols-outlined text-[16px] text-slate-500">${icon}</span>
+    <div class="mt-1 text-[11px] text-slate-600">${label}</div>
+  </div>`;
 }
 
 function metric(label, value, unit) {
@@ -556,6 +684,12 @@ function stepPill(level, title, desc) {
     </div>
     <div class="mt-0.5 truncate text-[11px] text-slate-500">${esc(desc)}</div>
   </div>`;
+}
+
+function toneText(tone) {
+  return tone === 'amber' ? 'text-amber-700'
+    : tone === 'teal' ? 'text-teal-700'
+    : 'text-slate-700';
 }
 
 function questionSourceText(session) {
@@ -577,6 +711,13 @@ function statusLabel(status) {
 
 function statusBadgeClass(status) {
   return status === 'needs_review' ? 'badge-yellow' : status === 'archived' ? 'badge-gray' : 'badge-green';
+}
+
+function isExpiredDate(value) {
+  if (!value) return false;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return false;
+  return date.getTime() < new Date().setHours(0, 0, 0, 0);
 }
 
 function sourceLabel(sourceType = '') {

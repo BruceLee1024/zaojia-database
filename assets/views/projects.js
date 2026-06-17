@@ -4,7 +4,7 @@ import { indicatorService } from '../services/indicatorService.js?v=3.9';
 import { boqRepo, versionRepo } from '../data/repository.js?v=3.9';
 import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { openReview } from './experience.js?v=3.9';
+import { openReview } from './experience.js?v=4.3';
 
 const TYPES = ['水厂', '泵站', '管网', '变电站', '水池', '车间', '其他'];
 const SCALES = ['小型', '中型', '大型', '特大型'];
