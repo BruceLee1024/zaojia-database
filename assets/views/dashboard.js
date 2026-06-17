@@ -1,13 +1,15 @@
 // 视图：仪表盘
-import { quotaRepo, projectRepo, boqRepo } from '../data/repository.js?v=2.8';
+import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.2';
 import { fmt, fmtMoney, esc } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=2.8';
+import { hasMissingPrice } from '../utils/costing.js?v=3.2';
 import { categoryGuess } from '../utils/stats.js';
 
 export async function render() {
-  const [quota, projects, boq] = await Promise.all([quotaRepo.all(), projectRepo.all(), boqRepo.all()]);
+  const [quota, projects, boq, versions] = await Promise.all([quotaRepo.all(), projectRepo.all(), boqRepo.all(), versionRepo.all()]);
   const archived = projects.filter(p => p.status === 'archived');
   const doing = projects.filter(p => p.status !== 'archived');
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const monthProjects = projects.filter(p => (p.createdAt || p.updatedAt || '').slice(0, 7) === monthKey);
   const totalCost = projects.reduce((s, p) => s + Number(p.totalCost || 0), 0);
   const archivedCost = archived.reduce((s, p) => s + Number(p.totalCost || 0), 0);
   const missingQuota = quota.filter(q => hasMissingPrice(q.priceTotal));
@@ -16,13 +18,14 @@ export async function render() {
   const categoryCost = categoryBreakdown(boq);
   const recentProjects = projects.slice(-6).reverse();
   const recentRiskLines = missingBoq.slice(0, 5);
+  const recentVersions = versions.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
 
   document.getElementById('workspace').innerHTML = `
     <div class="h-full min-h-0 flex flex-col gap-3">
       <section class="grid grid-cols-4 gap-3">
-        ${metricCard('项目总数', projects.length, '个', `${archived.length} 个已归档，${doing.length} 个进行中`, 'folder_managed')}
+        ${metricCard('本月新增项目', monthProjects.length, '个', `${projects.length} 个项目总量`, 'calendar_month')}
         ${metricCard('累计造价', fmtMoney(totalCost), '', `归档项目 ${fmtMoney(archivedCost)}`, 'payments')}
-        ${metricCard('清单条目', boq.length, '条', `${quota.length} 条定额可选`, 'list_alt')}
+        ${metricCard('报价中项目', doing.length, '个', `${archived.length} 个已归档`, 'pending_actions')}
         ${metricCard('缺单价风险', missingPriceCount, '处', missingPriceCount ? '需优先处理，避免报价漏算' : '暂无缺价风险', 'warning', missingPriceCount ? 'amber' : 'teal')}
       </section>
 
@@ -85,6 +88,16 @@ export async function render() {
             </div>
             <div class="p-3 space-y-2 max-h-[210px] overflow-auto scroll-thin">
               ${riskItems(recentRiskLines, missingQuota)}
+            </div>
+          </div>
+
+          <div class="card p-0 overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200">
+              <div class="font-semibold text-slate-800">最近报价版本</div>
+              <div class="text-xs text-slate-500 mt-1">关键调整后保留版本，便于复盘和回退。</div>
+            </div>
+            <div class="p-3 space-y-2 max-h-[180px] overflow-auto scroll-thin">
+              ${recentVersions.length ? recentVersions.map(v => versionItem(v, projects)).join('') : emptyBlock('保存报价版本后展示')}
             </div>
           </div>
 
@@ -181,6 +194,20 @@ function quickAction(title, desc, view, icon) {
         <div class="font-semibold text-slate-800">${title}</div>
         <div class="mt-1 text-xs text-slate-500">${desc}</div>
       </div>
+    </div>
+  </button>`;
+}
+
+function versionItem(v, projects) {
+  const p = projects.find(project => project.id === v.projectId);
+  return `<button onclick="window.__app.go('boq',{projectId:'${v.projectId}'})" class="w-full rounded border border-slate-200 bg-white px-3 py-2 text-left hover:bg-slate-50">
+    <div class="flex items-center justify-between gap-2">
+      <div class="truncate font-medium text-slate-800">${esc(v.name || '报价版本')}</div>
+      <div class="tabular-nums text-xs text-slate-500">${fmtMoney(v.totalCost || 0)}</div>
+    </div>
+    <div class="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
+      <span class="truncate">${esc(p?.name || '未知项目')}</span>
+      <span>${v.lineCount || 0} 条</span>
     </div>
   </button>`;
 }

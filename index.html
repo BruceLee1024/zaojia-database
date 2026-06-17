@@ -98,11 +98,28 @@
   .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
   .ai-bubble-user { background: var(--brand-container); color: #fff; }
   .ai-bubble-assistant { background: #f1f5f9; color: #0f172a; }
+  .app-shell { width: 100%; box-sizing: border-box; transition: padding-right .18s ease; }
+  body.ai-open .app-shell { padding-right: 360px; }
+  .ai-drawer {
+    width: 360px;
+    transform: translateX(100%);
+    transition: transform .18s ease;
+  }
+  body.ai-open .ai-drawer { transform: translateX(0); }
+  .ai-hint-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  @media (max-width: 1100px) {
+    body.ai-open .app-shell { padding-right: 0; }
+    .ai-drawer { width: min(360px, calc(100vw - 24px)); }
+  }
 </style>
 </head>
 <body class="overflow-hidden">
 
-<div class="flex h-screen">
+<div class="flex h-screen app-shell">
   <!-- 侧边栏 -->
   <aside class="bg-slate-900 text-white w-[240px] flex flex-col flex-shrink-0 border-r border-slate-800">
     <div class="px-5 py-6">
@@ -116,7 +133,7 @@
     </div>
     <nav id="nav" class="flex-1 px-3 py-2 space-y-3 scroll-y scroll-thin"></nav>
     <div class="px-5 py-4 text-[11px] text-slate-500 border-t border-slate-800">
-      v2.8 · ES Module<br>IndexedDB 本地数据
+      v3.2 · ES Module<br>IndexedDB 本地数据
     </div>
   </aside>
 
@@ -157,17 +174,21 @@
 </div>
 
 <!-- AI 抽屉 -->
-<div id="aiDrawer" class="hidden fixed right-0 top-0 bottom-0 w-[460px] bg-white z-40 flex flex-col border-l border-slate-200">
-  <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-    <div class="font-semibold flex items-center gap-2">
-      <span class="material-symbols-outlined text-[18px] text-teal-700">smart_toy</span> AI 造价助手
+<div id="aiDrawer" class="ai-drawer fixed right-0 top-0 bottom-0 bg-white z-40 flex flex-col border-l border-slate-200">
+  <div class="h-14 px-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+    <div class="min-w-0">
+      <div class="font-semibold flex items-center gap-2">
+        <span class="material-symbols-outlined text-[18px] text-teal-700">smart_toy</span>
+        <span>AI 造价助手</span>
+      </div>
+      <div class="mt-0.5 text-[11px] text-slate-500">本地数据优先 · 不自动改清单</div>
     </div>
     <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1">
       <span class="material-symbols-outlined text-[20px]">close</span>
     </button>
   </div>
-  <div id="aiMsgs" class="flex-1 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50"></div>
-  <div class="border-t border-slate-200 p-3 space-y-2">
+  <div id="aiMsgs" class="flex-1 min-h-0 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50"></div>
+  <div class="border-t border-slate-200 p-3 space-y-2 shrink-0 bg-white">
     <div class="flex gap-2">
       <input id="aiInput" type="text" placeholder="问点啥：5万m³/d 水池造价区间 / 推荐防水定额 …"
         class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-teal-600" />
@@ -178,6 +199,6 @@
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="./app.js?v=2.8"></script>
+<script type="module" src="./app.js?v=3.2"></script>
 </body>
 </html>

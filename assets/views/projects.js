@@ -1,14 +1,28 @@
 // 视图：项目管理
-import { projectService } from '../services/projectService.js?v=2.8';
-import { boqRepo } from '../data/repository.js?v=2.8';
+import { projectService } from '../services/projectService.js?v=3.2';
+import { indicatorService } from '../services/indicatorService.js?v=3.2';
+import { boqRepo, versionRepo } from '../data/repository.js?v=3.2';
 import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=2.8';
+import { hasMissingPrice } from '../utils/costing.js?v=3.2';
 
 const TYPES = ['水厂', '泵站', '管网', '变电站', '水池', '车间', '其他'];
 const SCALES = ['小型', '中型', '大型', '特大型'];
+const projectState = { status: '', type: '', risk: '', version: '' };
 
 export async function render() {
-  const [projects, allBoq] = await Promise.all([projectService.list(), boqRepo.all()]);
+  const [projects, allBoq, versions] = await Promise.all([projectService.list(), boqRepo.all(), versionRepo.all()]);
+  const visibleProjects = projects.filter(p => {
+    const lines = allBoq.filter(b => b.projectId === p.id);
+    const hasRisk = lines.some(b => hasMissingPrice(b.unitPrice));
+    const hasVersion = versions.some(v => v.projectId === p.id);
+    if (projectState.status && p.status !== projectState.status) return false;
+    if (projectState.type && p.type !== projectState.type) return false;
+    if (projectState.risk === 'missing' && !hasRisk) return false;
+    if (projectState.risk === 'ok' && hasRisk) return false;
+    if (projectState.version === 'has' && !hasVersion) return false;
+    if (projectState.version === 'none' && hasVersion) return false;
+    return true;
+  });
   const archivedCount = projects.filter(p => p.status === 'archived').length;
   const totalCost = projects.reduce((s, p) => s + Number(p.totalCost || 0), 0);
   const missingCount = allBoq.filter(b => hasMissingPrice(b.unitPrice)).length;
@@ -28,12 +42,39 @@ export async function render() {
         ${summaryTile('缺单价风险', missingCount, '处', missingCount ? 'text-amber-700' : '')}
         ${summaryTile('累计造价', fmtMoney(totalCost), '')}
       </div>
+      <div class="mt-4 flex items-center gap-2 text-sm">
+        <select id="pf_status_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
+          <option value="">全部状态</option>
+          <option value="doing" ${projectState.status === 'doing' ? 'selected' : ''}>进行中</option>
+          <option value="archived" ${projectState.status === 'archived' ? 'selected' : ''}>已归档</option>
+        </select>
+        <select id="pf_type_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
+          <option value="">全部类型</option>
+          ${TYPES.map(t => `<option value="${t}" ${projectState.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+        <select id="pf_risk_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
+          <option value="">全部风险</option>
+          <option value="missing" ${projectState.risk === 'missing' ? 'selected' : ''}>有缺价风险</option>
+          <option value="ok" ${projectState.risk === 'ok' ? 'selected' : ''}>价格完整</option>
+        </select>
+        <select id="pf_version_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
+          <option value="">全部版本</option>
+          <option value="has" ${projectState.version === 'has' ? 'selected' : ''}>已有版本</option>
+          <option value="none" ${projectState.version === 'none' ? 'selected' : ''}>未保存版本</option>
+        </select>
+        <div class="flex-1"></div>
+        <span class="text-xs text-slate-500">显示 ${visibleProjects.length} / ${projects.length} 个项目</span>
+      </div>
     </div>
     <div class="grid grid-cols-3 gap-3">
-      ${projects.length ? projects.map(p => card(p, allBoq.filter(b => b.projectId === p.id))).join('') : `<div class="col-span-3 card p-10 text-center text-gray-400">还没有项目，点右上角「+ 新建项目」开始建立项目档案。</div>`}
+      ${visibleProjects.length ? visibleProjects.map(p => card(p, allBoq.filter(b => b.projectId === p.id), versions.filter(v => v.projectId === p.id))).join('') : `<div class="col-span-3 card p-10 text-center text-gray-400">${projects.length ? '没有符合筛选条件的项目。' : '还没有项目，点右上角「+ 新建项目」开始建立项目档案。'}</div>`}
     </div>
   `;
   document.getElementById('btnNew').onclick = () => editForm({ id: '', name: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', status: 'doing' });
+  ['status', 'type', 'risk', 'version'].forEach(key => {
+    const el = document.getElementById(`pf_${key}_filter`);
+    if (el) el.onchange = () => { projectState[key] = el.value; render(); };
+  });
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = async () => {
     const p = await projectService.get(b.dataset.edit);
     if (p) editForm(p);
@@ -63,12 +104,13 @@ function summaryTile(label, value, unit, cls = '') {
   </div>`;
 }
 
-function card(p, lines = []) {
+function card(p, lines = [], versions = []) {
   const missing = lines.filter(b => hasMissingPrice(b.unitPrice)).length;
   const priced = lines.length - missing;
   const completion = lines.length ? Math.round(priced / lines.length * 100) : 0;
   const unitCost = p.area ? Number(p.totalCost || 0) / Number(p.area) : 0;
   const waterCost = p.dailyCapacity ? Number(p.totalCost || 0) / (Number(p.dailyCapacity) * 10000) : 0;
+  const next = nextAction(p, lines, versions);
   return `<div class="card p-0 overflow-hidden flex flex-col min-h-[280px]">
     <div class="p-4 border-b border-slate-200 bg-white">
       <div class="flex items-start justify-between gap-3">
@@ -114,6 +156,10 @@ function card(p, lines = []) {
         <span class="badge badge-gray">${esc(p.structure || '未填结构')}</span>
         <span class="badge badge-gray">${esc(p.process || '未填工艺')}</span>
       </div>
+      <button data-open="${p.id}" class="mt-4 w-full rounded border ${next.cls} px-3 py-2 text-left text-xs hover:bg-white">
+        <div class="font-medium">${esc(next.title)}</div>
+        <div class="mt-1 opacity-80">${esc(next.desc)}</div>
+      </button>
     </div>
 
     <div class="px-4 py-3 border-t border-slate-200 bg-white flex items-center gap-2">
@@ -124,6 +170,14 @@ function card(p, lines = []) {
       <button data-del="${p.id}" class="px-2.5 py-1.5 text-xs rounded border text-red-600 border-red-300 hover:bg-red-50">删除</button>
     </div>
   </div>`;
+}
+
+function nextAction(p, lines, versions) {
+  const missing = lines.filter(b => hasMissingPrice(b.unitPrice)).length;
+  if (missing) return { title: `下一步：补齐 ${missing} 条缺单价`, desc: '价格完整后再保存版本或导出报价。', cls: 'border-amber-200 bg-amber-50 text-amber-800' };
+  if (lines.length && !versions.length) return { title: '下一步：保存报价版本', desc: '为当前报价创建可回退快照。', cls: 'border-teal-200 bg-teal-50 text-teal-800' };
+  if (p.status !== 'archived' && lines.length) return { title: '下一步：归档进入指标库', desc: '归档后会沉淀为正式指标样本。', cls: 'border-slate-200 bg-white text-slate-700' };
+  return { title: '下一步：查看指标对标', desc: '用历史样本解释造价合理性。', cls: 'border-slate-200 bg-white text-slate-700' };
 }
 
 function miniMetric(label, value) {

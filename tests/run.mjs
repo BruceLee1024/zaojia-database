@@ -87,8 +87,12 @@ async function testVersions() {
   const { versionService } = await import('../assets/services/versionService.js?v=test-version');
 
   await repo.projectRepo.replaceAll([{ id: 'p1', name: '测试项目', totalCost: 100 }]);
+  await repo.quotaRepo.replaceAll([
+    { id: 'q1', name: '土方', feature: '综合', unit: 'm³', priceTotal: 10 },
+    { id: 'q2', name: '钢筋', feature: 'HRB400', unit: 't', priceTotal: 3000 },
+  ]);
   await repo.boqRepo.replaceAll([
-    { id: 'l1', projectId: 'p1', quotaItemId: 'q1', name: '土方', unit: 'm³', qty: 10, factor: 1, unitPrice: 10, amount: 100 },
+    { id: 'l1', projectId: 'p1', quotaItemId: 'q1', name: '土方', unit: 'm³', qty: 10, factor: 1, unitPrice: 10, amount: 100, structureGroup: 'civil' },
   ]);
 
   const versionA = await versionService.createFromCurrent('p1', { name: 'A', note: '初版' });
@@ -107,15 +111,36 @@ async function testVersions() {
   assert.equal(diff.removed.length, 0);
   assert.equal(diff.modified.length, 1);
   assert.equal(diff.totalDelta, 6020);
+  assert.equal(diff.categorySummary.some(row => row.id === 'civil'), true);
 
   const restored = await versionService.restore(versionA.id);
   const current = await repo.boqRepo.byProject('p1');
   const project = await repo.projectRepo.findById('p1');
   assert.equal(restored.restoredCount, 1);
+  assert.equal(Boolean(restored.backup), true);
   assert.equal(current.length, 1);
   assert.equal(current[0].qty, 10);
   assert.notEqual(current[0].id, 'l1');
   assert.equal(project.totalCost, 100);
+
+  const { boqService } = await import('../assets/services/boqService.js?v=test-version');
+  const recommendations = await boqService.recommendQuota({ name: '钢筋', feature: 'HRB400', unit: 't' });
+  assert.equal(recommendations[0].id, 'q2');
+  await boqService.replaceQuota(current[0].id, 'q2');
+  const replaced = (await repo.boqRepo.byProject('p1'))[0];
+  assert.equal(replaced.quotaItemId, 'q2');
+  assert.equal(replaced.unitPrice, 3000);
+  await boqService.updateStructureGroup(replaced.id, 'custom:安装清单');
+  const grouped = (await repo.boqRepo.byProject('p1'))[0];
+  assert.equal(grouped.structureGroup, 'custom:安装清单');
+  await repo.boqRepo.replaceAll([
+    { id: 'risk1', projectId: 'p1', quotaItemId: '', name: '缺价项', unit: 'm²', qty: 0, factor: 1.3, unitPrice: 0, amount: 0 },
+  ]);
+  const audit = await boqService.audit('p1');
+  assert.equal(audit.issues.missingPrice.length, 1);
+  assert.equal(audit.issues.zeroQty.length, 1);
+  assert.equal(audit.issues.factorRisk.length, 1);
+  assert.equal(audit.issues.unmatchedQuota.length, 1);
 }
 
 async function testDataEngine() {

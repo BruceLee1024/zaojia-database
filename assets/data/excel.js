@@ -3,7 +3,7 @@
 //   A) 定额库：清单名称/项目特征/工作内容/工程量计算规则/单位/综合单价/综合单价组成
 //   B] 工程量清单：序号/项目编码/项目名称/项目特征/计量单位/工程数量/综合单价/合价
 import { categoryGuess } from '../utils/stats.js';
-import { calculateAmount } from '../utils/costing.js?v=2.8';
+import { calculateAmount } from '../utils/costing.js?v=3.2';
 
 const HEADER_QUOTA  = ['清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'];
 const HEADER_BOQ    = ['序号', '项目编码', '项目名称', '项目特征', '计量单位', '工程数量', '综合单价', '合价'];

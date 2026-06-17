@@ -1,11 +1,11 @@
 // AI 本地指令路由
-import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=2.8';
+import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.2';
 import { pickBestQuota, categoryGuess } from '../utils/stats.js';
 import { fmtMoney, fmt } from '../utils/dom.js';
-import { boqService } from '../services/boqService.js?v=2.8';
-import { versionService } from '../services/versionService.js?v=2.8';
-import { indicatorService } from '../services/indicatorService.js?v=2.8';
-import { hasMissingPrice } from '../utils/costing.js?v=2.8';
+import { boqService } from '../services/boqService.js?v=3.2';
+import { versionService } from '../services/versionService.js?v=3.2';
+import { indicatorService } from '../services/indicatorService.js?v=3.2';
+import { hasMissingPrice } from '../utils/costing.js?v=3.2';
 
 export async function tryLocalCommand(text) {
   const t = text.trim();
@@ -198,6 +198,14 @@ async function cmdQuoteAudit(text) {
     actions: [
       { label: '打开清单', onClick: () => { window.__app.go('boq', { projectId: proj.id }); window.__app.closeAI(); } },
       { label: '打开定额库', onClick: () => { window.__app.go('quota'); window.__app.closeAI(); } },
+      { label: '确认保存报审版', onClick: async () => {
+        if (!confirm(`为「${proj.name}」保存一个报审版报价快照？`)) return;
+        const version = await versionService.createFromCurrent(proj.id, {
+          name: `报审版 · ${new Date().toLocaleString('zh-CN', { hour12: false })}`,
+          note: '由 AI 报价审查建议后，经用户确认保存。',
+        });
+        alert(`已保存报价版本：${version.name}`);
+      } },
     ],
   };
 }
@@ -216,7 +224,10 @@ async function cmdBenchmark(projName) {
   return {
     handled: true,
     msg: `「${proj.name}」项目对标\n\n${metricLines}\n\n偏差来源：\n${devLines || '暂无可对比分项。'}\n\n结论：${bm.conclusion}`,
-    actions: [{ label: '打开指标分析', onClick: () => { window.__app.go('indicators'); window.__app.closeAI(); } }],
+    actions: [
+      { label: '打开指标分析', onClick: () => { window.__app.go('indicators'); window.__app.closeAI(); } },
+      { label: '打开项目清单', onClick: () => { window.__app.go('boq', { projectId: proj.id }); window.__app.closeAI(); } },
+    ],
   };
 }
 
@@ -259,6 +270,16 @@ async function cmdVersions(text) {
   return {
     handled: true,
     msg: `「${proj.name}」报价版本\n\n${versions.slice(0, 6).map(v => `• ${v.name}｜${fmtMoney(v.totalCost || 0)}｜${v.lineCount || 0} 条｜缺单价 ${v.missingPriceCount || 0}｜${new Date(v.createdAt).toLocaleString('zh-CN', { hour12: false })}`).join('\n')}${diffText}`,
-    actions: [{ label: '打开版本管理', onClick: () => { window.__app.go('boq', { projectId: proj.id }); window.__app.closeAI(); } }],
+    actions: [
+      { label: '打开版本管理', onClick: () => { window.__app.go('boq', { projectId: proj.id }); window.__app.closeAI(); } },
+      { label: '生成差异说明', onClick: () => sendVersionPrompt(proj.name) },
+    ],
   };
+}
+
+function sendVersionPrompt(projectName) {
+  const input = document.getElementById('aiInput');
+  if (!input) return;
+  input.value = `请用业主能看懂的话总结「${projectName}」最近两个报价版本的差异，说明总价变化、主要分项变化和风险提示`;
+  input.focus();
 }

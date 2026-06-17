@@ -1,7 +1,7 @@
 // 视图：指标分析
-import { indicatorService } from '../services/indicatorService.js?v=2.8';
-import { dataEngineService } from '../services/dataEngineService.js?v=2.8';
-import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo } from '../data/repository.js?v=2.8';
+import { indicatorService } from '../services/indicatorService.js?v=3.2';
+import { dataEngineService } from '../services/dataEngineService.js?v=3.2';
+import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=3.2';
 import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js';
 
 const state = {
@@ -11,15 +11,16 @@ const state = {
   benchmarkProjectId: '',
   estimate: { area: '', dailyCapacity: '' },
   sample: { projectId: '', sourceType: '', quality: '' },
+  scope: 'formal',
 };
 
-let cache = { indicators: [], projects: [], archived: [], benchmark: null, estimate: null, facts: [], candidates: [], reports: [] };
+let cache = { indicators: [], projects: [], archived: [], benchmark: null, estimate: null, facts: [], candidates: [], reports: [], jobs: [] };
 
 export async function render() {
-  await indicatorService.recompute({ excludeOutliers: state.excludeOutliers });
+  await indicatorService.recompute(scopeOptions());
   cache.projects = await projectRepo.all();
   cache.archived = cache.projects.filter(p => p.status === 'archived');
-  [cache.facts, cache.candidates, cache.reports] = await Promise.all([dataFactRepo.all(), dataCandidateRepo.all(), dataQualityReportRepo.all()]);
+  [cache.facts, cache.candidates, cache.reports, cache.jobs] = await Promise.all([dataFactRepo.all(), dataCandidateRepo.all(), dataQualityReportRepo.all(), dataJobRepo.all()]);
   cache.indicators = await indicatorService.list(state.filters);
   if (!state.benchmarkProjectId) {
     state.benchmarkProjectId = (cache.projects.find(p => p.status === 'doing') || cache.archived[0] || cache.projects[0] || {}).id || '';
@@ -59,12 +60,15 @@ export async function render() {
 function expose() {
   window.__indicators = {
     tab: async tab => { state.tab = tab; await render(); },
-    recompute: async () => { await indicatorService.recompute({ excludeOutliers: state.excludeOutliers }); toast('指标已重算', 'success'); await render(); },
+    recompute: async () => { await indicatorService.recompute(scopeOptions()); toast('指标已重算', 'success'); await render(); },
+    setScope: async value => { state.scope = value; await render(); },
     drill: idx => drill(cache.indicators[idx]),
     selectProject: async value => { state.benchmarkProjectId = value; await render(); },
     updateEstimate: async (field, value) => { state.estimate[field] = value; await render(); },
     sampleFilter: async (field, value) => { state.sample[field] = value; await render(); },
     promote: async id => { await dataEngineService.promoteCandidates([id]); toast('候选样本已提升为正式事实', 'success'); await render(); },
+    lineage: id => showLineage(id),
+    repair: async (id, action) => repairSample(id, action),
     promoteVisible: async () => {
       const ids = filteredSamples().filter(s => s.status === 'candidate').map(s => s.id);
       if (!ids.length) return toast('当前筛选下没有候选样本', 'error');
@@ -72,6 +76,14 @@ function expose() {
       toast(`已提升 ${ids.length} 条候选样本`, 'success');
       await render();
     },
+  };
+}
+
+function scopeOptions() {
+  return {
+    excludeOutliers: state.excludeOutliers,
+    includeCandidates: state.scope === 'candidates',
+    includeVersions: state.scope === 'versions',
   };
 }
 
@@ -101,10 +113,18 @@ function filters() {
     </div>
     <div class="mt-3 flex items-center gap-3 text-xs text-slate-500">
       <label class="inline-flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
+        统计口径
+        <select onchange="window.__indicators.setScope(this.value)" class="h-7 rounded border border-slate-300 bg-white px-2 text-xs">
+          <option value="formal" ${state.scope === 'formal' ? 'selected' : ''}>仅正式归档样本</option>
+          <option value="candidates" ${state.scope === 'candidates' ? 'selected' : ''}>正式 + 候选</option>
+          <option value="versions" ${state.scope === 'versions' ? 'selected' : ''}>正式 + 报价版本</option>
+        </select>
+      </label>
+      <label class="inline-flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
         <input id="if_outliers" type="checkbox" ${state.excludeOutliers ? 'checked' : ''} />
         剔除 IQR 异常值
       </label>
-      <span>统计口径：仅使用已归档项目；同类样本按类型 / 规模 / 结构匹配，样本少于 3 时仅作参考。</span>
+      <span>同类样本按类型 / 规模 / 结构匹配，样本少于 3 时仅作参考。</span>
     </div>
   </section>`;
 }
@@ -440,8 +460,78 @@ function sampleRow(s) {
     <td class="px-2 max-w-[320px] truncate" title="${label.replace(/"/g, '&quot;')}">${label}</td>
     <td class="px-2"><span class="badge ${s.quality?.level === '低可信' ? 'badge-red' : s.quality?.level === '需复核' ? 'badge-yellow' : 'badge-gray'}">${esc(s.quality?.level || '-')}</span></td>
     <td class="px-2 text-right text-slate-500 tabular-nums">${esc(formatTime(s.createdAt))}</td>
-    <td class="px-3 text-right">${s.status === 'candidate' ? `<button onclick="window.__indicators.promote('${s.id}')" class="text-xs text-teal-700 hover:underline">提升</button>` : '<span class="text-xs text-slate-400">-</span>'}</td>
+    <td class="px-3 text-right whitespace-nowrap">
+      <button onclick="window.__indicators.lineage('${s.id}')" class="text-xs text-slate-600 hover:underline">血缘</button>
+      ${s.status === 'candidate' ? `<button onclick="window.__indicators.promote('${s.id}')" class="ml-2 text-xs text-teal-700 hover:underline">提升</button>` : ''}
+      ${s.quality?.issues?.includes('missing_price') ? `<button onclick="window.__indicators.repair('${s.id}','price')" class="ml-2 text-xs text-amber-700 hover:underline">补单价</button>` : ''}
+      ${s.quality?.issues?.includes('unmatched_quota') ? `<button onclick="window.__indicators.repair('${s.id}','quota')" class="ml-2 text-xs text-blue-700 hover:underline">匹配定额</button>` : ''}
+    </td>
   </tr>`;
+}
+
+function allSamples() {
+  return [...cache.facts, ...cache.candidates];
+}
+
+function showLineage(id) {
+  const sample = allSamples().find(s => s.id === id);
+  if (!sample) return;
+  const project = cache.projects.find(p => p.id === sample.projectId);
+  const job = cache.jobs.find(j => j.id === sample.jobId);
+  const report = cache.reports.find(r => r.jobId === sample.jobId || r.sourceId === sample.sourceId);
+  openModal('数据血缘详情', `
+    <div class="space-y-4 text-sm">
+      <div class="grid grid-cols-2 gap-2">
+        ${lineageTile('项目', project?.name || '-')}
+        ${lineageTile('事实类型', sample.factType)}
+        ${lineageTile('来源', `${sample.sourceType} / ${sample.sourceId || '-'}`)}
+        ${lineageTile('质量', sample.quality?.level || '-')}
+        ${lineageTile('血缘 ID', sample.lineageId || '-')}
+        ${lineageTile('数据集', sample.datasetKey || '-')}
+      </div>
+      <div class="rounded border border-slate-200 bg-slate-50 p-3">
+        <div class="font-medium text-slate-800">流水线任务</div>
+        <div class="mt-2 grid grid-cols-5 gap-2">
+          ${(job?.stages || []).map(stage => `<div class="rounded border border-slate-200 bg-white p-2">
+            <div class="text-xs text-slate-500">${esc(stage.name)}</div>
+            <div class="mt-1 text-xs ${stage.status === 'done' ? 'text-teal-700' : 'text-slate-400'}">${stage.status === 'done' ? '完成' : '待处理'}</div>
+          </div>`).join('') || '<div class="col-span-5 text-slate-400">未关联任务</div>'}
+        </div>
+      </div>
+      <div class="rounded border border-slate-200 bg-white p-3">
+        <div class="font-medium text-slate-800">质量建议</div>
+        <div class="mt-2 space-y-1 text-xs text-slate-600">
+          ${(report?.recommendations || sample.quality?.issues || []).map(v => `<div>• ${esc(v)}</div>`).join('') || '<div class="text-slate-400">暂无建议</div>'}
+        </div>
+      </div>
+    </div>
+  `, `<button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>`);
+}
+
+function lineageTile(label, value) {
+  return `<div class="rounded border border-slate-200 bg-white p-3">
+    <div class="text-xs text-slate-500">${label}</div>
+    <div class="mt-1 break-all font-medium text-slate-800">${esc(String(value || '-'))}</div>
+  </div>`;
+}
+
+async function repairSample(id, action) {
+  const sample = allSamples().find(s => s.id === id);
+  if (!sample?.projectId) return;
+  if (action === 'price') {
+    window.__app.state.currentProjectId = sample.projectId;
+    window.__app.go('boq', { projectId: sample.projectId });
+    setTimeout(() => {
+      const app = window.__app;
+      if (app) toast('已跳转到清单，请筛选缺单价后补价', 'success');
+    }, 100);
+    return;
+  }
+  if (action === 'quota') {
+    window.__app.state.currentProjectId = sample.projectId;
+    window.__app.go('boq', { projectId: sample.projectId });
+    setTimeout(() => toast('已跳转到清单，可在明细区使用关联定额推荐', 'success'), 100);
+  }
 }
 
 function formatTime(s) {

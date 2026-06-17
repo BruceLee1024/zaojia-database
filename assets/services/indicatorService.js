@@ -1,5 +1,5 @@
 // 指标服务
-import { projectRepo, boqRepo, indicatorRepo, dataFactRepo } from '../data/repository.js?v=2.8';
+import { projectRepo, boqRepo, indicatorRepo, dataFactRepo } from '../data/repository.js?v=3.2';
 import { stats, categoryGuess } from '../utils/stats.js';
 
 const UNSET = '未填写';
@@ -117,14 +117,18 @@ function categoryTotals(lines) {
 export async function recomputeIndicators(options = {}) {
   const [allProjects, facts] = await Promise.all([projectRepo.all(), dataFactRepo.all()]);
   const projectMap = new Map(allProjects.map(p => [p.id, p]));
-  const projectFacts = facts.filter(f => f.status === 'formal' && f.factType === 'project_cost' && f.sourceType === 'archived_project' && Number(f.payload?.totalCost || 0) > 0);
-  const categoryCostFacts = facts.filter(f => f.status === 'formal' && f.factType === 'category_cost' && f.sourceType === 'archived_project');
+  const includeCandidates = !!options.includeCandidates;
+  const includeVersions = !!options.includeVersions;
+  const statusAllowed = f => f.status === 'formal' || (includeCandidates && f.status === 'candidate');
+  const sourceAllowed = f => f.sourceType === 'archived_project' || (includeVersions && f.sourceType === 'version');
+  const projectFacts = facts.filter(f => statusAllowed(f) && sourceAllowed(f) && f.factType === 'project_cost' && Number(f.payload?.totalCost || 0) > 0);
+  const categoryCostFacts = facts.filter(f => statusAllowed(f) && sourceAllowed(f) && f.factType === 'category_cost');
   const indicators = [];
 
   for (const fact of projectFacts) {
     const p = projectMap.get(fact.projectId);
     if (!p) continue;
-    if (p.status !== 'archived') continue;
+    if (fact.sourceType === 'archived_project' && p.status !== 'archived') continue;
     const dims = projectDims(p);
     const totalCost = Number(fact.payload?.totalCost || p.totalCost || 0);
 

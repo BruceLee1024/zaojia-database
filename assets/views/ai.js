@@ -1,33 +1,27 @@
 // 视图：AI 抽屉
-import { tryLocalCommand } from '../ai/localCommands.js?v=2.8';
-import { callLLM } from '../ai/remoteLLM.js?v=2.8';
+import { tryLocalCommand } from '../ai/localCommands.js?v=3.2';
+import { callLLM } from '../ai/remoteLLM.js?v=3.2';
 
 const history = [];
 
 export function open() {
-  document.getElementById('aiDrawer').classList.remove('hidden');
+  document.body.classList.add('ai-open');
   document.getElementById('aiInput').focus();
   if (!document.getElementById('aiMsgs').children.length) {
     addMsg('assistant',
-`你好！我是水务造价助手。我能：
+`你好，我是水务造价助手。
 
-• 报价审查：检查缺单价、0 工程量、异常系数、重复清单
-• 项目对标：判断当前项目偏高/偏低，并解释偏差来源
-• 推荐定额：按项目特征从定额库找候选项
-• 版本辅助：查看报价版本，解释最近两版差异
-• 快速估算：用历史指标给出造价参考区间
-
-直接说就行，我会优先用本地数据回答；需要联网模型时会读取必要上下文，但不会自动修改清单。`);
+我会优先读取本地项目、清单、指标和报价版本，帮助你做审查、对标、推荐定额和估算。`);
     addSuggestions();
   }
 }
-export function close() { document.getElementById('aiDrawer').classList.add('hidden'); }
+export function close() { document.body.classList.remove('ai-open'); }
 
 function addMsg(role, text) {
   const div = document.createElement('div');
-  div.className = `p-2 rounded-md text-sm whitespace-pre-wrap ${role === 'user' ? 'ai-bubble-user' : 'ai-bubble-assistant'}`;
+  div.className = `px-3 py-2 rounded-md text-sm leading-6 whitespace-pre-wrap border ${role === 'user' ? 'ai-bubble-user border-teal-700' : 'ai-bubble-assistant border-slate-200'}`;
   div.style.alignSelf = role === 'user' ? 'flex-end' : 'flex-start';
-  div.style.maxWidth = role === 'user' ? '85%' : '95%';
+  div.style.maxWidth = role === 'user' ? '88%' : '100%';
   div.textContent = text;
   document.getElementById('aiMsgs').appendChild(div);
   document.getElementById('aiMsgs').scrollTop = document.getElementById('aiMsgs').scrollHeight;
@@ -35,19 +29,19 @@ function addMsg(role, text) {
 
 function addActionMsg(msg, actions) {
   const wrap = document.createElement('div');
-  wrap.className = 'p-2 rounded-md text-sm bg-slate-100 space-y-2';
+  wrap.className = 'px-3 py-2 rounded-md text-sm bg-white border border-slate-200 space-y-2';
   wrap.style.alignSelf = 'flex-start';
-  wrap.style.maxWidth = '95%';
+  wrap.style.maxWidth = '100%';
   const txt = document.createElement('div');
   txt.className = 'whitespace-pre-wrap';
   txt.textContent = msg;
   wrap.appendChild(txt);
   if (actions && actions.length) {
     const row = document.createElement('div');
-    row.className = 'flex gap-2 flex-wrap';
+    row.className = 'ai-hint-grid';
     actions.forEach(a => {
       const b = document.createElement('button');
-      b.className = 'px-2 py-1 text-xs rounded border border-teal-600 text-teal-700 hover:bg-teal-50';
+      b.className = 'min-h-8 px-2 py-1 text-xs rounded border border-slate-200 bg-slate-50 text-slate-700 hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 text-left';
       b.textContent = a.label;
       b.onclick = a.onClick;
       row.appendChild(b);
@@ -66,11 +60,11 @@ function replaceLast(text) {
 
 function addSuggestions() {
   addActionMsg('常用问题', [
-    { label: '审查当前报价', onClick: () => send('审查当前报价有没有风险') },
+    { label: '审查报价', onClick: () => send('审查当前报价有没有风险') },
     { label: '检查缺单价', onClick: () => send('检查缺单价') },
     { label: '项目对标', onClick: () => send('当前项目对标，贵不贵') },
-    { label: '查看报价版本', onClick: () => send('查看当前项目报价版本列表和差异') },
-    { label: '推荐防水定额', onClick: () => send('推荐 水池 防水 定额') },
+    { label: '报价版本', onClick: () => send('查看当前项目报价版本列表和差异') },
+    { label: '推荐定额', onClick: () => send('推荐 水池 防水 定额') },
   ]);
 }
 
