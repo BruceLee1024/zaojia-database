@@ -1,11 +1,12 @@
 // AI 本地指令路由
-import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.4';
+import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.9';
 import { pickBestQuota, categoryGuess } from '../utils/stats.js';
 import { fmtMoney, fmt } from '../utils/dom.js';
-import { boqService } from '../services/boqService.js?v=3.4';
-import { versionService } from '../services/versionService.js?v=3.4';
-import { indicatorService } from '../services/indicatorService.js?v=3.4';
-import { hasMissingPrice } from '../utils/costing.js?v=3.4';
+import { boqService } from '../services/boqService.js?v=3.9';
+import { versionService } from '../services/versionService.js?v=3.9';
+import { indicatorService } from '../services/indicatorService.js?v=3.9';
+import { experienceService } from '../services/experienceService.js?v=3.9';
+import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 
 export async function tryLocalCommand(text) {
   const t = text.trim();
@@ -34,6 +35,10 @@ export async function tryLocalCommand(text) {
   // 4) 缺单价检查
   m = t.match(/(?:检查|查看|找出|列出).*(?:缺单价|缺少单价|0单价|零单价|价格为空)/);
   if (m) return await cmdMissingPrices();
+
+  // 5) 经验检索 / 复盘入口
+  m = t.match(/(?:查|找|搜索|看看|以前|历史).*(?:经验|复盘|风险处理)|(?:经验|复盘).*(?:怎么处理|怎么做|有没有|查|找)|(?:复盘).*(?:当前|这个|项目|报价)/);
+  if (m) return await cmdExperience(t);
 
   // 5) 推荐定额
   m = t.match(/(?:推荐|查找|搜索|找).{0,6}(?:定额|清单)?[：:，,\s]*(.+)$/);
@@ -282,4 +287,48 @@ function sendVersionPrompt(projectName) {
   if (!input) return;
   input.value = `请用业主能看懂的话总结「${projectName}」最近两个报价版本的差异，说明总价变化、主要分项变化和风险提示`;
   input.focus();
+}
+
+async function cmdExperience(text) {
+  const proj = await findProject(text);
+  if (/复盘/.test(text) && !/(查|找|搜索|以前|历史|有没有)/.test(text)) {
+    if (!proj) return { handled: true, msg: '还没有项目可复盘，请先新建项目并添加清单。' };
+    return {
+      handled: true,
+      msg: `可以为「${proj.name}」生成一次报价复盘：我会根据当前清单、版本和质量报告生成追问卡，确认后再沉淀为经验卡。`,
+      actions: [{ label: '开始复盘', onClick: async () => {
+        const mod = await import('../views/experience.js?v=3.9');
+        mod.openReview({ projectId: proj.id, sourceType: 'ai_review' });
+      } }],
+    };
+  }
+
+  const hits = await experienceService.searchCards(text, proj ? {
+    projectId: proj.id,
+    projectName: proj.name,
+    type: proj.type,
+    process: proj.process,
+    structure: proj.structure,
+  } : {});
+  if (!hits.length) {
+    return {
+      handled: true,
+      msg: `暂未找到相关经验卡。${proj ? `可以先为「${proj.name}」做一次报价复盘。` : '归档项目、保存版本或报价审查后可以沉淀经验。'}`,
+      actions: proj ? [{ label: '开始复盘', onClick: async () => {
+        const mod = await import('../views/experience.js?v=3.9');
+        mod.openReview({ projectId: proj.id, sourceType: 'ai_review' });
+      } }] : [],
+    };
+  }
+  return {
+    handled: true,
+    msg: `找到 ${hits.length} 张相关经验卡：\n\n${hits.map(card => `• ${card.title}\n  状态：${card.reviewStatus === 'needs_review' ? '需复核' : '正式经验'}｜可信度：${card.confidence || '-'}｜有效期：${card.expiresAt || '-'}｜复用 ${card.reuseCount || 0} 次\n  经验：${card.lesson || '-'}\n  边界：${card.applicability || '-'}\n  风险：${card.risks || '-'}`).join('\n\n')}`,
+    actions: [
+      { label: '打开经验知识库', onClick: () => { window.__app.go('experience'); window.__app.closeAI(); } },
+      ...(proj ? [{ label: '继续复盘当前项目', onClick: async () => {
+        const mod = await import('../views/experience.js?v=3.9');
+        mod.openReview({ projectId: proj.id, sourceType: 'ai_review' });
+      } }] : []),
+    ],
+  };
 }

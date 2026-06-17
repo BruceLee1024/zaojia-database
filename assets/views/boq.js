@@ -1,11 +1,12 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.4';
-import { boqService, groupForLine } from '../services/boqService.js?v=3.4';
-import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=3.4';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.4';
+import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.9';
+import { boqService, groupForLine } from '../services/boqService.js?v=3.9';
+import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=3.9';
+import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { openReview } from './experience.js?v=3.9';
 import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
-import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=3.4';
-import { hasMissingPrice } from '../utils/costing.js?v=3.4';
+import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=3.9';
+import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
 
 const boqState = {
@@ -877,6 +878,21 @@ function saveVersion(projectId) {
     });
     closeModal();
     toast(`已保存版本：${version.name}，${version.lineCount} 条，${fmtMoney(version.totalCost)}`, 'success');
+    openModal('报价版本已保存', `
+      <div class="space-y-3 text-sm text-slate-700">
+        <div class="rounded border border-slate-200 bg-white p-3">
+          <div class="font-semibold text-slate-900">${esc(version.name)}</div>
+          <div class="mt-1 text-xs text-slate-500">${version.lineCount} 条清单 · ${fmtMoney(version.totalCost)} · 缺单价 ${version.missingPriceCount || 0}</div>
+        </div>
+        <div class="rounded border border-teal-200 bg-teal-50 p-3 text-xs leading-5 text-teal-800">
+          可以趁判断还新鲜，把本次报价异常、关键判断和适用边界沉淀成经验卡。
+        </div>
+      </div>
+    `, `
+      <button id="verReviewNow" class="px-3 py-1.5 text-sm brand-bg text-white rounded">生成报价复盘</button>
+      <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">稍后</button>
+    `);
+    document.getElementById('verReviewNow').onclick = () => openReview({ projectId, versionId: version.id, sourceType: 'version_saved' });
   };
 }
 
@@ -917,6 +933,7 @@ async function manageVersions(projectId) {
                 <td class="px-2 text-gray-500 truncate" title="${esc(v.note || '')}">${esc(v.note || '-')}</td>
                 <td class="px-2 text-right whitespace-nowrap">
                   <button class="text-teal-700 hover:underline text-xs" data-view-ver="${v.id}">查看</button>
+                  <button class="text-emerald-700 hover:underline text-xs ml-2" data-review-ver="${v.id}">复盘</button>
                   <button class="text-blue-700 hover:underline text-xs ml-2" data-restore-ver="${v.id}">恢复</button>
                   <button class="text-red-600 hover:underline text-xs ml-2" data-del-ver="${v.id}">删除</button>
                 </td>
@@ -938,6 +955,9 @@ async function manageVersions(projectId) {
   document.querySelectorAll('[data-view-ver]').forEach(btn => btn.onclick = async () => {
     const version = await versionService.get(btn.dataset.viewVer);
     if (version) viewVersion(version, projectId);
+  });
+  document.querySelectorAll('[data-review-ver]').forEach(btn => btn.onclick = () => {
+    openReview({ projectId, versionId: btn.dataset.reviewVer, sourceType: 'version_saved' });
   });
   document.querySelectorAll('[data-restore-ver]').forEach(btn => btn.onclick = async () => {
     const version = await versionService.get(btn.dataset.restoreVer);
@@ -1048,6 +1068,7 @@ async function showQuoteAudit(projectId) {
     </div>
   `, `
     <button id="auditMissing" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">定位缺单价</button>
+    <button id="auditReview" class="px-3 py-1.5 text-sm border rounded text-emerald-700 border-emerald-300">沉淀风险判断</button>
     <button id="auditSaveVersion" class="px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300">保存报审版</button>
     <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>
   `);
@@ -1056,6 +1077,7 @@ async function showQuoteAudit(projectId) {
     closeModal();
     render();
   };
+  document.getElementById('auditReview').onclick = () => openReview({ projectId, sourceType: 'quote_audit' });
   document.getElementById('auditSaveVersion').onclick = () => {
     closeModal();
     saveVersion(projectId);

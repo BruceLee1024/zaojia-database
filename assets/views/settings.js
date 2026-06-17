@@ -1,15 +1,16 @@
 // 视图：设置
-import { getAIConfig, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=3.4';
-import { testConnection } from '../ai/remoteLLM.js?v=3.4';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.4';
-import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo } from '../data/repository.js?v=3.4';
-import { loadDemoData } from '../data/demo.js';
+import { getAIConfig, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=3.9';
+import { testConnection } from '../ai/remoteLLM.js?v=3.9';
+import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { experienceService } from '../services/experienceService.js?v=3.9';
+import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from '../data/repository.js?v=3.9';
+import { ensureDemoData } from '../data/demo.js?v=3.9';
 import { esc, toast, fmt } from '../utils/dom.js';
 
 export async function render() {
   const cfg = getAIConfig();
   const providers = listProviders();
-  const engine = await dataEngineService.dashboard();
+  const [engine, experience] = await Promise.all([dataEngineService.dashboard(), experienceService.dashboard()]);
   document.getElementById('workspace').innerHTML = `
     <div class="grid grid-cols-2 gap-4">
       <div class="card p-4">
@@ -51,7 +52,7 @@ export async function render() {
             <button id="btnClear" class="px-3 py-1.5 text-sm border rounded text-red-600 border-red-300">清空全部</button>
           </div>
           <div class="text-xs text-gray-500 leading-relaxed">
-            所有业务数据保存在浏览器 IndexedDB；AI Key 仅保存在本机 localStorage。<br>• 备份：导出 JSON 文件，可在另一台机器导入还原，请按商业敏感数据妥善保存。<br>• 导入备份会覆盖当前定额、项目、清单、报价版本与指标。<br>• 演示数据：3 个项目（产品水池/预处理车间/变电站）+ 现有定额库，自动入库用于体验。
+            所有业务数据保存在浏览器 IndexedDB；AI Key 仅保存在本机 localStorage。<br>• 备份：导出 JSON 文件，可在另一台机器导入还原，请按商业敏感数据妥善保存。<br>• 导入备份会覆盖当前定额、项目、清单、报价版本、经验卡与指标。<br>• 演示数据：3 个项目（产品水池/预处理车间/变电站）+ 现有定额库，自动入库用于体验。
           </div>
         </div>
       </div>
@@ -69,12 +70,17 @@ export async function render() {
           <button id="btnEngineRebuild" class="px-3 py-1.5 text-sm brand-bg text-white rounded">重建指标</button>
           <button id="btnEngineClearCandidates" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">清理候选</button>
         </div>
-        <div class="mt-4 grid grid-cols-5 gap-3">
+        <div class="mt-4 grid grid-cols-4 gap-3">
           ${engineMetric('正式事实', engine.facts.length, '条')}
           ${engineMetric('候选样本', engine.candidates.length, '条')}
           ${engineMetric('质量报告', engine.reports.length, '份')}
-          ${engineMetric('低可信报告', engine.lowQuality, '份')}
           ${engineMetric('健康分', engine.qualityScore || 0, '分')}
+        </div>
+        <div class="mt-3 grid grid-cols-4 gap-3">
+          ${engineMetric('低可信报告', engine.lowQuality, '份')}
+          ${engineMetric('经验卡', experience.confirmedCards.length, '张')}
+          ${engineMetric('待确认复盘', experience.pendingSessions.length, '个')}
+          ${engineMetric('过期经验', experience.expiredCards.length, '张')}
         </div>
         <div class="mt-4 grid grid-cols-12 gap-3">
           <div class="col-span-7 rounded border border-slate-200 bg-white p-3">
@@ -174,20 +180,23 @@ export async function render() {
     render();
   };
   document.getElementById('btnDemo').onclick = async () => {
-    if (!confirm('将加载演示数据：现有定额库 + 3 个示例项目。已有同名数据可能被追加或更新。')) return;
-    await loadDemoData();
+    if (!confirm('将加载内置演示数据：定额库 + 3 个示例项目 + 报价版本 + 指标样本。已有业务数据不会被覆盖。')) return;
+    const result = await ensureDemoData();
+    if (!result.loaded) {
+      toast('当前已有业务数据；如需重新体验，请使用「重置演示数据」。', 'success');
+      return;
+    }
     toast('演示数据已加载', 'success');
     window.__app.go('dashboard');
   };
   document.getElementById('btnDemoReset').onclick = async () => {
     if (!confirm('将先清空当前业务数据，再重新加载演示数据。此操作不可撤销，确定继续？')) return;
-    await clearBusinessData();
-    await loadDemoData();
+    await ensureDemoData({ force: true });
     toast('演示数据已重置', 'success');
     window.__app.go('dashboard');
   };
   document.getElementById('btnClear').onclick = async () => {
-    if (!confirm('清空所有定额、项目、清单、报价版本和指标？建议先导出 JSON 备份。')) return;
+    if (!confirm('清空所有定额、项目、清单、报价版本、经验卡和指标？建议先导出 JSON 备份。')) return;
     await clearBusinessData();
     location.reload();
   };
@@ -220,7 +229,7 @@ async function importAll() {
   input.accept = '.json';
   input.onchange = async e => {
     const file = e.target.files[0]; if (!file) return;
-    if (!confirm('导入 JSON 备份会覆盖当前定额、项目、清单、报价版本、指标和 AI 配置。建议先导出当前备份。确定导入？')) return;
+    if (!confirm('导入 JSON 备份会覆盖当前定额、项目、清单、报价版本、经验卡、指标和 AI 配置。建议先导出当前备份。确定导入？')) return;
     let data;
     try {
       data = JSON.parse(await file.text());
@@ -237,6 +246,8 @@ async function importAll() {
     await dataCandidateRepo.replaceAll(data.data_candidates || []);
     await dataJobRepo.replaceAll(data.data_jobs || []);
     await dataQualityReportRepo.replaceAll(data.data_quality_reports || []);
+    await experienceSessionRepo.replaceAll(data.experience_sessions || []);
+    await experienceCardRepo.replaceAll(data.experience_cards || []);
     if (data.ai_config) setAIConfig(data.ai_config);
     toast('导入完成', 'success');
     location.reload();
@@ -255,6 +266,8 @@ async function clearBusinessData() {
     dataCandidateRepo.replaceAll([]),
     dataJobRepo.replaceAll([]),
     dataQualityReportRepo.replaceAll([]),
+    experienceSessionRepo.replaceAll([]),
+    experienceCardRepo.replaceAll([]),
   ]);
 }
 
@@ -269,6 +282,8 @@ async function exportAll() {
     data_candidates: await dataCandidateRepo.all(),
     data_jobs: await dataJobRepo.all(),
     data_quality_reports: await dataQualityReportRepo.all(),
+    experience_sessions: await experienceSessionRepo.all(),
+    experience_cards: await experienceCardRepo.all(),
     ai_config:   JSON.parse(localStorage.getItem('ai_config') || 'null'),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

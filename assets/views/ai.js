@@ -1,6 +1,6 @@
 // 视图：AI 抽屉
-import { tryLocalCommand } from '../ai/localCommands.js?v=3.4';
-import { callLLM } from '../ai/remoteLLM.js?v=3.4';
+import { tryLocalCommand } from '../ai/localCommands.js?v=3.9';
+import { callLLM } from '../ai/remoteLLM.js?v=3.9';
 
 const history = [];
 
@@ -61,6 +61,8 @@ function replaceLast(text) {
 function addSuggestions() {
   addActionMsg('常用问题', [
     { label: '审查报价', onClick: () => send('审查当前报价有没有风险') },
+    { label: '复盘项目', onClick: () => send('复盘当前项目') },
+    { label: '查经验', onClick: () => send('查防水报价经验') },
     { label: '检查缺单价', onClick: () => send('检查缺单价') },
     { label: '项目对标', onClick: () => send('当前项目对标，贵不贵') },
     { label: '报价版本', onClick: () => send('查看当前项目报价版本列表和差异') },

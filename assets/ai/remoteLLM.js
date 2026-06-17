@@ -1,15 +1,15 @@
 // 远端 LLM 调用
-import { getAIConfig } from '../services/aiService.js?v=3.4';
-import { quotaRepo, projectRepo, indicatorRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.4';
+import { getAIConfig } from '../services/aiService.js?v=3.9';
+import { quotaRepo, projectRepo, indicatorRepo, boqRepo, versionRepo, experienceCardRepo } from '../data/repository.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.4';
+import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 
 export async function callLLM(text, history = []) {
   const cfg = getAIConfig();
   if (!cfg.api_key) throw new Error('未配置 API Key');
 
-  const [quota, projects, indicators, boq, versions] = await Promise.all([
-    quotaRepo.all(), projectRepo.all(), indicatorRepo.all(), boqRepo.all(), versionRepo.all(),
+  const [quota, projects, indicators, boq, versions, experienceCards] = await Promise.all([
+    quotaRepo.all(), projectRepo.all(), indicatorRepo.all(), boqRepo.all(), versionRepo.all(), experienceCardRepo.all(),
   ]);
   const currentProjectId = window.__app?.state?.currentProjectId;
   const currentProject = projects.find(p => p.id === currentProjectId) || projects[0] || null;
@@ -50,6 +50,32 @@ export async function callLLM(text, history = []) {
     indicators: indicators.slice(0, 30).map(i => ({
       key: i.typeKey, metric: i.metric, n: i.n, median: i.median, p25: i.p25, p75: i.p75, min: i.min, max: i.max, confidence: i.confidence, dispersion: i.dispersion,
     })),
+    experienceCards: experienceCards
+      .filter(c => (c.reviewStatus || c.status || 'confirmed') === 'confirmed')
+      .filter(c => {
+        if (!currentProject) return true;
+        if (c.projectId === currentProject.id) return true;
+        const blob = [c.projectNameSnapshot, ...(c.tags || []), ...(c.keywords || []), c.category, c.domainCategory, c.projectType, c.processType, c.costCategory, c.lesson, c.applicability].join(' ');
+        return Boolean((currentProject.type && blob.includes(currentProject.type)) || (currentProject.process && blob.includes(currentProject.process)));
+      })
+      .slice(0, 8)
+      .map(c => ({
+        title: c.title,
+        category: c.domainCategory || c.category,
+        projectType: c.projectType,
+        processType: c.processType,
+        costCategory: c.costCategory,
+        keywords: c.keywords,
+        projectName: c.projectNameSnapshot,
+        tags: c.tags,
+        trigger: c.trigger,
+        lesson: c.lesson,
+        applicability: c.applicability,
+        risks: c.risks,
+        confidence: c.confidence,
+        expiresAt: c.expiresAt,
+        reuseCount: c.reuseCount || 0,
+      })),
   };
   const matched = quota.filter(q => {
     const blob = `${q.name} ${q.feature} ${(q.tags || []).join(' ')}`.toLowerCase();
@@ -62,6 +88,7 @@ export async function callLLM(text, history = []) {
 - 你是报价辅助，不直接承诺修改数据；涉及新增清单、调价、恢复版本等动作时，必须提示用户使用页面按钮或明确确认。
 - 优先指出数据依据、样本数、缺单价、0 工程量和异常系数。
 - 指标样本少或 confidence 为“仅参考/低可信”时要明确提醒。
+- 引用经验卡时必须说明适用边界、可信度和过期风险；不要把经验卡当成硬性指标。
 - 回答保持简洁，先给结论，再给依据和建议动作。
 
 当前数据上下文(JSON)：${JSON.stringify(ctx)}

@@ -1,9 +1,10 @@
 // 视图：项目管理
-import { projectService } from '../services/projectService.js?v=3.4';
-import { indicatorService } from '../services/indicatorService.js?v=3.4';
-import { boqRepo, versionRepo } from '../data/repository.js?v=3.4';
+import { projectService } from '../services/projectService.js?v=3.9';
+import { indicatorService } from '../services/indicatorService.js?v=3.9';
+import { boqRepo, versionRepo } from '../data/repository.js?v=3.9';
 import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.4';
+import { hasMissingPrice } from '../utils/costing.js?v=3.9';
+import { openReview } from './experience.js?v=3.9';
 
 const TYPES = ['水厂', '泵站', '管网', '变电站', '水池', '车间', '其他'];
 const SCALES = ['小型', '中型', '大型', '特大型'];
@@ -82,9 +83,10 @@ export async function render() {
   document.querySelectorAll('[data-archive]').forEach(b => b.onclick = async () => {
     const p = await projectService.get(b.dataset.archive);
     if (p?.status !== 'archived' && !confirm('归档会把当前项目清单写入数据引擎样本池，并用于后续指标统计。确定归档？')) return;
-    await projectService.archive(b.dataset.archive);
+    const updated = await projectService.archive(b.dataset.archive);
     toast('已更新，数据引擎已同步');
     render();
+    if (updated?.status === 'archived') openReview({ projectId: updated.id, sourceType: 'project_archive' });
   });
   document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => {
     window.__app.go('boq', { projectId: b.dataset.open });

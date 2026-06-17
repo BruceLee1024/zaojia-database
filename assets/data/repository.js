@@ -1,6 +1,6 @@
 // Repository 层：所有 IndexedDB 访问的唯一入口
 // 业务层不准直接碰 idb-keyval，必须走这里
-import { idb } from './idb-bridge.js?v=3.4';
+import { idb } from './idb-bridge.js?v=3.9';
 
 export const STORES = {
   quota_items: 'quota_items',
@@ -12,6 +12,8 @@ export const STORES = {
   data_candidates: 'data_candidates',
   data_jobs: 'data_jobs',
   data_quality_reports: 'data_quality_reports',
+  experience_sessions: 'experience_sessions',
+  experience_cards: 'experience_cards',
 };
 
 export const dbGetAll = async store => (await idb.get(store)) || [];
@@ -119,4 +121,24 @@ export const dataQualityReportRepo = {
   all: () => dbGetAll(STORES.data_quality_reports),
   replaceAll: arr => dbSetAll(STORES.data_quality_reports, arr),
   upsert: obj => dbAdd(STORES.data_quality_reports, obj),
+};
+
+export const experienceSessionRepo = {
+  all: () => dbGetAll(STORES.experience_sessions),
+  byProject: pid => dbQuery(STORES.experience_sessions, s => s.projectId === pid),
+  findById: id => dbFind(STORES.experience_sessions, id),
+  replaceAll: arr => dbSetAll(STORES.experience_sessions, arr),
+  upsert: obj => dbAdd(STORES.experience_sessions, obj),
+  update: (id, patch) => dbUpdate(STORES.experience_sessions, id, patch),
+  remove: id => dbRemove(STORES.experience_sessions, id),
+};
+
+export const experienceCardRepo = {
+  all: () => dbGetAll(STORES.experience_cards),
+  byProject: pid => dbQuery(STORES.experience_cards, c => c.projectId === pid),
+  findById: id => dbFind(STORES.experience_cards, id),
+  replaceAll: arr => dbSetAll(STORES.experience_cards, arr),
+  upsert: obj => dbAdd(STORES.experience_cards, obj),
+  update: (id, patch) => dbUpdate(STORES.experience_cards, id, patch),
+  remove: id => dbRemove(STORES.experience_cards, id),
 };
