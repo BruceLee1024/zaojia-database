@@ -1,8 +1,8 @@
 // 视图：设置
-import { getAIConfig, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=3.2';
-import { testConnection } from '../ai/remoteLLM.js?v=3.2';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.2';
-import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo } from '../data/repository.js?v=3.2';
+import { getAIConfig, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=3.4';
+import { testConnection } from '../ai/remoteLLM.js?v=3.4';
+import { dataEngineService } from '../services/dataEngineService.js?v=3.4';
+import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo } from '../data/repository.js?v=3.4';
 import { loadDemoData } from '../data/demo.js';
 import { esc, toast, fmt } from '../utils/dom.js';
 

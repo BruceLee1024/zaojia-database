@@ -1,7 +1,7 @@
 // 视图：仪表盘
-import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.2';
+import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.4';
 import { fmt, fmtMoney, esc } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.2';
+import { hasMissingPrice } from '../utils/costing.js?v=3.4';
 import { categoryGuess } from '../utils/stats.js';
 
 export async function render() {

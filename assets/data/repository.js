@@ -1,6 +1,6 @@
 // Repository 层：所有 IndexedDB 访问的唯一入口
 // 业务层不准直接碰 idb-keyval，必须走这里
-import { idb } from './idb-bridge.js?v=3.2';
+import { idb } from './idb-bridge.js?v=3.4';
 
 export const STORES = {
   quota_items: 'quota_items',

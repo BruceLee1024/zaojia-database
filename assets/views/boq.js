@@ -1,11 +1,11 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.2';
-import { boqService, groupForLine } from '../services/boqService.js?v=3.2';
-import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=3.2';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.2';
+import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.4';
+import { boqService, groupForLine } from '../services/boqService.js?v=3.4';
+import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=3.4';
+import { dataEngineService } from '../services/dataEngineService.js?v=3.4';
 import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
-import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=3.2';
-import { hasMissingPrice } from '../utils/costing.js?v=3.2';
+import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=3.4';
+import { hasMissingPrice } from '../utils/costing.js?v=3.4';
 import { categoryGuess } from '../utils/stats.js';
 
 const boqState = {
@@ -16,6 +16,7 @@ const boqState = {
   activeId: '',
   treeKeyword: '',
   treeGroup: '',
+  detailCollapsed: localStorage.getItem('boq_detail_collapsed') === 'true',
   expandedProjectIds: new Set(),
 };
 let searchTimer = null;
@@ -69,6 +70,9 @@ export async function render() {
 
   const allProjectBoq = await boqRepo.all();
   const boq = allProjectBoq.filter(line => line.projectId === proj.id);
+  if (boqState.treeGroup && !structureGroups(boq, proj).some(group => group.id === boqState.treeGroup)) {
+    boqState.treeGroup = '';
+  }
   const filteredBoq = filterLines(boq);
   if (boqState.activeId && !filteredBoq.find(b => b.id === boqState.activeId)) boqState.activeId = '';
   const activeLine = boq.find(b => b.id === boqState.activeId) || filteredBoq[0] || null;
@@ -134,7 +138,7 @@ export async function render() {
       </section>
 
       <div class="grid grid-cols-[300px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
-        ${projectTree(projects, allProjectBoq, proj)}
+        ${projectTree(proj, boq)}
         <div class="min-w-0 min-h-0 flex flex-col gap-3">
           <section class="bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden flex-1 min-h-[220px]">
             <div class="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center justify-between text-sm shrink-0">
@@ -175,7 +179,7 @@ export async function render() {
             </div>
           </section>
 
-          <section id="boqDetail" class="card shrink-0 overflow-hidden" style="height:${clampBoqDetailHeight(boqDetailHeight)}px">
+          <section id="boqDetail" class="card shrink-0 overflow-hidden" style="height:${boqState.detailCollapsed ? 52 : clampBoqDetailHeight(boqDetailHeight)}px">
             ${detailPanel(activeLine, activeRecommendations)}
           </section>
         </div>
@@ -183,24 +187,20 @@ export async function render() {
     </div>
   `;
 
-  document.getElementById('projSel').onchange = e => { window.__app.state.currentProjectId = e.target.value; render(); };
+  document.getElementById('projSel').onchange = e => {
+    window.__app.state.currentProjectId = e.target.value;
+    boqState.treeGroup = '';
+    boqState.activeId = '';
+    boqState.selectedIds.clear();
+    render();
+  };
   document.getElementById('treeKw')?.addEventListener('input', e => {
     boqState.treeKeyword = e.target.value;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => render(), 120);
   });
-  document.querySelectorAll('[data-tree-project]').forEach(b => b.onclick = () => {
-    const id = b.dataset.treeProject;
-    window.__app.state.currentProjectId = id;
-    if (boqState.expandedProjectIds.has(id)) boqState.expandedProjectIds.delete(id);
-    else boqState.expandedProjectIds.add(id);
-    boqState.treeGroup = '';
-    boqState.activeId = '';
-    render();
-  });
   document.querySelectorAll('[data-tree-group]').forEach(b => b.onclick = () => {
     window.__app.state.currentProjectId = b.dataset.projectId;
-    boqState.expandedProjectIds.add(b.dataset.projectId);
     boqState.treeGroup = b.dataset.treeGroup;
     boqState.activeId = '';
     render();
@@ -313,6 +313,11 @@ export async function render() {
   });
   document.getElementById('btnEmptyAdd')?.addEventListener('click', pickQuota);
   document.getElementById('boqResize')?.addEventListener('pointerdown', startBoqResize);
+  document.getElementById('detailToggle')?.addEventListener('click', () => {
+    boqState.detailCollapsed = !boqState.detailCollapsed;
+    localStorage.setItem('boq_detail_collapsed', String(boqState.detailCollapsed));
+    render();
+  });
   document.getElementById('detailSave')?.addEventListener('click', () => saveDetail(activeLine?.id));
   document.querySelectorAll('[data-replace-quota]').forEach(btn => btn.onclick = async () => {
     if (!activeLine) return;
@@ -329,7 +334,7 @@ export async function render() {
     toast('已删除清单项', 'success');
     render();
   });
-  applyBoqDetailHeight();
+  if (!boqState.detailCollapsed) applyBoqDetailHeight();
 }
 
 function filterLines(lines) {
@@ -344,25 +349,66 @@ function filterLines(lines) {
   });
 }
 
-function projectTree(projects, allBoq, currentProject) {
+function projectTree(currentProject, lines) {
   const kw = boqState.treeKeyword.trim().toLowerCase();
-  const visibleProjects = projects.filter(p => !kw || `${p.name || ''} ${p.type || ''}`.toLowerCase().includes(kw));
+  const groups = structureGroups(lines, currentProject)
+    .map(group => ({ ...group, riskCount: lines.filter(line => classifyLineGroup(line) === group.id && lineRisks(line).length).length }))
+    .filter(group => group.count || String(group.id).startsWith('custom:'))
+    .filter(group => !kw || `${group.label} ${group.id}`.toLowerCase().includes(kw));
+  const pricedCount = lines.filter(line => !hasMissingPrice(line.unitPrice)).length;
+  const completion = lines.length ? Math.round(pricedCount / lines.length * 100) : 0;
   return `<aside class="card p-0 overflow-hidden min-h-0 flex flex-col">
     <div class="p-4 border-b border-slate-200 bg-white">
       <div class="flex items-center justify-between">
-        <div>
+        <div class="min-w-0">
           <div class="font-semibold text-slate-800">项目清单</div>
-          <div class="mt-1 text-xs text-slate-500">按项目结构组织工程量清单</div>
+          <div class="mt-1 truncate text-xs text-slate-500" title="${esc(currentProject.name || '')}">${esc(currentProject.name || '未命名项目')}</div>
         </div>
-        <span class="badge badge-gray">${projects.length} 项目</span>
+        <span class="badge badge-gray">${lines.length} 项</span>
+      </div>
+      <div class="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-slate-500">价格完整度</span>
+          <span class="${completion < 100 ? 'text-amber-700' : 'text-teal-700'} tabular-nums">${completion}%</span>
+        </div>
+        <div class="mt-2 h-2 overflow-hidden rounded bg-slate-200">
+          <div class="h-2 rounded ${completion < 100 ? 'bg-amber-500' : 'bg-teal-600'}" style="width:${completion}%"></div>
+        </div>
       </div>
       <div class="relative mt-3">
         <span class="material-symbols-outlined pointer-events-none absolute left-3 top-2 text-[18px] text-slate-400">search</span>
-        <input id="treeKw" value="${esc(boqState.treeKeyword)}" class="h-9 w-full rounded border border-slate-300 bg-slate-50 pl-9 pr-3 text-sm" placeholder="搜索项目..." />
+        <input id="treeKw" value="${esc(boqState.treeKeyword)}" class="h-9 w-full rounded border border-slate-300 bg-slate-50 pl-9 pr-3 text-sm" placeholder="搜索结构分组..." />
       </div>
     </div>
     <div class="flex-1 min-h-0 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50">
-      ${visibleProjects.map(project => projectTreeNode(project, allBoq.filter(line => line.projectId === project.id), currentProject.id === project.id)).join('') || `<div class="py-10 text-center text-sm text-slate-400">没有匹配项目</div>`}
+      <div class="rounded-lg bg-white border border-teal-200">
+        <div class="flex items-center gap-2 px-2 py-2 text-left">
+          <span class="material-symbols-outlined text-[22px] text-amber-500">folder</span>
+          <span class="min-w-0 flex-1 truncate font-medium text-slate-900" title="${esc(currentProject.name || '')}">${esc(currentProject.name || '未命名项目')}</span>
+          <span class="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">${lines.length}项</span>
+        </div>
+        <div class="pb-2 pl-8 pr-2 space-y-1">
+          <button data-add-group="${currentProject.id}" class="w-full flex items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-left text-xs text-slate-500 hover:border-teal-300 hover:text-teal-700">
+            <span class="material-symbols-outlined text-[16px]">add</span>
+            新建结构分组
+          </button>
+          ${groups.map(group => {
+            const active = boqState.treeGroup === group.id;
+            return `
+            <button data-tree-group="${group.id}" data-project-id="${currentProject.id}" data-drop-group="${group.id}" data-drop-project="${currentProject.id}" class="w-full rounded-lg border px-3 py-2 text-left ${active ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-white/70 text-slate-600 hover:bg-white border-slate-200'}">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[18px]">${group.icon}</span>
+                <span class="min-w-0 flex-1 truncate font-medium">${esc(group.label)}</span>
+                <span class="text-xs tabular-nums ${active ? 'text-teal-700' : 'text-slate-400'}">${group.count}</span>
+              </div>
+              <div class="mt-1 flex items-center justify-between text-xs">
+                <span class="${group.riskCount ? 'text-amber-700' : 'text-slate-400'}">${group.riskCount ? `风险 ${group.riskCount}` : '无风险'}</span>
+                <span class="text-slate-400">拖入归类</span>
+              </div>
+            </button>
+          `; }).join('') || `<div class="rounded border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-400">当前项目暂无匹配结构</div>`}
+        </div>
+      </div>
     </div>
   </aside>`;
 }
@@ -463,9 +509,27 @@ function boqMetric(label, value, suffix = '', cls = '') {
 }
 
 function detailPanel(line, recommendations = []) {
+  const collapsed = boqState.detailCollapsed;
+  const header = `
+    <div class="px-4 py-3 border-b border-slate-200 bg-white shrink-0">
+      <div class="flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <div class="font-semibold text-slate-800">清单明细编辑</div>
+            ${line && hasMissingPrice(line.unitPrice) ? '<span class="badge badge-yellow">缺单价</span>' : ''}
+          </div>
+          <div class="mt-1 text-xs text-slate-500 truncate" title="${esc(line?.name || '')}">${line ? `${esc(line.name || '')} · ${esc(groupLabel(classifyLineGroup(line)))}` : '选择一行后查看和编辑明细'}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="detailToggle" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">${collapsed ? '展开明细' : '收起明细'}</button>
+          ${line && !collapsed ? '<button id="detailDelete" class="px-3 py-1.5 text-sm rounded border border-red-200 text-red-600 hover:bg-red-50">删除</button><button id="detailSave" class="px-3 py-1.5 text-sm rounded brand-bg text-white">保存明细</button>' : ''}
+        </div>
+      </div>
+    </div>`;
   if (!line) {
     return `<div class="h-full flex flex-col bg-white">
-      <div id="boqResize" class="h-2 cursor-row-resize bg-slate-100 hover:bg-teal-100 border-b border-slate-200" title="拖动调整明细区高度"></div>
+      ${collapsed ? '' : '<div id="boqResize" class="h-2 cursor-row-resize bg-slate-100 hover:bg-teal-100 border-b border-slate-200" title="拖动调整明细区高度"></div>'}
+      ${header}
       <div class="flex-1 flex items-center justify-center text-center text-slate-400">
         <div>
           <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded border border-slate-200 bg-slate-50">
@@ -477,21 +541,12 @@ function detailPanel(line, recommendations = []) {
       </div>
     </div>`;
   }
+  if (collapsed) {
+    return `<div class="h-full flex flex-col bg-white">${header}</div>`;
+  }
   return `<div class="h-full flex flex-col bg-slate-50">
     <div id="boqResize" class="h-2 cursor-row-resize bg-slate-100 hover:bg-teal-100 border-b border-slate-200 shrink-0" title="拖动调整明细区高度"></div>
-    <div class="px-4 py-3 border-b border-slate-200 bg-white shrink-0">
-      <div class="flex items-start justify-between gap-4">
-        <div class="min-w-0">
-          <div class="font-semibold text-slate-800">清单明细编辑</div>
-          <div class="mt-1 text-xs text-slate-500 truncate" title="${esc(line.name || '')}">${esc(line.name || '')} ${hasMissingPrice(line.unitPrice) ? '· 缺少综合单价' : ''}</div>
-        </div>
-        <div class="flex items-center gap-2">
-          ${hasMissingPrice(line.unitPrice) ? '<span class="badge badge-yellow">缺单价</span>' : ''}
-          <button id="detailDelete" class="px-3 py-1.5 text-sm rounded border border-red-200 text-red-600 hover:bg-red-50">删除</button>
-          <button id="detailSave" class="px-3 py-1.5 text-sm rounded brand-bg text-white">保存明细</button>
-        </div>
-      </div>
-    </div>
+    ${header}
 
     <div id="boqDetailBody" class="flex-1 overflow-auto scroll-thin p-4">
       <div class="grid grid-cols-[320px_minmax(0,1fr)] gap-4">

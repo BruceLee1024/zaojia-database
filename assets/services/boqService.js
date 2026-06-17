@@ -1,9 +1,9 @@
 // 工程量清单服务
-import { boqRepo, projectRepo, quotaRepo, versionRepo } from '../data/repository.js?v=3.2';
+import { boqRepo, projectRepo, quotaRepo, versionRepo } from '../data/repository.js?v=3.4';
 import { uid } from '../utils/dom.js';
 import { pickBestQuota, categoryGuess } from '../utils/stats.js';
-import { calculateAmount } from '../utils/costing.js?v=3.2';
-import { hasMissingPrice } from '../utils/costing.js?v=3.2';
+import { calculateAmount } from '../utils/costing.js?v=3.4';
+import { hasMissingPrice } from '../utils/costing.js?v=3.4';
 
 export const boqService = {
   async listByProject(projectId) {

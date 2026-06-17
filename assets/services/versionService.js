@@ -1,9 +1,9 @@
 // 报价版本服务：当前清单的不可变快照、恢复与对比
-import { boqRepo, projectRepo, versionRepo } from '../data/repository.js?v=3.2';
+import { boqRepo, projectRepo, versionRepo } from '../data/repository.js?v=3.4';
 import { uid } from '../utils/dom.js';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.2';
-import { dataEngineService } from './dataEngineService.js?v=3.2';
-import { groupForLine } from './boqService.js?v=3.2';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.4';
+import { dataEngineService } from './dataEngineService.js?v=3.4';
+import { groupForLine } from './boqService.js?v=3.4';
 
 const LINE_FIELDS = ['quotaItemId', 'code', 'name', 'feature', 'unit', 'qty', 'factor', 'unitPrice', 'amount', 'priceMissing', 'structureGroup'];
 

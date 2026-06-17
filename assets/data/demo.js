@@ -1,6 +1,6 @@
 // 演示数据加载 + 智能兜底单价
-import { quotaRepo, projectRepo, boqRepo } from './repository.js?v=3.2';
-import { parseExcel, detectRowKind, rowToQuotaItem, rowToBOQ } from './excel.js?v=3.2';
+import { quotaRepo, projectRepo, boqRepo } from './repository.js?v=3.4';
+import { parseExcel, detectRowKind, rowToQuotaItem, rowToBOQ } from './excel.js?v=3.4';
 import { categoryGuess } from '../utils/stats.js';
 import { uid } from '../utils/dom.js';
 

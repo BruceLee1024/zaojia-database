@@ -1,8 +1,8 @@
 // 项目服务
-import { projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.2';
+import { projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.4';
 import { uid } from '../utils/dom.js';
-import { recomputeProjectCost } from './boqService.js?v=3.2';
-import { dataEngineService } from './dataEngineService.js?v=3.2';
+import { recomputeProjectCost } from './boqService.js?v=3.4';
+import { dataEngineService } from './dataEngineService.js?v=3.4';
 
 export const projectService = {
   async list() { return await projectRepo.all(); },

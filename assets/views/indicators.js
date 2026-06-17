@@ -1,7 +1,7 @@
 // 视图：指标分析
-import { indicatorService } from '../services/indicatorService.js?v=3.2';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.2';
-import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=3.2';
+import { indicatorService } from '../services/indicatorService.js?v=3.4';
+import { dataEngineService } from '../services/dataEngineService.js?v=3.4';
+import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=3.4';
 import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js';
 
 const state = {

@@ -1,8 +1,8 @@
 // 视图：定额库
-import { quotaService } from '../services/quotaService.js?v=3.2';
+import { quotaService } from '../services/quotaService.js?v=3.4';
 import { fmtMoney, esc, $, openModal, toast } from '../utils/dom.js';
-import { exportQuotaTemplate } from '../data/excel.js?v=3.2';
-import { hasMissingPrice } from '../utils/costing.js?v=3.2';
+import { exportQuotaTemplate } from '../data/excel.js?v=3.4';
+import { hasMissingPrice } from '../utils/costing.js?v=3.4';
 
 const filterState = { keyword: '', category: '', unit: '', priceStatus: '' };
 let editorState = { mode: 'empty', item: null, tab: 'base' };

@@ -1,6 +1,6 @@
 // 视图：AI 抽屉
-import { tryLocalCommand } from '../ai/localCommands.js?v=3.2';
-import { callLLM } from '../ai/remoteLLM.js?v=3.2';
+import { tryLocalCommand } from '../ai/localCommands.js?v=3.4';
+import { callLLM } from '../ai/remoteLLM.js?v=3.4';
 
 const history = [];
 

@@ -1,11 +1,11 @@
 // AI 本地指令路由
-import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.2';
+import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.4';
 import { pickBestQuota, categoryGuess } from '../utils/stats.js';
 import { fmtMoney, fmt } from '../utils/dom.js';
-import { boqService } from '../services/boqService.js?v=3.2';
-import { versionService } from '../services/versionService.js?v=3.2';
-import { indicatorService } from '../services/indicatorService.js?v=3.2';
-import { hasMissingPrice } from '../utils/costing.js?v=3.2';
+import { boqService } from '../services/boqService.js?v=3.4';
+import { versionService } from '../services/versionService.js?v=3.4';
+import { indicatorService } from '../services/indicatorService.js?v=3.4';
+import { hasMissingPrice } from '../utils/costing.js?v=3.4';
 
 export async function tryLocalCommand(text) {
   const t = text.trim();

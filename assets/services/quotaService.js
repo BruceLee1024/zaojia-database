@@ -1,8 +1,8 @@
 // 定额库服务
-import { quotaRepo } from '../data/repository.js?v=3.2';
-import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=3.2';
+import { quotaRepo } from '../data/repository.js?v=3.4';
+import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=3.4';
 import { uid } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.2';
+import { hasMissingPrice } from '../utils/costing.js?v=3.4';
 
 export const quotaService = {
   /** 列出所有定额，支持分类/关键字过滤 */

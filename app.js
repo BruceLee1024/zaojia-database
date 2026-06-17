@@ -1,11 +1,11 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=3.2';
-import * as quota     from './assets/views/quota.js?v=3.2';
-import * as projects  from './assets/views/projects.js?v=3.2';
-import * as boq       from './assets/views/boq.js?v=3.2';
-import * as indicators from './assets/views/indicators.js?v=3.2';
-import * as settings  from './assets/views/settings.js?v=3.2';
-import * as ai        from './assets/views/ai.js?v=3.2';
+import * as dashboard from './assets/views/dashboard.js?v=3.4';
+import * as quota     from './assets/views/quota.js?v=3.4';
+import * as projects  from './assets/views/projects.js?v=3.4';
+import * as boq       from './assets/views/boq.js?v=3.4';
+import * as indicators from './assets/views/indicators.js?v=3.4';
+import * as settings  from './assets/views/settings.js?v=3.4';
+import * as ai        from './assets/views/ai.js?v=3.4';
 
 const VIEWS = [
   { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard' },
@@ -54,7 +54,7 @@ async function renderWorkspace() {
 
 function exportAll() {
   // 复用 settings 的导出逻辑
-  import('./assets/views/settings.js?v=3.2').then(m => m.render());
+  import('./assets/views/settings.js?v=3.4').then(m => m.render());
   // 简化：直接跳到设置页
   setTimeout(() => document.querySelector('#btnExport')?.click(), 100);
   go('settings');
