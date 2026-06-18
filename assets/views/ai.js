@@ -9,7 +9,7 @@ export function open() {
   document.getElementById('aiInput').focus();
   if (!document.getElementById('aiMsgs').children.length) {
     addMsg('assistant',
-`你好，我是水务造价助手。
+`你好，我是工程造价助手。
 
 我会优先读取本地项目、清单、指标和报价版本，帮助你做审查、对标、推荐定额和估算。`);
     addSuggestions();

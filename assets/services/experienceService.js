@@ -290,7 +290,7 @@ function buildLocalQuestions(context) {
 async function questionsWithLLM(context, sourceType) {
   const cfg = getAIConfig();
   if (!cfg.api_key) return null;
-  const prompt = `请为一次水务造价报价复盘生成 4-6 个递进追问。只返回 JSON，不要 Markdown。
+  const prompt = `请为一次工程造价报价复盘生成 4-6 个递进追问。只返回 JSON，不要 Markdown。
 JSON 格式：{"questions":[{"id":"snake_case","label":"不超过6个字","prompt":"具体追问"}]}
 要求：
 - 问题必须结合项目类型、工艺、清单风险、质量报告和费用集中项。
@@ -308,7 +308,7 @@ context=${JSON.stringify(context)}`;
         temperature: 0.25,
         stream: false,
         messages: [
-          { role: 'system', content: '你是水务工程造价复盘追问智能体。必须输出严格 JSON。' },
+          { role: 'system', content: '你是工程造价复盘追问智能体。必须输出严格 JSON。' },
           { role: 'user', content: prompt },
         ],
       }),
@@ -345,7 +345,7 @@ answers=${JSON.stringify(answers)}`;
         temperature: 0.25,
         stream: false,
         messages: [
-          { role: 'system', content: '你是水务工程造价复盘的递进追问智能体。必须输出严格 JSON。' },
+          { role: 'system', content: '你是工程造价复盘的递进追问智能体。必须输出严格 JSON。' },
           { role: 'user', content: prompt },
         ],
       }),
@@ -391,7 +391,7 @@ function normalizeQuestions(questions, min = 3, max = 6) {
 async function draftWithLLM(session, answers) {
   const cfg = getAIConfig();
   if (!cfg.api_key) return null;
-  const prompt = `请把以下水务造价报价复盘整理成一张 JSON 经验卡。只返回 JSON，不要 Markdown。
+  const prompt = `请把以下工程造价报价复盘整理成一张 JSON 经验卡。只返回 JSON，不要 Markdown。
 字段：title, category, tags, trigger, evidence, lesson, applicability, risks, expiresAt, confidence。
 context=${JSON.stringify(session.context)}
 answers=${JSON.stringify(answers)}`;
@@ -404,7 +404,7 @@ answers=${JSON.stringify(answers)}`;
         temperature: 0.2,
         stream: false,
         messages: [
-          { role: 'system', content: '你是水务工程造价经验萃取助手。必须输出严格 JSON。' },
+          { role: 'system', content: '你是工程造价经验萃取助手。必须输出严格 JSON。' },
           { role: 'user', content: prompt },
         ],
       }),
@@ -440,7 +440,7 @@ function localDraft(session, answers) {
       answerText ? `复盘回答：${answerText.slice(0, 300)}` : '',
     ].filter(Boolean).join('\n'),
     lesson: answerByIntent.lesson || '将本次报价判断、异常处理和适用条件沉淀为后续类似项目的复核依据。',
-    applicability: answerByIntent.boundary || `${[project.type, project.scale, project.structure, project.process].filter(Boolean).join(' / ') || '类似水务工程'}可参考，正式复用前需结合最新图纸、市场价和合同边界复核。`,
+    applicability: answerByIntent.boundary || `${[project.type, project.scale, project.structure, project.process].filter(Boolean).join(' / ') || '类似工程项目'}可参考，正式复用前需结合最新图纸、市场价和合同边界复核。`,
     risks: answerByIntent.risk || risks.join('；') || '样本不足或边界变化时不要直接套用。',
     expiresAt: nextYearISO(),
     confidence: risks.length ? '需复核' : '中',

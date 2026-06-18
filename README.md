@@ -1,4 +1,4 @@
-# 水务造价数据库 · 企业定额与指标平台
+# 工程造价数据库 · 企业定额与指标平台
 
 ![version](https://img.shields.io/badge/version-v4.3.0-0f766e)
 ![frontend](https://img.shields.io/badge/frontend-ES%20Modules-0f766e)
@@ -6,7 +6,7 @@
 ![backend](https://img.shields.io/badge/backend-none-64748b)
 ![AI](https://img.shields.io/badge/AI-experience%20knowledge%20base-f59e0b)
 
-标签：`水务造价` `企业定额` `工程量清单` `报价版本` `指标分析` `AI 助手` `经验知识库` `IndexedDB` `纯前端`
+标签：`工程造价` `企业定额` `工程量清单` `报价版本` `指标分析` `AI 助手` `经验知识库` `IndexedDB` `纯前端`
 
 一个纯前端的造价数据库、指标分析和 AI 报价辅助工具。应用不需要后端，业务数据保存在浏览器 IndexedDB，AI Key 仅保存在本机 `localStorage`。
 
