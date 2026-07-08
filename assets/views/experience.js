@@ -1,6 +1,6 @@
 // 经验萃取与知识库工作台
 import { projectRepo } from '../data/repository.js?v=3.9';
-import { experienceService } from '../services/experienceService.js?v=3.9';
+import { experienceService } from '../services/experienceService.js?v=4.4';
 import { esc, fmt, openModal, closeModal, toast } from '../utils/dom.js';
 
 const experienceState = {
@@ -52,7 +52,7 @@ export async function render() {
         <div class="mt-3 grid grid-cols-2 2xl:grid-cols-4 gap-3">
           ${healthTile('覆盖率', `${health.coverage}%`, `${health.coveredProjects}/${health.expectedProjects} 个关键项目已有经验`, health.coverage >= 60 ? 'teal' : 'amber')}
           ${healthTile('知识活性', `${health.activity}%`, `${health.activeCards} 张经验被引用或更新`, health.activity >= 30 || !kb.stats.confirmed ? 'teal' : 'amber')}
-          ${healthTile('萃取效率', `${health.efficiency}%`, `${dashboard.sessions.length} 次复盘产出 ${kb.stats.confirmed} 张正式经验`, health.efficiency >= 60 || !dashboard.sessions.length ? 'teal' : 'amber')}
+          ${healthTile('萃取质量', `${health.extractionQuality}%`, `${health.lowQualityCards} 张需补齐证据或边界`, health.extractionQuality >= 70 ? 'teal' : 'amber')}
           ${healthTile('复核压力', `${health.reviewPressure}%`, `${kb.stats.needsReview + kb.stats.expired} 张需复核或过期`, health.reviewPressure ? 'amber' : 'teal')}
         </div>
       </section>
@@ -133,6 +133,7 @@ export async function openSession(sessionId) {
 }
 
 function renderReview(session, draft = null) {
+  const extraction = draft?.extraction || session.extraction || null;
   openModal('报价复盘经验萃取', `
     <div class="space-y-4 text-sm text-slate-700">
       <section class="rounded-lg border border-slate-200 bg-white overflow-hidden">
@@ -176,6 +177,7 @@ function renderReview(session, draft = null) {
             ${reviewStep('L1', '首轮追问', session.questionSource === 'ai' ? 'AI 生成' : '本地模板', 'done')}
             ${reviewStep('L2', '递进补问', (session.questions || []).some(q => q.level === 'L2') ? (session.followUpSource === 'ai' ? 'AI 已补问' : '本地已补问') : '回答后生成', (session.questions || []).some(q => q.level === 'L2') ? 'done' : 'pending')}
           </div>
+          ${reviewQualityPanel(extraction)}
           <div class="p-3 space-y-3 max-h-[430px] overflow-auto scroll-thin">
             ${(session.questions || []).map((q, idx) => questionCard(q, idx, (session.answers || {})[q.id] || '')).join('')}
           </div>
@@ -187,17 +189,17 @@ function renderReview(session, draft = null) {
               <div class="font-semibold text-slate-800">经验卡草稿</div>
               <div class="mt-1 text-xs leading-5 text-slate-500">确认后写入知识库，并可被 AI 查询引用。</div>
             </div>
-            <span class="badge ${draft ? 'badge-green' : 'badge-gray'} shrink-0">${draft ? '已生成' : '待生成'}</span>
+            <span class="badge ${draft ? 'badge-green' : 'badge-gray'} shrink-0">${draft ? `萃取 ${extraction?.score ?? '-'} 分` : '待生成'}</span>
           </div>
           <div class="p-3 max-h-[520px] overflow-auto scroll-thin bg-slate-50/70">
-            ${draft ? draftForm(draft) : draftEmptyState()}
+            ${draft ? draftForm(draft) : draftEmptyState(extraction)}
           </div>
         </section>
       </div>
     </div>
   `, `
     <div class="w-full flex items-center justify-between gap-3">
-      <div class="text-xs text-slate-500">流程：回答追问 → 生成草稿 → 用户确认入库</div>
+      <div class="text-xs text-slate-500">${extractionFooterHint(extraction)}</div>
       <div class="flex items-center gap-2">
         <button id="expRefine" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded text-slate-700 border-slate-300 bg-white hover:bg-slate-50">
           <span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 补问
@@ -221,7 +223,7 @@ function renderReview(session, draft = null) {
   document.getElementById('expDraft').onclick = async () => {
     const answers = collectAnswers();
     const nextDraft = await experienceService.draftCard(session.id, answers);
-    const fresh = { ...session, answers, draft: nextDraft, status: 'draft_ready' };
+    const fresh = { ...session, answers, draft: nextDraft, extraction: nextDraft.extraction, status: 'draft_ready' };
     renderReview(fresh, nextDraft);
     toast('已生成经验卡草稿，请确认后入库', 'success');
   };
@@ -343,7 +345,7 @@ function cardItem(card, active) {
     </div>
     <div class="flex flex-col items-center justify-start gap-1 pt-0.5">
       <span class="badge ${statusBadgeClass(card.reviewStatus)} shrink-0">${statusLabel(card.reviewStatus)}</span>
-      <span class="text-[11px] text-slate-400">${esc(card.confidence || '可信度-')}</span>
+      <span class="text-[11px] ${Number(card.extractionScore || 0) >= 70 ? 'text-slate-500' : 'text-amber-700'}">萃取 ${fmt(card.extractionScore || 0)}分</span>
     </div>
     <div class="pt-0.5 text-right">
       <div class="font-semibold tabular-nums text-slate-800">${fmt(card.reuseCount || 0)}</div>
@@ -398,11 +400,13 @@ function detailPanel(card) {
       </div>
     </div>
     <div class="p-4 space-y-4 overflow-auto scroll-thin flex-1 min-h-0">
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid grid-cols-4 gap-2">
         ${metric('复用', fmt(card.reuseCount || 0), '次')}
         ${metric('可信度', esc(card.confidence || '-'), '')}
+        ${metric('萃取', fmt(card.extractionScore || 0), '分')}
         ${metric('有效期', esc(card.expiresAt || '-'), '')}
       </div>
+      ${extractionDetail(card)}
       ${detailBlock('经验结论', card.lesson)}
       ${detailBlock('适用边界', card.applicability)}
       ${detailBlock('风险提示', card.risks)}
@@ -474,13 +478,18 @@ function knowledgeHealth(projects, dashboard, kb) {
   const coveredProjects = new Set(confirmedCards.map(card => card.projectId).filter(Boolean)).size;
   const activeCards = confirmedCards.filter(card => Number(card.reuseCount || 0) > 0 || isRecent(card.updatedAt || card.createdAt)).length;
   const riskCards = (kb.stats.needsReview || 0) + (kb.stats.expired || 0);
+  const extractionQuality = confirmedCards.length
+    ? Math.round(confirmedCards.reduce((sum, card) => sum + Number(card.extractionScore || 0), 0) / confirmedCards.length)
+    : 100;
   return {
     expectedProjects,
     coveredProjects,
     activeCards,
+    lowQualityCards: dashboard.lowQualityCards?.length || kb.stats.lowQuality || 0,
     coverage: Math.round(Math.min(1, coveredProjects / expectedProjects) * 100),
     activity: confirmedCards.length ? Math.round(activeCards / confirmedCards.length * 100) : 100,
     efficiency: dashboard.sessions.length ? Math.round((kb.stats.confirmed || 0) / dashboard.sessions.length * 100) : 100,
+    extractionQuality,
     reviewPressure: kb.stats.total ? Math.round(riskCards / kb.stats.total * 100) : 0,
   };
 }
@@ -519,6 +528,30 @@ function evidenceRefs(refs = []) {
     <div class="mt-2 space-y-1 text-sm text-slate-700">
       ${refs.length ? refs.map(ref => `<div>• ${esc(ref.type || 'source')}：${esc(ref.label || ref.id || '-')}</div>`).join('') : '<div class="text-slate-400">暂无结构化证据链</div>'}
     </div>
+  </div>`;
+}
+
+function extractionDetail(card) {
+  const extraction = card.extraction || {};
+  const score = Number(card.extractionScore ?? extraction.score ?? 0);
+  const gaps = card.extractionGaps || extraction.gaps || [];
+  const checks = card.extractionChecks || extraction.checks || [];
+  const tone = qualityTone(score);
+  return `<div class="rounded border border-slate-200 bg-white p-3">
+    <div class="flex items-center justify-between gap-3">
+      <div>
+        <div class="text-xs font-medium text-slate-500">萃取质量</div>
+        <div class="mt-1 text-sm font-semibold ${tone.text}">${esc(card.extractionLevel || extraction.level || '待评估')}</div>
+      </div>
+      <div class="text-right">
+        <div class="text-lg font-semibold tabular-nums ${tone.text}">${fmt(score)}<span class="ml-1 text-xs font-normal text-slate-500">分</span></div>
+        <div class="text-[11px] text-slate-500">证据 / 边界 / 风险</div>
+      </div>
+    </div>
+    <div class="mt-3 h-1.5 rounded bg-slate-100 overflow-hidden"><div class="h-1.5 rounded ${tone.bar}" style="width:${Math.max(4, Math.min(100, score))}%"></div></div>
+    <div class="mt-2 text-xs leading-5 text-slate-600">${esc(card.extractionSummary || extraction.summary || '暂无萃取评估')}</div>
+    ${checks.length ? `<div class="mt-3 grid grid-cols-2 gap-2">${checks.slice(0, 4).map(qualityCheckPill).join('')}</div>` : ''}
+    ${gaps.length ? `<div class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">需补齐：${gaps.map(g => esc(g.label || g.key)).join('、')}</div>` : ''}
   </div>`;
 }
 
@@ -581,6 +614,7 @@ function collectDraftPatch() {
 function draftForm(draft) {
   return `
     <div class="space-y-2">
+      ${draftQualityStrip(draft.extraction)}
       ${input('标题', 'expTitle', draft.title)}
       <div class="grid grid-cols-2 gap-2">
         ${input('分类', 'expCategory', draft.category)}
@@ -632,6 +666,42 @@ function reviewStep(level, title, desc, status = 'pending') {
   </div>`;
 }
 
+function reviewQualityPanel(extraction) {
+  const score = Number(extraction?.score || 0);
+  const gaps = extraction?.gaps || [];
+  const checks = extraction?.checks || [];
+  const tone = qualityTone(score);
+  return `<div class="px-4 py-3 border-b border-slate-100 bg-white">
+    <div class="flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <div class="font-semibold text-slate-800">萃取完整度</div>
+        <div class="mt-1 text-xs leading-5 text-slate-500">${esc(extraction?.summary || '回答后会自动判断证据、边界和风险是否足够沉淀。')}</div>
+      </div>
+      <div class="text-right shrink-0">
+        <div class="text-lg font-semibold tabular-nums ${tone.text}">${fmt(score)}<span class="ml-1 text-xs font-normal text-slate-500">分</span></div>
+        <div class="text-[11px] text-slate-500">${esc(extraction?.level || '待评估')}</div>
+      </div>
+    </div>
+    <div class="mt-3 h-1.5 rounded bg-slate-100 overflow-hidden"><div class="h-1.5 rounded ${tone.bar}" style="width:${Math.max(4, Math.min(100, score))}%"></div></div>
+    ${checks.length ? `<div class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">${checks.slice(0, 4).map(qualityCheckPill).join('')}</div>` : ''}
+    ${gaps.length ? `<div class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">建议继续追问：${gaps.slice(0, 2).map(g => esc(g.label)).join('、')}</div>` : ''}
+  </div>`;
+}
+
+function qualityCheckPill(check) {
+  const ok = check.status === 'ok';
+  const partial = check.status === 'partial';
+  const cls = ok ? 'border-teal-200 bg-teal-50 text-teal-800' : partial ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-600';
+  const icon = ok ? 'check_circle' : partial ? 'radio_button_partial' : 'error';
+  return `<div class="rounded border ${cls} px-2.5 py-2">
+    <div class="flex items-center gap-1.5">
+      <span class="material-symbols-outlined text-[15px]">${icon}</span>
+      <span class="text-xs font-medium">${esc(check.label)}</span>
+    </div>
+    <div class="mt-1 truncate text-[11px] opacity-80">${esc(check.message || '')}</div>
+  </div>`;
+}
+
 function questionCard(q, index, answer) {
   const isFollowUp = q.level === 'L2';
   return `<label class="block rounded-lg border ${isFollowUp ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200 bg-white'} p-3">
@@ -647,17 +717,32 @@ function questionCard(q, index, answer) {
   </label>`;
 }
 
-function draftEmptyState() {
+function draftEmptyState(extraction = null) {
   return `<div class="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white px-6 text-center">
     <div class="h-11 w-11 rounded-lg border border-slate-200 bg-slate-50 text-slate-500 flex items-center justify-center">
       <span class="material-symbols-outlined text-[22px]">edit_document</span>
     </div>
     <div class="mt-3 font-medium text-slate-800">等待生成经验卡草稿</div>
     <div class="mt-1 max-w-[280px] text-xs leading-5 text-slate-500">先回答左侧关键追问，再点击“生成草稿”。AI 内容会保持草稿状态，确认后才会进入知识库。</div>
+    ${extraction ? `<div class="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">当前萃取完整度 ${fmt(extraction.score || 0)} 分，${esc(extraction.gaps?.length ? '建议先补齐追问缺口' : '已具备生成草稿条件')}</div>` : ''}
     <div class="mt-4 grid grid-cols-3 gap-2 w-full max-w-[320px]">
       ${miniProcessPill('结论', 'lesson')}
       ${miniProcessPill('边界', 'rule')}
       ${miniProcessPill('证据', 'fact_check')}
+    </div>
+  </div>`;
+}
+
+function draftQualityStrip(extraction) {
+  const score = Number(extraction?.score || 0);
+  const tone = qualityTone(score);
+  return `<div class="rounded border ${score >= 70 ? 'border-teal-200 bg-teal-50' : 'border-amber-200 bg-amber-50'} px-3 py-2">
+    <div class="flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <div class="text-xs font-medium ${tone.text}">萃取质量：${esc(extraction?.level || '待评估')}</div>
+        <div class="mt-1 text-[11px] leading-4 text-slate-600">${esc(extraction?.summary || '')}</div>
+      </div>
+      <div class="shrink-0 text-sm font-semibold tabular-nums ${tone.text}">${fmt(score)}分</div>
     </div>
   </div>`;
 }
@@ -667,6 +752,20 @@ function miniProcessPill(label, icon) {
     <span class="material-symbols-outlined text-[16px] text-slate-500">${icon}</span>
     <div class="mt-1 text-[11px] text-slate-600">${label}</div>
   </div>`;
+}
+
+function extractionFooterHint(extraction) {
+  if (!extraction) return '流程：回答追问 → 生成草稿 → 用户确认入库';
+  const score = Number(extraction.score || 0);
+  if (score >= 85) return '萃取质量较完整，可生成草稿并确认入库';
+  if (score >= 70) return '已达到入库门槛，建议补齐高亮缺口后再确认';
+  return '当前萃取仍偏薄，建议先点“AI 补问”补证据、边界或风险';
+}
+
+function qualityTone(score) {
+  return Number(score || 0) >= 70
+    ? { text: 'text-teal-700', bar: 'bg-teal-600' }
+    : { text: 'text-amber-700', bar: 'bg-amber-500' };
 }
 
 function metric(label, value, unit) {

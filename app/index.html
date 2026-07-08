@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>工程造价数据库 · 企业定额与指标平台</title>
+
+<!-- 依赖：Tailwind(CDN) / SheetJS(Excel 解析导出) / Chart.js(图表) / idb-keyval(IndexedDB) -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6.2.1/dist/umd.js"></script>
+
+<style>
+  :root {
+    --brand: #00514b;
+    --brand-container: #0d6b64;
+    --brand-soft: #a2f1e7;
+    --secondary: #00658e;
+    --bg: #f6f8fb;
+    --surface: #ffffff;
+    --surface-low: #eff4ff;
+    --line: #dbe4ef;
+    --line-strong: #cbd5e1;
+    --text: #0b1c30;
+    --muted: #64748b;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    letter-spacing: 0;
+  }
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+    line-height: 1;
+  }
+  .brand-bg { background: var(--brand-container); }
+  .brand-text { color: var(--brand); }
+  .nav-item {
+    border-radius: 8px;
+    color: #9fb0c7;
+    transition: background .18s ease, color .18s ease, border-color .18s ease;
+    border: 1px solid transparent;
+  }
+  .nav-item:hover { background: rgba(15, 23, 42, .62); color: #f8fafc; border-color: rgba(148, 163, 184, .18); }
+  .nav-item.active {
+    background: #0f766e;
+    color: #fff;
+    border-color: rgba(153, 246, 228, .32);
+  }
+  .nav-section-title {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    padding: 0 12px;
+    margin: 14px 0 6px;
+  }
+  .sidebar-stat {
+    border: 1px solid rgba(148, 163, 184, .16);
+    background: rgba(15, 23, 42, .42);
+    border-radius: 10px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  .table-fixed th {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    z-index: 1;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+  }
+  .scroll-y { overflow-y: auto; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+  .scroll-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .badge-green { background: #dcfce7; color: #166534; }
+  .badge-blue { background: #dbeafe; color: #1e40af; }
+  .badge-yellow { background: #fef3c7; color: #92400e; }
+  .badge-red { background: #fee2e2; color: #991b1b; }
+  .badge-gray { background: #e2e8f0; color: #475569; }
+  .modal-mask { background: rgba(15,23,42,0.45); backdrop-filter: blur(3px); }
+  .kbd { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 1px 6px; border: 1px solid #d1d5db; border-bottom-width: 2px; border-radius: 4px; background: #fff; }
+  .tab-active { border-bottom: 2px solid var(--brand); color: var(--brand); font-weight: 600; }
+  .tabular-nums, .font-data, input[type="number"] { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  input, select, textarea {
+    border-color: var(--line-strong) !important;
+    border-radius: 8px !important;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none !important;
+    border-color: var(--brand) !important;
+    box-shadow: 0 0 0 3px rgba(10, 182, 253, .16) !important;
+  }
+  button { border-radius: 8px; transition: background .18s ease, color .18s ease, border-color .18s ease, transform .12s ease; }
+  button:active { transform: translateY(1px); }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] > summary .chev { transform: rotate(90deg); }
+  .chev { transition: transform .15s; }
+  .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+  .ai-bubble-user { background: var(--brand-container); color: #fff; }
+  .ai-bubble-assistant { background: #f1f5f9; color: #0f172a; }
+  .app-shell { width: 100%; box-sizing: border-box; transition: padding-right .18s ease; }
+  body.ai-open .app-shell { padding-right: 360px; }
+  .ai-drawer {
+    width: 360px;
+    transform: translateX(100%);
+    transition: transform .18s ease;
+  }
+  body.ai-open .ai-drawer { transform: translateX(0); }
+  .ai-hint-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  @media (max-width: 1100px) {
+    body.ai-open .app-shell { padding-right: 0; }
+    .ai-drawer { width: min(360px, calc(100vw - 24px)); }
+  }
+</style>
+</head>
+<body class="overflow-hidden">
+
+<div class="flex h-screen app-shell">
+  <!-- 侧边栏 -->
+  <aside class="bg-slate-900 text-white w-[240px] flex flex-col flex-shrink-0 border-r border-slate-800">
+    <div class="px-5 py-5 border-b border-slate-800">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-2xl text-teal-100">S</div>
+        <div>
+          <div class="font-semibold leading-tight">工程造价数据库</div>
+          <div class="text-[11px] text-slate-400">企业定额 · 指标 · 报价</div>
+        </div>
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-2 text-[11px]">
+        <div class="sidebar-stat px-3 py-2">
+          <div class="text-slate-500">模式</div>
+          <div class="mt-0.5 font-semibold text-teal-100">本地版</div>
+        </div>
+        <div class="sidebar-stat px-3 py-2">
+          <div class="text-slate-500">数据</div>
+          <div class="mt-0.5 font-semibold text-teal-100">IndexedDB</div>
+        </div>
+      </div>
+    </div>
+    <nav id="nav" class="flex-1 px-3 py-3 scroll-y scroll-thin"></nav>
+    <div class="px-5 py-4 text-[11px] text-slate-500 border-t border-slate-800 space-y-2">
+      <div class="flex items-center justify-between">
+        <span>运行版本</span>
+        <span class="font-data text-slate-400">v5.4</span>
+      </div>
+      <div class="flex items-center gap-2 text-slate-400">
+        <span class="pulse-dot"></span>
+        <span>浏览器本地存储</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 主体 -->
+  <div class="flex-1 flex flex-col min-w-0 bg-slate-50">
+    <header class="bg-white/95 border-b border-slate-200 h-16 px-6 shrink-0">
+      <div class="h-full max-w-[1680px] mx-auto flex items-center gap-4">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="h-9 w-9 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+            <span id="crumbIcon" class="material-symbols-outlined text-[20px]" aria-hidden="true">dashboard</span>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <div class="text-sm font-semibold text-slate-900 truncate" id="crumb">仪表盘</div>
+              <span class="hidden md:block h-1 w-1 rounded-full bg-slate-300"></span>
+              <div class="hidden md:block text-xs text-slate-500 truncate" id="crumbGroup">工作台</div>
+            </div>
+            <div class="mt-0.5 text-xs text-slate-500 truncate" id="crumbDesc">经营概览</div>
+          </div>
+        </div>
+        <div class="flex-1"></div>
+        <div class="hidden xl:flex items-center gap-2 text-xs text-slate-500 shrink-0">
+          <span class="inline-flex h-2 w-2 rounded-full bg-teal-500"></span>
+          <span>本地数据 · IndexedDB</span>
+        </div>
+        <div class="relative hidden md:block w-[min(420px,32vw)] min-w-[260px]">
+          <input id="globalSearch" type="text" placeholder="搜索定额 / 项目 / 指标 / 经验…"
+            class="w-full pl-9 pr-14 py-2 text-sm border bg-slate-50 text-slate-800 placeholder:text-slate-400" />
+          <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]" aria-hidden="true">search</span>
+          <span class="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-data text-slate-400">Enter</span>
+        </div>
+        <button onclick="window.__app.openAI()" class="h-9 px-3 text-sm brand-bg text-white flex items-center gap-1.5 shrink-0">
+          <span class="material-symbols-outlined text-[17px]" aria-hidden="true">auto_awesome</span>
+          <span>AI 助手</span>
+        </button>
+        <button onclick="window.__app.exportAll()" class="h-9 w-9 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-700 shrink-0 border border-slate-200 bg-white" title="导出备份" aria-label="导出备份">
+          <span class="material-symbols-outlined text-[19px]" aria-hidden="true">download</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="workspace" class="flex-1 overflow-auto scroll-thin p-6"></main>
+  </div>
+</div>
+
+<!-- 通用弹窗 -->
+<div id="modal" class="hidden fixed inset-0 z-50 modal-mask flex items-center justify-center p-6">
+  <div class="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+      <div id="modalTitle" class="font-semibold"></div>
+      <button onclick="document.getElementById('modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-1">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <div id="modalBody" class="flex-1 overflow-auto scroll-thin p-5 bg-slate-50"></div>
+    <div id="modalFoot" class="px-5 py-4 border-t border-slate-200 flex justify-end gap-2 shrink-0 bg-white"></div>
+  </div>
+</div>
+
+<!-- AI 抽屉 -->
+<div id="aiDrawer" class="ai-drawer fixed right-0 top-0 bottom-0 bg-white z-40 flex flex-col border-l border-slate-200">
+  <div class="h-14 px-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+    <div class="min-w-0">
+      <div class="font-semibold flex items-center gap-2">
+        <span class="material-symbols-outlined text-[18px] text-teal-700">smart_toy</span>
+        <span>AI 造价助手</span>
+      </div>
+      <div class="mt-0.5 text-[11px] text-slate-500">本地数据优先 · 不自动改清单</div>
+    </div>
+    <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1">
+      <span class="material-symbols-outlined text-[20px]">close</span>
+    </button>
+  </div>
+  <div id="aiMsgs" class="flex-1 min-h-0 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50"></div>
+  <div class="border-t border-slate-200 p-3 space-y-2 shrink-0 bg-white">
+    <div class="flex gap-2">
+      <input id="aiInput" type="text" placeholder="问点啥：5万m³/d 水池造价区间 / 推荐防水定额 …"
+        class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-teal-600" />
+      <button onclick="window.__app.sendAI()" class="px-4 py-2 text-sm brand-bg text-white">发送</button>
+    </div>
+    <div class="text-[11px] text-gray-400">提示：在「设置」中配置国内大模型 API Key。数据仅在本机与所配置 AI 间传输。</div>
+  </div>
+</div>
+
+<!-- 应用入口（ES Module） -->
+<script type="module" src="../app.js?v=5.4"></script>
+</body>
+</html>

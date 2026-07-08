@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="Abstract engineering cost data engine">
+  <defs>
+    <radialGradient id="coreGlow" cx="52%" cy="45%" r="42%">
+      <stop offset="0%" stop-color="#6cf7c8" stop-opacity="0.95"/>
+      <stop offset="18%" stop-color="#34d6b4" stop-opacity="0.55"/>
+      <stop offset="52%" stop-color="#237a89" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#061017" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="steelGlow" cx="72%" cy="30%" r="38%">
+      <stop offset="0%" stop-color="#74c7ff" stop-opacity="0.34"/>
+      <stop offset="100%" stop-color="#0a1119" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="panelStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a8fff0" stop-opacity="0.58"/>
+      <stop offset="52%" stop-color="#55788e" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.1"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#39e7bb" stop-opacity="0"/>
+      <stop offset="45%" stop-color="#39e7bb" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#83c9ff" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#d7fff5" stroke-opacity="0.055" stroke-width="1"/>
+    </pattern>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.23 0 0 0 0 0.95 0 0 0 0 0.75 0 0 0 0.9 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="900" fill="#061017"/>
+  <rect width="1600" height="900" fill="url(#grid)" opacity="0.85"/>
+  <rect width="1600" height="900" fill="url(#steelGlow)"/>
+  <rect width="1600" height="900" fill="url(#coreGlow)"/>
+
+  <g opacity="0.34" stroke="#eafff9" stroke-width="1" fill="none">
+    <path d="M-20 700 C260 604 438 555 650 584 C930 622 1090 728 1620 614"/>
+    <path d="M-20 748 C250 654 448 614 692 638 C980 667 1180 745 1620 684"/>
+    <path d="M-20 798 C270 725 514 690 760 704 C1050 720 1235 780 1620 742"/>
+  </g>
+
+  <g transform="translate(820 430)" fill="none">
+    <ellipse rx="430" ry="128" stroke="#c9fff4" stroke-opacity="0.28" stroke-width="1.5" transform="rotate(-17)"/>
+    <ellipse rx="342" ry="104" stroke="#39e7bb" stroke-opacity="0.34" stroke-width="1.3" transform="rotate(22)"/>
+    <ellipse rx="240" ry="76" stroke="#82caff" stroke-opacity="0.26" stroke-width="1.2" transform="rotate(68)"/>
+    <circle r="92" fill="#0a1820" stroke="url(#panelStroke)" stroke-width="1.4"/>
+    <circle r="62" fill="#39e7bb" opacity="0.08"/>
+    <circle r="38" fill="#6cf7c8" opacity="0.2" filter="url(#softGlow)"/>
+    <path d="M-22 -8h44M-22 10h44M-8 -24v48M10 -24v48" stroke="#dffff8" stroke-opacity="0.55" stroke-width="2"/>
+  </g>
+
+  <g fill="none" stroke-linecap="round">
+    <path d="M120 236 C330 162 486 173 628 274 C710 332 748 360 820 430" stroke="url(#flow)" stroke-width="3"/>
+    <path d="M1422 170 C1215 238 1084 280 996 334 C918 382 882 408 820 430" stroke="url(#flow)" stroke-width="3"/>
+    <path d="M138 666 C334 606 508 590 666 636 C746 660 782 590 820 430" stroke="url(#flow)" stroke-width="2.5"/>
+    <path d="M1454 650 C1265 586 1112 578 990 612 C906 636 872 548 820 430" stroke="url(#flow)" stroke-width="2.5"/>
+  </g>
+
+  <g opacity="0.58">
+    <g transform="translate(96 166) rotate(-9)">
+      <rect width="318" height="210" rx="14" fill="#0d1a23" stroke="url(#panelStroke)"/>
+      <path d="M34 54h206M34 86h252M34 118h160M34 150h224" stroke="#dffff8" stroke-opacity="0.22" stroke-width="9" stroke-linecap="round"/>
+      <path d="M34 184h98" stroke="#39e7bb" stroke-opacity="0.55" stroke-width="10" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(1190 128) rotate(12)">
+      <rect width="300" height="190" rx="14" fill="#0b1822" stroke="url(#panelStroke)"/>
+      <path d="M34 52h180M34 82h232M34 112h132M34 142h212" stroke="#dffff8" stroke-opacity="0.22" stroke-width="8" stroke-linecap="round"/>
+      <path d="M210 152h50" stroke="#82caff" stroke-opacity="0.62" stroke-width="10" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(180 616) rotate(8)">
+      <rect width="350" height="160" rx="14" fill="#0b1822" stroke="url(#panelStroke)"/>
+      <path d="M32 46h118M32 78h282M32 110h238" stroke="#dffff8" stroke-opacity="0.2" stroke-width="8" stroke-linecap="round"/>
+      <path d="M268 46h46" stroke="#39e7bb" stroke-opacity="0.7" stroke-width="8" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(1112 636) rotate(-8)">
+      <rect width="318" height="154" rx="14" fill="#0b1822" stroke="url(#panelStroke)"/>
+      <path d="M32 46h246M32 78h154M32 110h224" stroke="#dffff8" stroke-opacity="0.2" stroke-width="8" stroke-linecap="round"/>
+      <path d="M218 78h60" stroke="#39e7bb" stroke-opacity="0.7" stroke-width="8" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <g filter="url(#softGlow)">
+    <circle cx="314" cy="226" r="5" fill="#6cf7c8"/>
+    <circle cx="1210" cy="264" r="5" fill="#83c9ff"/>
+    <circle cx="502" cy="638" r="5" fill="#6cf7c8"/>
+    <circle cx="1190" cy="624" r="5" fill="#6cf7c8"/>
+    <circle cx="820" cy="430" r="8" fill="#dffff8"/>
+  </g>
+
+  <rect width="1600" height="900" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect width="1600" height="900" fill="url(#grid)" opacity="0.18"/>
+  <rect y="620" width="1600" height="280" fill="url(#coreGlow)" opacity="0.32"/>
+</svg>

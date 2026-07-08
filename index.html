@@ -1,236 +1,1840 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>工程造价数据库 · 企业定额与指标平台</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>工程造价数据库 · 让历史项目变成可复用的决策依据</title>
+  <style>
+    :root {
+      --bg: oklch(11% 0.024 238);
+      --surface: oklch(17% 0.024 238);
+      --surface-2: oklch(22% 0.03 238);
+      --fg: oklch(94% 0.008 235);
+      --muted: oklch(67% 0.018 235);
+      --border: oklch(35% 0.022 238);
+      --accent: oklch(70% 0.145 168);
+      --accent-2: oklch(66% 0.12 220);
+      --success: oklch(70% 0.14 150);
+      --warn: oklch(78% 0.13 82);
+      --danger: oklch(65% 0.16 28);
+      --violet: oklch(64% 0.16 285);
+      --steel: oklch(73% 0.07 220);
+      --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+      --font-display: "Söhne", "Avenir Next", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --radius: 14px;
+      --radius-sm: 9px;
+      --max: 1680px;
+    }
 
-<!-- 依赖：Tailwind(CDN) / SheetJS(Excel 解析导出) / Chart.js(图表) / idb-keyval(IndexedDB) -->
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6.2.1/dist/umd.js"></script>
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 80% 2%, color-mix(in oklch, var(--accent) 18%, transparent), transparent 34rem),
+        radial-gradient(circle at 10% 18%, color-mix(in oklch, var(--accent-2) 16%, transparent), transparent 30rem),
+        linear-gradient(180deg, oklch(10% 0.024 238), var(--bg) 40rem);
+      color: var(--fg);
+      font-family: var(--font-body);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: geometricPrecision;
+    }
 
-<style>
-  :root {
-    --brand: #00514b;
-    --brand-container: #0d6b64;
-    --brand-soft: #a2f1e7;
-    --secondary: #00658e;
-    --bg: #f6f8fb;
-    --surface: #ffffff;
-    --surface-low: #eff4ff;
-    --line: #dbe4ef;
-    --line-strong: #cbd5e1;
-    --text: #0b1c30;
-    --muted: #64748b;
-  }
-  html, body { height: 100%; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-    font-size: 14px;
-    letter-spacing: 0;
-  }
-  .material-symbols-outlined {
-    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
-    line-height: 1;
-  }
-  .brand-bg { background: var(--brand-container); }
-  .brand-text { color: var(--brand); }
-  .nav-item {
-    border-radius: 8px;
-    color: #9fb0c7;
-    transition: background .18s ease, color .18s ease, border-color .18s ease;
-    border: 1px solid transparent;
-  }
-  .nav-item:hover { background: rgba(15, 23, 42, .62); color: #f8fafc; border-color: rgba(148, 163, 184, .18); }
-  .nav-item.active {
-    background: #0f766e;
-    color: #fff;
-    border-color: rgba(153, 246, 228, .32);
-  }
-  .nav-section-title {
-    color: #64748b;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: .08em;
-    padding: 0 12px;
-    margin: 14px 0 6px;
-  }
-  .sidebar-stat {
-    border: 1px solid rgba(148, 163, 184, .16);
-    background: rgba(15, 23, 42, .42);
-    border-radius: 10px;
-  }
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-  }
-  .table-fixed th {
-    position: sticky;
-    top: 0;
-    background: #f8fafc;
-    z-index: 1;
-    color: #64748b;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: .05em;
-  }
-  .scroll-y { overflow-y: auto; }
-  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
-  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
-  .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-  .scroll-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-  .badge-green { background: #dcfce7; color: #166534; }
-  .badge-blue { background: #dbeafe; color: #1e40af; }
-  .badge-yellow { background: #fef3c7; color: #92400e; }
-  .badge-gray { background: #e2e8f0; color: #475569; }
-  .modal-mask { background: rgba(15,23,42,0.45); backdrop-filter: blur(3px); }
-  .kbd { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 1px 6px; border: 1px solid #d1d5db; border-bottom-width: 2px; border-radius: 4px; background: #fff; }
-  .tab-active { border-bottom: 2px solid var(--brand); color: var(--brand); font-weight: 600; }
-  .tabular-nums, .font-data, input[type="number"] { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
-  input, select, textarea {
-    border-color: var(--line-strong) !important;
-    border-radius: 8px !important;
-  }
-  input:focus, select:focus, textarea:focus {
-    outline: none !important;
-    border-color: var(--brand) !important;
-    box-shadow: 0 0 0 3px rgba(10, 182, 253, .16) !important;
-  }
-  button { border-radius: 8px; transition: background .18s ease, color .18s ease, border-color .18s ease, transform .12s ease; }
-  button:active { transform: translateY(1px); }
-  details > summary { list-style: none; cursor: pointer; }
-  details > summary::-webkit-details-marker { display: none; }
-  details[open] > summary .chev { transform: rotate(90deg); }
-  .chev { transition: transform .15s; }
-  .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
-  .ai-bubble-user { background: var(--brand-container); color: #fff; }
-  .ai-bubble-assistant { background: #f1f5f9; color: #0f172a; }
-  .app-shell { width: 100%; box-sizing: border-box; transition: padding-right .18s ease; }
-  body.ai-open .app-shell { padding-right: 360px; }
-  .ai-drawer {
-    width: 360px;
-    transform: translateX(100%);
-    transition: transform .18s ease;
-  }
-  body.ai-open .ai-drawer { transform: translateX(0); }
-  .ai-hint-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-  }
-  @media (max-width: 1100px) {
-    body.ai-open .app-shell { padding-right: 0; }
-    .ai-drawer { width: min(360px, calc(100vw - 24px)); }
-  }
-</style>
+    a { color: inherit; text-decoration: none; }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .62; }
+    :focus-visible {
+      outline: 2px solid color-mix(in oklch, var(--accent) 88%, white);
+      outline-offset: 3px;
+    }
+    ::selection { background: color-mix(in oklch, var(--accent) 35%, transparent); color: var(--fg); }
+
+    .page-shell {
+      min-height: 100dvh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .page-shell::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(to bottom, black, transparent 70%);
+      opacity: .65;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      background: color-mix(in oklch, var(--bg) 86%, transparent);
+      backdrop-filter: blur(18px);
+    }
+
+    .nav-inner {
+      max-width: var(--max);
+      margin: 0 auto;
+      min-height: 68px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 22px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border: 1px solid color-mix(in oklch, var(--accent) 55%, var(--border));
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: color-mix(in oklch, var(--accent) 11%, var(--surface));
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: .06em;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      color: var(--muted);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .nav-links a:hover { color: var(--fg); }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      white-space: nowrap;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      min-height: 42px;
+      border-radius: 999px;
+      padding: 0 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--fg);
+      background: rgba(255,255,255,.035);
+      transition: transform .18s var(--ease-out-expo), background .18s var(--ease-out-expo), border-color .18s var(--ease-out-expo), box-shadow .18s var(--ease-out-expo);
+      font-size: 14px;
+      font-weight: 560;
+      letter-spacing: .02em;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+      box-shadow: 0 14px 30px rgba(0,0,0,.22);
+    }
+    .btn:active { transform: translateY(0) scale(.98); }
+    .btn.loading {
+      pointer-events: none;
+      color: transparent;
+      position: relative;
+    }
+    .btn.loading::after {
+      content: "";
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      color: oklch(13% 0.018 238);
+      animation: spin .8s linear infinite;
+    }
+    .btn.primary {
+      border-color: color-mix(in oklch, var(--accent) 65%, var(--border));
+      background: var(--accent);
+      color: oklch(13% 0.018 238);
+      box-shadow: 0 0 0 1px rgba(255,255,255,.08) inset;
+    }
+
+    main { position: relative; z-index: 1; }
+    section {
+      padding: 92px clamp(18px, 3vw, 48px);
+      position: relative;
+    }
+    .wrap {
+      width: min(var(--max), calc(100vw - clamp(36px, 6vw, 96px)));
+      margin: 0 auto;
+    }
+
+    .hero {
+      min-height: calc(100dvh - 68px);
+      display: grid;
+      align-items: center;
+      padding-top: clamp(64px, 8vw, 118px);
+      padding-bottom: clamp(58px, 8vw, 104px);
+      position: relative;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: -14% -8% auto;
+      height: 72%;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 72% 46%, color-mix(in oklch, var(--accent) 22%, transparent), transparent 24rem),
+        radial-gradient(circle at 34% 34%, color-mix(in oklch, var(--accent-2) 20%, transparent), transparent 28rem);
+      filter: blur(10px);
+      opacity: .9;
+      z-index: -2;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(115deg, transparent 0 46%, rgba(255,255,255,.08) 48%, transparent 51% 100%),
+        linear-gradient(180deg, transparent, var(--bg) 92%);
+      mix-blend-mode: screen;
+      opacity: .32;
+      transform: translateX(-22%);
+      animation: scanSweep 8s var(--ease-out-expo) infinite;
+      z-index: -1;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: clamp(34px, 5vw, 58px);
+      align-items: center;
+      position: relative;
+    }
+
+    .kicker {
+      width: fit-content;
+      margin-bottom: 18px;
+      padding: 7px 10px;
+      border: 1px solid color-mix(in oklch, var(--accent) 40%, var(--border));
+      border-radius: 999px;
+      color: var(--accent);
+      background: color-mix(in oklch, var(--accent) 9%, transparent);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 {
+      font-family: var(--font-display);
+      margin: 0;
+      letter-spacing: -0.02em;
+      line-height: 1.06;
+    }
+
+    h1 {
+      font-size: clamp(54px, 8.2vw, 118px);
+      max-width: 12.8ch;
+      letter-spacing: -0.035em;
+    }
+
+    .hero-lede {
+      margin: 22px 0 28px;
+      max-width: 58ch;
+      color: var(--muted);
+      font-size: clamp(18px, 1.6vw, 22px);
+      line-height: 1.58;
+    }
+
+    .hero-cta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .trust-strip {
+      margin-top: 34px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      max-width: 760px;
+    }
+
+    .trust-item {
+      border: 1px solid rgba(255,255,255,.08);
+      background: color-mix(in oklch, var(--surface) 56%, transparent);
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      min-height: 70px;
+      backdrop-filter: blur(12px);
+    }
+
+    .hero-stage {
+      min-height: clamp(390px, 46vw, 610px);
+      position: relative;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 28px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 48%, color-mix(in oklch, var(--accent) 14%, transparent), transparent 18rem),
+        linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.018));
+      box-shadow: 0 34px 110px rgba(0,0,0,.48);
+      contain: paint;
+      will-change: transform, opacity;
+    }
+
+    .hero-asset {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: .78;
+      filter: saturate(1.08) contrast(1.08);
+      transform: translate3d(0, var(--asset-y, 0px), 0) scale(1.045);
+      pointer-events: none;
+      user-select: none;
+      will-change: transform;
+    }
+
+    .hero-stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+      background-size: 36px 36px;
+      mask-image: radial-gradient(circle at 52% 52%, black, transparent 72%);
+      animation: gridDrift 18s linear infinite;
+      z-index: 1;
+    }
+
+    .hero-stage::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(transparent 50%, rgba(255,255,255,.035) 50%) 0 0 / 100% 6px,
+        radial-gradient(circle at 50% 50%, transparent 0 42%, rgba(0,0,0,.46) 76% 100%);
+      opacity: .48;
+      pointer-events: none;
+      z-index: 6;
+    }
+
+    .hero-word {
+      position: absolute;
+      left: 5%;
+      bottom: -7%;
+      z-index: 1;
+      color: rgba(255,255,255,.052);
+      font-family: var(--font-mono);
+      font-size: clamp(58px, 11vw, 150px);
+      line-height: .82;
+      letter-spacing: -.08em;
+      font-weight: 800;
+      text-transform: uppercase;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .engine-orbit {
+      position: absolute;
+      inset: 9% 11%;
+      z-index: 3;
+      display: grid;
+      place-items: center;
+    }
+
+    .orbit-ring {
+      position: absolute;
+      border: 1px solid rgba(255,255,255,.13);
+      border-radius: 50%;
+      transform: rotateX(64deg) rotateZ(var(--tilt));
+      box-shadow: 0 0 34px color-mix(in oklch, var(--accent) 16%, transparent);
+    }
+
+    .orbit-ring:nth-child(1) { width: 88%; aspect-ratio: 1; --tilt: -18deg; animation: orbitSpin 18s linear infinite; }
+    .orbit-ring:nth-child(2) { width: 66%; aspect-ratio: 1; --tilt: 24deg; animation: orbitSpin 13s linear infinite reverse; }
+    .orbit-ring:nth-child(3) { width: 44%; aspect-ratio: 1; --tilt: 68deg; animation: orbitSpin 9s linear infinite; }
+
+    .engine-core {
+      position: relative;
+      width: clamp(138px, 18vw, 238px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle, color-mix(in oklch, var(--accent) 24%, transparent) 0 32%, rgba(255,255,255,.08) 34%, transparent 35%),
+        conic-gradient(from 140deg, var(--accent), var(--accent-2), var(--violet), var(--accent));
+      box-shadow:
+        0 0 54px color-mix(in oklch, var(--accent) 35%, transparent),
+        inset 0 0 70px rgba(0,0,0,.48);
+      animation: corePulse 4s var(--ease-out-expo) infinite;
+    }
+
+    .engine-core::after {
+      content: "COST\A ENGINE";
+      white-space: pre;
+      text-align: center;
+      color: var(--fg);
+      font-family: var(--font-mono);
+      font-size: clamp(12px, 1.4vw, 16px);
+      letter-spacing: .1em;
+      line-height: 1.35;
+      text-transform: uppercase;
+    }
+
+    .node {
+      position: absolute;
+      z-index: 4;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 22px var(--accent);
+      animation: nodeBlink 2.6s ease-in-out infinite;
+    }
+
+    .node:nth-of-type(1) { left: 17%; top: 28%; animation-delay: .1s; }
+    .node:nth-of-type(2) { left: 74%; top: 18%; background: var(--accent-2); box-shadow: 0 0 22px var(--accent-2); animation-delay: .55s; }
+    .node:nth-of-type(3) { left: 80%; top: 65%; animation-delay: .9s; }
+    .node:nth-of-type(4) { left: 28%; top: 74%; background: var(--steel); box-shadow: 0 0 22px var(--steel); animation-delay: 1.2s; }
+
+    .signal-card {
+      position: absolute;
+      z-index: 5;
+      width: min(295px, 34vw);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 16px;
+      padding: 14px;
+      background: rgba(8,14,20,.72);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 22px 58px rgba(0,0,0,.38);
+    }
+
+    .signal-card strong {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .signal-card span {
+      display: block;
+      color: var(--fg);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+    .signal-card span span { display: inline; }
+
+    .signal-card.top { top: 9%; right: 7%; }
+    .signal-card.bottom { left: 7%; bottom: 11%; }
+
+    .hero-records {
+      position: absolute;
+      right: 7%;
+      bottom: 10%;
+      z-index: 5;
+      width: min(380px, 42vw);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 18px;
+      overflow: hidden;
+      background: rgba(7,12,18,.76);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 26px 70px rgba(0,0,0,.42);
+      will-change: transform, opacity;
+    }
+
+    .hero-records .table-head { background: rgba(255,255,255,.035); }
+    .hero-records .cost-row { grid-template-columns: 1.15fr .7fr .7fr .65fr; }
+    .hero-records .insight-list {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 12px 14px 14px;
+      border-top: 1px solid rgba(255,255,255,.07);
+    }
+    .hero-records .insight-list div {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 999px;
+      padding: 5px 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .engine-actions {
+      position: absolute;
+      left: 7%;
+      top: 11%;
+      z-index: 5;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      max-width: 420px;
+    }
+
+    .engine-actions .chip {
+      min-height: 36px;
+      backdrop-filter: blur(12px);
+    }
+
+    .hero-metrics {
+      position: absolute;
+      left: 7%;
+      right: 7%;
+      bottom: 5%;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      transform: translateY(100%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .hero-metrics .trust-item { min-height: 64px; }
+
+    .trust-item strong {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--fg);
+      letter-spacing: .01em;
+    }
+
+    .trust-item span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chip {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 999px;
+      background: rgba(255,255,255,.035);
+      color: var(--muted);
+      padding: 8px 11px;
+      min-height: 38px;
+      font-size: 12px;
+      transition: transform .18s var(--ease-out-expo), color .18s var(--ease-out-expo), border-color .18s var(--ease-out-expo), background .18s var(--ease-out-expo);
+    }
+
+    .chip:hover {
+      color: var(--fg);
+      border-color: color-mix(in oklch, var(--accent) 42%, var(--border));
+      transform: translateY(-1px);
+    }
+    .chip:active { transform: translateY(0) scale(.98); }
+
+    .chip.active {
+      color: oklch(13% 0.018 238);
+      background: var(--accent);
+      border-color: transparent;
+      font-weight: 650;
+    }
+
+    .table-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 14px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .cost-row {
+      display: grid;
+      grid-template-columns: 1.15fr .7fr .7fr .65fr;
+      gap: 12px;
+      align-items: center;
+      padding: 13px 14px;
+      border-bottom: 1px solid rgba(255,255,255,.065);
+      font-size: 13px;
+    }
+
+    .cost-row:last-child { border-bottom: 0; }
+    .cost-row.header {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      background: rgba(255,255,255,.025);
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .status {
+      width: fit-content;
+      border: 1px solid color-mix(in oklch, var(--success) 45%, transparent);
+      color: var(--success);
+      background: color-mix(in oklch, var(--success) 10%, transparent);
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+    }
+
+    .status.warn {
+      color: var(--warn);
+      border-color: color-mix(in oklch, var(--warn) 45%, transparent);
+      background: color-mix(in oklch, var(--warn) 10%, transparent);
+    }
+
+    .insight-list {
+      display: grid;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .section-heading {
+      display: grid;
+      gap: 14px;
+      margin-bottom: 34px;
+      max-width: 760px;
+    }
+
+    .section-heading.center {
+      text-align: center;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    h2 { font-size: clamp(34px, 4vw, 54px); }
+    .section-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 17px;
+      max-width: 65ch;
+    }
+
+    #problem,
+    #model,
+    #scenario,
+    #workflow,
+    .cta-band {
+      position: relative;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    #model::before,
+    #scenario::before,
+    #workflow::before,
+    .cta-band::before {
+      content: "";
+      position: absolute;
+      inset: 8% 0;
+      pointer-events: none;
+      z-index: -2;
+      opacity: .72;
+      mask-image: linear-gradient(90deg, transparent, #000 10% 90%, transparent);
+    }
+
+    #model::before {
+      background:
+        radial-gradient(circle at 18% 30%, rgba(77, 143, 255, .14), transparent 28rem),
+        linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+      background-size: 100% 100%, 64px 64px, 64px 64px;
+    }
+
+    #scenario::before {
+      background:
+        radial-gradient(circle at 74% 20%, rgba(107, 255, 198, .13), transparent 30rem),
+        radial-gradient(circle at 18% 78%, rgba(77, 143, 255, .09), transparent 26rem),
+        repeating-linear-gradient(115deg, rgba(255,255,255,.032) 0 1px, transparent 1px 18px);
+    }
+
+    #workflow::before {
+      background:
+        linear-gradient(90deg, transparent, rgba(107, 255, 198, .1), transparent),
+        radial-gradient(circle at 50% 52%, rgba(107, 255, 198, .12), transparent 34rem);
+    }
+
+    .cta-band::before {
+      inset: 0;
+      background:
+        radial-gradient(circle at 68% 42%, rgba(107, 255, 198, .18), transparent 30rem),
+        radial-gradient(circle at 20% 70%, rgba(77, 143, 255, .12), transparent 26rem),
+        linear-gradient(180deg, transparent, rgba(255,255,255,.035), transparent);
+      opacity: .9;
+    }
+
+    #problem::before {
+      content: "";
+      position: absolute;
+      inset: 6% 6% 2%;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(107, 255, 198, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(107, 255, 198, .045) 1px, transparent 1px),
+        radial-gradient(circle at 22% 36%, rgba(107, 255, 198, .16), transparent 28rem),
+        radial-gradient(circle at 76% 58%, rgba(77, 143, 255, .12), transparent 24rem);
+      background-size: 54px 54px, 54px 54px, 100% 100%, 100% 100%;
+      mask-image: radial-gradient(ellipse at center, #000 0 58%, transparent 86%);
+      opacity: .62;
+      z-index: -2;
+      animation: problemGridDrift 18s linear infinite;
+    }
+
+    #problem::after {
+      content: "";
+      position: absolute;
+      inset: 14% 10%;
+      pointer-events: none;
+      background:
+        linear-gradient(106deg, transparent 0 38%, rgba(107, 255, 198, .16) 45%, transparent 53% 100%),
+        linear-gradient(180deg, transparent, rgba(107, 255, 198, .075), transparent);
+      mix-blend-mode: screen;
+      opacity: .42;
+      transform: translateX(-30%);
+      z-index: -1;
+      animation: problemScan 9s var(--ease-out-expo) infinite;
+    }
+
+    .problem-grid {
+      display: grid;
+      grid-template-columns: minmax(360px, .82fr) minmax(0, 1.45fr);
+      gap: 18px;
+      align-items: stretch;
+      position: relative;
+      width: 100%;
+      max-width: min(1680px, calc(100vw - clamp(36px, 6vw, 96px)));
+      margin-inline: auto;
+      padding: 22px;
+      border: 1px solid rgba(255,255,255,.055);
+      border-radius: 32px;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.045), rgba(255,255,255,.012)),
+        radial-gradient(circle at 12% 18%, rgba(107, 255, 198, .08), transparent 22rem);
+      box-shadow: 0 30px 90px rgba(0,0,0,.24);
+    }
+
+    .problem-grid::before,
+    .problem-grid::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
+      border: 1px solid rgba(107, 255, 198, .36);
+      width: 74px;
+      height: 74px;
+      opacity: .75;
+    }
+
+    .problem-grid::before {
+      top: -1px;
+      left: -1px;
+      border-right: 0;
+      border-bottom: 0;
+      border-radius: 32px 0 0;
+    }
+
+    .problem-grid::after {
+      right: -1px;
+      bottom: -1px;
+      border-left: 0;
+      border-top: 0;
+      border-radius: 0 0 32px;
+    }
+
+    .problem-statement {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 18px;
+      padding: 30px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.025)),
+        radial-gradient(circle at 86% 14%, rgba(107, 255, 198, .12), transparent 18rem);
+      box-shadow: 0 1px 0 rgba(255,255,255,.06) inset;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .problem-statement::after {
+      content: "";
+      position: absolute;
+      inset: auto 28px 24px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(107, 255, 198, .72), transparent);
+      opacity: .42;
+      animation: problemPulse 3.8s var(--ease-out-expo) infinite;
+    }
+
+    .problem-statement p {
+      margin: 18px 0 0;
+      color: var(--muted);
+    }
+
+    .friction-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .friction-card {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: var(--radius);
+      padding: 20px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.052), rgba(255,255,255,.022)),
+        radial-gradient(circle at 12% 10%, rgba(107, 255, 198, .09), transparent 13rem);
+      box-shadow: 0 1px 0 rgba(255,255,255,.045) inset;
+      position: relative;
+      overflow: hidden;
+      transition: transform .24s var(--ease-out-expo), border-color .24s var(--ease-out-expo), background .24s var(--ease-out-expo);
+    }
+
+    .friction-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(90deg, transparent, rgba(107, 255, 198, .18), transparent),
+        repeating-linear-gradient(180deg, rgba(255,255,255,.035) 0 1px, transparent 1px 9px);
+      opacity: .18;
+      transform: translateX(-62%);
+      animation: cardDataSweep 6.5s var(--ease-out-expo) infinite;
+    }
+
+    .friction-card:nth-child(2)::before { animation-delay: .7s; }
+    .friction-card:nth-child(3)::before { animation-delay: 1.4s; }
+    .friction-card:nth-child(4)::before { animation-delay: 2.1s; }
+
+    .friction-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(107, 255, 198, .28);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.027)),
+        radial-gradient(circle at 12% 10%, rgba(107, 255, 198, .13), transparent 14rem);
+    }
+
+    .friction-card h3 {
+      font-size: 18px;
+      letter-spacing: -0.01em;
+      margin-bottom: 10px;
+    }
+
+    .friction-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .data-model {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+    }
+
+    .model-card {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 22px;
+      min-height: 260px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .model-card:nth-child(2) { background: color-mix(in oklch, var(--accent-2) 9%, var(--surface)); }
+    .model-card:nth-child(3) { background: color-mix(in oklch, var(--accent) 8%, var(--surface)); }
+
+    .model-index {
+      font-family: var(--font-mono);
+      color: var(--accent);
+      font-size: 12px;
+      letter-spacing: .08em;
+      margin-bottom: 28px;
+    }
+
+    .model-card h3 { font-size: 23px; margin-bottom: 12px; }
+    .model-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .model-tags {
+      margin-top: auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      padding-top: 24px;
+    }
+
+    .model-tags span {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 999px;
+      padding: 6px 8px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .scenario-panel {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.02));
+      overflow: hidden;
+    }
+
+    .scenario-controls {
+      display: flex;
+      gap: 8px;
+      padding: 16px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      overflow-x: auto;
+    }
+
+    .scenario-body {
+      display: grid;
+      grid-template-columns: .92fr 1.08fr;
+      gap: 18px;
+      padding: 22px;
+    }
+
+    .scenario-copy h3 { font-size: 30px; margin-bottom: 14px; }
+    .scenario-copy p { color: var(--muted); margin: 0 0 20px; }
+
+    .quote-box {
+      border-left: 2px solid var(--accent);
+      padding: 4px 0 4px 16px;
+      color: var(--fg);
+      font-size: 17px;
+      max-width: 36ch;
+    }
+
+    .evidence-box {
+      display: grid;
+      gap: 10px;
+    }
+
+    .evidence-row {
+      display: grid;
+      grid-template-columns: 110px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,.09);
+      border-radius: 12px;
+      background: rgba(0,0,0,.16);
+      font-size: 13px;
+    }
+
+    .evidence-row .label {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      counter-reset: step;
+    }
+
+    .workflow-card {
+      counter-increment: step;
+      border-top: 1px solid rgba(255,255,255,.13);
+      padding: 18px 12px 0 0;
+      min-height: 190px;
+    }
+
+    .workflow-card::before {
+      content: "0" counter(step);
+      display: block;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      letter-spacing: .08em;
+      margin-bottom: 34px;
+    }
+
+    .workflow-card h3 { font-size: 20px; margin-bottom: 10px; }
+    .workflow-card p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    .cta-band {
+      padding-top: 60px;
+    }
+
+    .cta-panel {
+      border: 1px solid color-mix(in oklch, var(--accent) 32%, var(--border));
+      border-radius: 24px;
+      padding: 34px;
+      background:
+        linear-gradient(135deg, color-mix(in oklch, var(--accent) 12%, transparent), transparent 46%),
+        var(--surface);
+      display: grid;
+      grid-template-columns: 1fr 410px;
+      gap: 32px;
+      align-items: start;
+    }
+
+    .cta-panel h2 { margin-bottom: 14px; }
+    .cta-panel p { color: var(--muted); max-width: 62ch; margin: 0; }
+
+    .contact-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 24px;
+      max-width: 560px;
+    }
+
+    .contact-list div {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      color: color-mix(in oklch, var(--fg) 82%, var(--muted));
+      font-size: 14px;
+    }
+
+    .contact-list div::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      margin-top: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 18px color-mix(in oklch, var(--accent) 70%, transparent);
+      flex: 0 0 auto;
+    }
+
+    .wechat-card {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 18px;
+      padding: 18px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.025)),
+        rgba(0,0,0,.18);
+      display: grid;
+      grid-template-columns: 168px 1fr;
+      gap: 18px;
+      align-items: center;
+      box-shadow: 0 1px 0 rgba(255,255,255,.05) inset;
+    }
+
+    .qr-frame {
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 16px;
+      padding: 10px;
+      background: #fff;
+      box-shadow: 0 18px 44px rgba(0,0,0,.28);
+    }
+
+    .qr-frame img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 10px;
+    }
+
+    .wechat-meta {
+      min-width: 0;
+    }
+
+    .author-label {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid color-mix(in oklch, var(--accent) 38%, var(--border));
+      border-radius: 999px;
+      background: color-mix(in oklch, var(--accent) 11%, transparent);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: .04em;
+    }
+
+    .wechat-meta h3 {
+      margin: 14px 0 8px;
+      font-size: 25px;
+      letter-spacing: -.02em;
+    }
+
+    .wechat-meta p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+      margin: 0;
+    }
+
+    .wechat-note {
+      margin-top: 16px;
+      border-top: 1px solid rgba(255,255,255,.1);
+      padding-top: 14px;
+      color: color-mix(in oklch, var(--fg) 86%, var(--muted));
+      font-size: 13px;
+    }
+
+    .drawer {
+      position: fixed;
+      inset: auto 22px 22px auto;
+      width: min(420px, calc(100vw - 44px));
+      border: 1px solid rgba(255,255,255,.13);
+      border-radius: 18px;
+      background: color-mix(in oklch, var(--surface) 94%, black);
+      box-shadow: 0 24px 70px rgba(0,0,0,.45);
+      z-index: 80;
+      transform: translateY(18px);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform .22s ease, opacity .22s ease;
+    }
+
+    .drawer.open {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .drawer-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+
+    .drawer-head strong { font-size: 15px; }
+    .drawer-head button {
+      border: 1px solid rgba(255,255,255,.12);
+      background: transparent;
+      color: var(--fg);
+      border-radius: 9px;
+      width: 32px;
+      height: 32px;
+    }
+    .drawer-head button:hover { background: rgba(255,255,255,.08); }
+
+    .drawer-body {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .footer {
+      border-top: 1px solid rgba(255,255,255,.08);
+      padding: 32px 24px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer-inner {
+      max-width: var(--max);
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    [data-reveal] {
+      opacity: 0;
+      transform: translate3d(0, var(--reveal-y, 16px), 0);
+      transition:
+        opacity .62s var(--ease-out-expo) var(--reveal-delay, 0ms),
+        transform .62s var(--ease-out-expo) var(--reveal-delay, 0ms);
+      will-change: transform, opacity;
+    }
+
+    [data-reveal].visible {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+
+    .hero-copy .kicker { --reveal-delay: 70ms; --reveal-y: 10px; }
+    .hero-copy h1 { --reveal-delay: 140ms; --reveal-y: 18px; }
+    .hero-copy .hero-lede { --reveal-delay: 220ms; --reveal-y: 18px; }
+    .hero-copy .hero-cta { --reveal-delay: 300ms; --reveal-y: 14px; }
+    .hero-copy .trust-strip { --reveal-delay: 380ms; --reveal-y: 14px; }
+
+    .hero-stage[data-reveal] {
+      --reveal-y: 24px;
+      --reveal-delay: 240ms;
+      transform: translate3d(0, calc(var(--stage-y, 0px) + var(--reveal-y)), 0) scale(.985);
+    }
+
+    .hero-stage[data-reveal].visible {
+      transform: translate3d(0, var(--stage-y, 0px), 0) scale(1);
+    }
+
+    .hero-stage.is-refreshing .engine-core {
+      animation: corePulse 4s var(--ease-out-expo) infinite, matchPop .42s var(--ease-out-expo);
+    }
+
+    .hero-stage.is-refreshing .hero-records,
+    .scenario-panel.is-refreshing .evidence-box {
+      animation: refreshLift .42s var(--ease-out-expo);
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes scanSweep {
+      0%, 58% { transform: translateX(-28%); opacity: .18; }
+      74% { transform: translateX(24%); opacity: .42; }
+      100% { transform: translateX(28%); opacity: .18; }
+    }
+
+    @keyframes gridDrift {
+      to { background-position: 72px 72px; }
+    }
+
+    @keyframes orbitSpin {
+      to { rotate: 360deg; }
+    }
+
+    @keyframes corePulse {
+      0%, 100% { transform: scale(1); filter: saturate(1); }
+      50% { transform: scale(1.035); filter: saturate(1.28); }
+    }
+
+    @keyframes nodeBlink {
+      0%, 100% { opacity: .45; transform: scale(.82); }
+      50% { opacity: 1; transform: scale(1.35); }
+    }
+
+    @keyframes matchPop {
+      0% { transform: scale(1); }
+      42% { transform: scale(1.08); filter: saturate(1.45); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes refreshLift {
+      0% { opacity: .62; transform: translate3d(0, 10px, 0) scale(.985); }
+      100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+    }
+
+    @keyframes problemGridDrift {
+      to { background-position: 54px 54px, 54px 54px, 0 0, 0 0; }
+    }
+
+    @keyframes problemScan {
+      0%, 52% { opacity: .22; transform: translateX(-34%); }
+      72% { opacity: .55; transform: translateX(18%); }
+      100% { opacity: .24; transform: translateX(34%); }
+    }
+
+    @keyframes problemPulse {
+      0%, 100% { opacity: .24; transform: scaleX(.72); }
+      50% { opacity: .68; transform: scaleX(1); }
+    }
+
+    @keyframes cardDataSweep {
+      0%, 48% { opacity: .12; transform: translateX(-68%); }
+      66% { opacity: .28; transform: translateX(8%); }
+      100% { opacity: .1; transform: translateX(72%); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+      [data-reveal] { opacity: 1; transform: none; }
+      .hero-stage[data-reveal],
+      .hero-stage[data-reveal].visible,
+      .hero-asset { transform: none; }
+    }
+
+    @media (max-width: 980px) {
+      .nav-links { display: none; }
+      .hero-grid, .problem-grid, .scenario-body, .cta-panel { grid-template-columns: 1fr; }
+      .hero { min-height: auto; }
+      .hero-grid { gap: 30px; }
+      .problem-grid { padding: 18px; }
+      h1 { max-width: 12ch; }
+      .hero-stage { min-height: 540px; }
+      .signal-card { width: min(270px, 42vw); }
+      .hero-records { width: min(360px, 48vw); }
+      .data-model { grid-template-columns: 1fr; }
+      .workflow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 680px) {
+      section { padding: 72px 18px; }
+      .nav-inner { padding: 0 16px; }
+      .nav-actions .btn:not(.primary) { display: none; }
+      .brand span { max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
+      .trust-strip, .friction-list, .workflow { grid-template-columns: 1fr; }
+      .hero { padding-top: 54px; padding-bottom: 48px; }
+      #problem::before { inset: 0 -26% 0; opacity: .42; }
+      #problem::after { opacity: .2; }
+      .problem-grid {
+        max-width: none;
+        width: 100%;
+        margin-inline: 0;
+        padding: 12px;
+        border-radius: 22px;
+      }
+      .problem-grid::before { width: 48px; height: 48px; border-radius: 22px 0 0; }
+      .problem-grid::after { width: 48px; height: 48px; border-radius: 0 0 22px; }
+      .problem-statement { padding: 24px; }
+      .friction-card { padding: 18px; }
+      h1 { font-size: clamp(44px, 15vw, 68px); max-width: 9.5ch; }
+      .hero-cta .btn { width: 100%; min-height: 46px; }
+      .trust-strip { margin-top: 24px; }
+      .hero-stage { min-height: 560px; border-radius: 22px; }
+      .engine-actions { left: 18px; right: 18px; top: 18px; }
+      .engine-actions .chip, .engine-actions .btn { min-height: 44px; }
+      .engine-orbit { inset: 20% -18% 18%; }
+      .signal-card {
+        width: calc(100% - 36px);
+        left: 18px;
+        right: auto;
+      }
+      .signal-card.top { top: 100px; }
+      .signal-card.bottom { display: none; }
+      .hero-records {
+        left: 18px;
+        right: 18px;
+        bottom: 18px;
+        width: auto;
+      }
+      .hero-records .cost-row { grid-template-columns: 1fr; }
+      .cost-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+      .cost-row.header { display: none; }
+      .scenario-controls { padding-bottom: 10px; }
+      .evidence-row { grid-template-columns: 1fr; }
+      .cta-panel { padding: 22px; }
+      .hero-lede { font-size: 16px; }
+      .wechat-card { grid-template-columns: 1fr; }
+      .qr-frame { max-width: 220px; margin: 0 auto; }
+      .drawer { inset: auto 14px 14px; width: calc(100vw - 28px); }
+    }
+  </style>
 </head>
-<body class="overflow-hidden">
-
-<div class="flex h-screen app-shell">
-  <!-- 侧边栏 -->
-  <aside class="bg-slate-900 text-white w-[240px] flex flex-col flex-shrink-0 border-r border-slate-800">
-    <div class="px-5 py-5 border-b border-slate-800">
-      <div class="flex items-center gap-3">
-        <div class="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-2xl text-teal-100">S</div>
-        <div>
-          <div class="font-semibold leading-tight">工程造价数据库</div>
-          <div class="text-[11px] text-slate-400">企业定额 · 指标 · 报价</div>
+<body>
+  <div class="page-shell">
+    <nav class="nav" aria-label="主导航">
+      <div class="nav-inner">
+        <a class="brand" href="#top" aria-label="工程造价数据库首页">
+          <span class="brand-mark">EC</span>
+          <span>工程造价数据库</span>
+        </a>
+        <div class="nav-links" aria-label="页面导航">
+          <a href="#problem">客户问题</a>
+          <a href="#model">数据结构</a>
+          <a href="#scenario">行业样例</a>
+          <a href="#workflow">落地流程</a>
+        </div>
+        <div class="nav-actions">
+          <a class="btn" href="#demo">联系作者</a>
+          <a class="btn primary" href="/app/">进入系统</a>
         </div>
       </div>
-      <div class="mt-4 grid grid-cols-2 gap-2 text-[11px]">
-        <div class="sidebar-stat px-3 py-2">
-          <div class="text-slate-500">模式</div>
-          <div class="mt-0.5 font-semibold text-teal-100">本地版</div>
+    </nav>
+
+    <main id="top">
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <div class="kicker" data-reveal>Engineering Cost Intelligence</div>
+            <h1 data-reveal>工程造价数据引擎</h1>
+            <p class="hero-lede" data-reveal>
+              把分散在清单、合同、签证、审价和复盘里的历史工程，压缩成一套可检索、可追溯、可复用的组织级造价判断系统。
+            </p>
+            <div class="hero-cta" data-reveal>
+              <a class="btn primary" href="/app/">进入系统</a>
+              <a class="btn" href="#demo">联系作者</a>
+              <button class="btn" type="button" id="copyReport">复制样例报告</button>
+            </div>
+            <div class="trust-strip" data-reveal>
+              <div class="trust-item">
+                <strong>多专业</strong>
+                <span>房建、市政、机电、园区工程</span>
+              </div>
+              <div class="trust-item">
+                <strong>可追溯</strong>
+                <span>价格依据、版本、审批痕迹关联</span>
+              </div>
+              <div class="trust-item">
+                <strong>可复用</strong>
+                <span>新项目自动匹配相似历史案例</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-stage" data-reveal role="region" aria-label="工程造价数据引擎动态示意">
+            <img class="hero-asset" src="landing-assets/hero-cost-data-engine.svg" alt="" aria-hidden="true" loading="eager" decoding="async" />
+            <div class="hero-word" aria-hidden="true">COST DATA</div>
+            <div class="engine-actions" id="heroChips" role="group" aria-label="切换工程类型">
+              <button class="chip active" type="button" data-type="房建工程">房建工程</button>
+              <button class="chip" type="button" data-type="市政工程">市政工程</button>
+              <button class="chip" type="button" data-type="机电安装">机电安装</button>
+              <button class="chip" type="button" data-type="园区配套">园区配套</button>
+              <button class="btn primary" type="button" id="runQuery">运行匹配</button>
+            </div>
+            <input id="queryInput" type="hidden" value="高层住宅地下室单方造价偏高，找相似案例和复核依据" />
+            <div class="engine-orbit" aria-hidden="true">
+              <div class="orbit-ring"></div>
+              <div class="orbit-ring"></div>
+              <div class="orbit-ring"></div>
+              <div class="engine-core"></div>
+              <span class="node"></span>
+              <span class="node"></span>
+              <span class="node"></span>
+              <span class="node"></span>
+            </div>
+            <div class="signal-card top">
+              <strong>Live matching</strong>
+              <span>相似案例、价格期、工程条件与审批证据正在同屏关联。</span>
+            </div>
+            <div class="signal-card bottom">
+              <strong>Decision signal</strong>
+              <span><span id="signalType">房建</span>场景匹配置信 <span id="scoreRing">78%</span></span>
+            </div>
+            <div class="hero-records">
+              <div class="table-head"><span>Matched records</span><span id="recordCount">12 条</span></div>
+              <div class="cost-row header">
+                <span>项目 / 指标</span><span>区间</span><span>地区</span><span>状态</span>
+              </div>
+              <div id="recordRows"></div>
+              <div class="insight-list" id="insightList"></div>
+            </div>
+          </div>
         </div>
-        <div class="sidebar-stat px-3 py-2">
-          <div class="text-slate-500">数据</div>
-          <div class="mt-0.5 font-semibold text-teal-100">IndexedDB</div>
+      </section>
+
+      <section id="problem">
+        <div class="wrap problem-grid">
+          <div class="problem-statement" data-reveal>
+            <h2>造价数据不是少，是没有形成组织能力</h2>
+            <p>
+              每个项目都会留下清单、对比表、审价意见和复盘记录，但它们常散在文件夹、聊天记录和个人电脑里。真正需要决策时，团队很难快速回答：“过去类似项目怎么做、当时为什么这么判断、现在能不能复用？”
+            </p>
+          </div>
+          <div class="friction-list">
+            <div class="friction-card" data-reveal>
+              <h3>历史项目难找</h3>
+              <p>文件名、版本和专业口径不一致，检索靠人记忆，越是老项目越难还原。</p>
+            </div>
+            <div class="friction-card" data-reveal>
+              <h3>指标口径不统一</h3>
+              <p>同一类工程在不同团队里拆分口径不同，无法直接横向对比。</p>
+            </div>
+            <div class="friction-card" data-reveal>
+              <h3>判断依据断链</h3>
+              <p>最终价格留下了，但调差依据、审批意见和风险提醒没有被结构化保存。</p>
+            </div>
+            <div class="friction-card" data-reveal>
+              <h3>经验依赖个人</h3>
+              <p>成熟造价师能判断，但新人和跨区域团队无法稳定复用这些经验。</p>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-    <nav id="nav" class="flex-1 px-3 py-3 scroll-y scroll-thin"></nav>
-    <div class="px-5 py-4 text-[11px] text-slate-500 border-t border-slate-800 space-y-2">
-      <div class="flex items-center justify-between">
-        <span>运行版本</span>
-        <span class="font-data text-slate-400">v4.3</span>
-      </div>
-      <div class="flex items-center gap-2 text-slate-400">
-        <span class="pulse-dot"></span>
-        <span>浏览器本地存储</span>
-      </div>
-    </div>
-  </aside>
+      </section>
 
-  <!-- 主体 -->
-  <div class="flex-1 flex flex-col min-w-0 bg-slate-50">
-    <header class="bg-white border-b border-slate-200 h-14 px-6 flex items-center gap-3 shrink-0">
-      <div class="text-sm text-slate-500" id="crumb">仪表盘</div>
-      <div class="flex-1"></div>
-      <div class="relative">
-        <input id="globalSearch" type="text" placeholder="全局搜索：定额 / 项目 / 指标…"
-          class="w-80 pl-9 pr-3 py-2 text-sm border bg-slate-50 text-slate-800 placeholder:text-slate-400" />
-        <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
-      </div>
-      <button onclick="window.__app.openAI()" class="px-4 py-2 text-sm brand-bg text-white flex items-center gap-1.5">
-        <span class="material-symbols-outlined text-[16px]">auto_awesome</span> AI 助手
-      </button>
-      <button onclick="window.__app.exportAll()" class="p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700" title="导出备份">
-        <span class="material-symbols-outlined text-[20px]">download</span>
-      </button>
-    </header>
+      <section id="model">
+        <div class="wrap">
+          <div class="section-heading" data-reveal>
+            <h2>把工程资料拆成三层可用数据</h2>
+            <p>不是单纯上传文件，而是把项目事实、指标口径和判断证据分层沉淀，让数据库能服务真实造价决策。</p>
+          </div>
+          <div class="data-model">
+            <article class="model-card" data-reveal>
+              <div class="model-index">LAYER 01</div>
+              <h3>项目事实层</h3>
+              <p>保存项目类型、地区、规模、结构形式、合同模式、时间周期等基础条件。</p>
+              <div class="model-tags"><span>项目画像</span><span>专业分类</span><span>版本记录</span></div>
+            </article>
+            <article class="model-card" data-reveal>
+              <div class="model-index">LAYER 02</div>
+              <h3>造价指标层</h3>
+              <p>统一清单项、单方指标、材料价格、人工机械、综合单价和费用组成口径。</p>
+              <div class="model-tags"><span>单方指标</span><span>综合单价</span><span>材料价差</span></div>
+            </article>
+            <article class="model-card" data-reveal>
+              <div class="model-index">LAYER 03</div>
+              <h3>决策证据层</h3>
+              <p>关联审价意见、调差原因、签证依据、风险提示和最终采纳情况。</p>
+              <div class="model-tags"><span>审批痕迹</span><span>复核建议</span><span>经验卡片</span></div>
+            </article>
+          </div>
+        </div>
+      </section>
 
-    <main id="workspace" class="flex-1 overflow-auto scroll-thin p-6"></main>
+      <section id="scenario">
+        <div class="wrap">
+          <div class="section-heading center" data-reveal>
+            <h2>按工程场景切换样例</h2>
+            <p>点击不同专业，查看数据库如何给出可追溯的参考区间、相似项目和复核动作。</p>
+          </div>
+          <div class="scenario-panel" data-reveal>
+            <div class="scenario-controls" id="scenarioControls">
+              <button class="chip active" type="button" data-type="房建工程">房建工程</button>
+              <button class="chip" type="button" data-type="市政工程">市政工程</button>
+              <button class="chip" type="button" data-type="机电安装">机电安装</button>
+              <button class="chip" type="button" data-type="园区配套">园区配套</button>
+            </div>
+            <div class="scenario-body">
+              <div class="scenario-copy">
+                <h3 id="scenarioTitle">地下室土建指标复核</h3>
+                <p id="scenarioText">系统将项目规模、地下层数、结构形式和地区价格期关联起来，先筛出相似项目，再提示哪些清单项最可能造成偏差。</p>
+                <div class="quote-box" id="scenarioQuote">建议优先复核土方外运、支护形式和防水做法，三项通常决定地下室单方造价的主要波动。</div>
+              </div>
+              <div class="evidence-box" id="evidenceBox"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow">
+        <div class="wrap">
+          <div class="section-heading" data-reveal>
+            <h2>从资料入库到决策复用，四步落地</h2>
+            <p>适合先从一个业务线或区域试点，不要求一次性改造全部系统。</p>
+          </div>
+          <div class="workflow">
+            <article class="workflow-card" data-reveal>
+              <h3>清点数据源</h3>
+              <p>梳理现有清单、合同、结算、复盘和审批材料，先确定可入库范围。</p>
+            </article>
+            <article class="workflow-card" data-reveal>
+              <h3>统一指标口径</h3>
+              <p>按专业和项目类型建立字段映射，避免不同团队用不同口径比较。</p>
+            </article>
+            <article class="workflow-card" data-reveal>
+              <h3>结构化证据</h3>
+              <p>把关键结论、适用条件和采纳状态转成经验卡片，并保留来源链接。</p>
+            </article>
+            <article class="workflow-card" data-reveal>
+              <h3>嵌入新项目</h3>
+              <p>在估算、招采、审价和复盘节点调用相似案例，形成持续更新闭环。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta-band" id="demo">
+        <div class="wrap">
+          <div class="cta-panel" data-reveal>
+            <div>
+              <h2>联系作者</h2>
+              <p>如果你想交流工程造价数据库、指标沉淀、AI 经验萃取或项目落地方式，可以扫码添加微信。作者统一使用公开昵称“赛博土木”。</p>
+              <div class="contact-list" aria-label="可交流方向">
+                <div>讨论如何把历史项目、清单、报价版本和复盘经验整理成可复用知识库。</div>
+                <div>交流造价指标、样本可信度、证据链追溯和 AI 辅助审查的落地路径。</div>
+                <div>添加时可备注“造价数据库”，方便快速识别来意。</div>
+              </div>
+            </div>
+            <div class="wechat-card" aria-label="赛博土木微信二维码">
+              <div class="qr-frame">
+                <img src="landing-assets/wechat-cybertumu.jpg" alt="赛博土木微信二维码" loading="lazy" decoding="async" />
+              </div>
+              <div class="wechat-meta">
+                <span class="author-label">WECHAT</span>
+                <h3>赛博土木</h3>
+                <p>扫码添加微信，交流工程造价数据产品、AI 工作流和企业知识沉淀。</p>
+                <div class="wechat-note">建议备注：造价数据库</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-labelledby="drawerTitle" aria-live="polite">
+      <div class="drawer-head">
+        <strong id="drawerTitle">证据链详情</strong>
+        <button type="button" id="closeDrawer" aria-label="关闭">×</button>
+      </div>
+      <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>工程造价数据库 · 组织级造价经验沉淀工具</span>
+        <span>数据结构、检索样例和演示流程均可按团队口径调整</span>
+      </div>
+    </footer>
   </div>
-</div>
 
-<!-- 通用弹窗 -->
-<div id="modal" class="hidden fixed inset-0 z-50 modal-mask flex items-center justify-center p-6">
-  <div class="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden">
-    <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
-      <div id="modalTitle" class="font-semibold"></div>
-      <button onclick="document.getElementById('modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-1">
-        <span class="material-symbols-outlined text-[20px]">close</span>
-      </button>
-    </div>
-    <div id="modalBody" class="flex-1 overflow-auto scroll-thin p-5 bg-slate-50"></div>
-    <div id="modalFoot" class="px-5 py-4 border-t border-slate-200 flex justify-end gap-2 shrink-0 bg-white"></div>
-  </div>
-</div>
+  <script>
+    const scenarioData = {
+      "房建工程": {
+        count: "12 条",
+        signal: "房建",
+        score: "78%",
+        query: "高层住宅地下室单方造价偏高，找相似案例和复核依据",
+        rows: [
+          ["地下室土建单方指标", "参考区间", "华东", "需复核"],
+          ["支护及降水费用", "偏高项", "同地区", "预警"],
+          ["防水构造做法", "相似做法", "近两年", "可引用"]
+        ],
+        insights: ["识别 3 个主要偏差项", "建议先核查支护方案与土方外运距离", "可引用 2 个同地区相似项目"],
+        title: "地下室土建指标复核",
+        text: "系统将项目规模、地下层数、结构形式和地区价格期关联起来，先筛出相似项目，再提示哪些清单项最可能造成偏差。",
+        quote: "建议优先复核土方外运、支护形式和防水做法，三项通常决定地下室单方造价的主要波动。",
+        evidence: [
+          ["相似项目", "住宅项目 A / 地下二层 / 框剪结构", "打开"],
+          ["关键指标", "地下室土建单方、支护单方、防水单方", "打开"],
+          ["复核动作", "核查施工组织设计与清单描述是否一致", "打开"]
+        ]
+      },
+      "市政工程": {
+        count: "9 条",
+        signal: "市政",
+        score: "73%",
+        query: "城市道路改造项目，找排水和路面工程的造价对比依据",
+        rows: [
+          ["道路改造综合指标", "参考区间", "华南", "可引用"],
+          ["雨污管网迁改", "波动项", "同城市", "需复核"],
+          ["沥青面层做法", "相似做法", "近三年", "可引用"]
+        ],
+        insights: ["管线迁改是主要不确定项", "建议拆分夜间施工与交通导改费用", "可对比同城市价格期材料价"],
+        title: "道路改造指标对比",
+        text: "系统把道路等级、管线迁改、交通导改、材料价格期分开建模，避免只用单一综合指标做粗略比较。",
+        quote: "市政项目的差异常来自迁改和导改条件，数据库会把这些条件作为筛选前提，而不是只看总造价。",
+        evidence: [
+          ["相似项目", "城市主干路 B / 雨污分流 / 夜间施工", "打开"],
+          ["关键指标", "沥青面层、管网迁改、交通导改", "打开"],
+          ["复核动作", "确认迁改范围是否进入本次合同边界", "打开"]
+        ]
+      },
+      "机电安装": {
+        count: "15 条",
+        signal: "机电",
+        score: "82%",
+        query: "商业综合体机电安装费用偏高，找系统分项和设备价依据",
+        rows: [
+          ["暖通系统综合单价", "参考区间", "华东", "可引用"],
+          ["配电设备价格", "偏高项", "同价格期", "预警"],
+          ["消防系统指标", "相似系统", "近两年", "可引用"]
+        ],
+        insights: ["设备品牌档次影响最大", "建议拆分甲供与乙供边界", "可引用 4 个商业综合体样本"],
+        title: "机电系统分项追溯",
+        text: "系统按暖通、强弱电、给排水、消防等专业分项追溯，不把机电安装简单压成一个总指标。",
+        quote: "机电造价复核必须先对齐系统边界和设备品牌档次，否则综合单价比较容易误判。",
+        evidence: [
+          ["相似项目", "商业综合体 C / 18 万㎡ / 乙供设备", "打开"],
+          ["关键指标", "暖通、电气、消防、给排水分项", "打开"],
+          ["复核动作", "拆分设备价、安装费和调试费口径", "打开"]
+        ]
+      },
+      "园区配套": {
+        count: "7 条",
+        signal: "园区",
+        score: "69%",
+        query: "产业园区配套工程，找室外管网和景观道路参考指标",
+        rows: [
+          ["室外综合管网", "参考区间", "长三角", "需复核"],
+          ["园区道路铺装", "相似做法", "同等级", "可引用"],
+          ["景观绿化工程", "波动项", "近两年", "预警"]
+        ],
+        insights: ["室外管网密度是核心变量", "建议核查红线外接驳范围", "景观档次需单独标注"],
+        title: "园区配套边界核查",
+        text: "系统把红线内外边界、管网密度、道路等级和景观档次作为关键条件，辅助判断配套工程是否漏项或高估。",
+        quote: "园区配套工程容易因为边界不清产生偏差，先对齐范围，再看指标才有意义。",
+        evidence: [
+          ["相似项目", "产业园 D / 42 公顷 / 一期配套", "打开"],
+          ["关键指标", "室外管网、园区道路、景观绿化", "打开"],
+          ["复核动作", "确认红线外接驳是否计入合同范围", "打开"]
+        ]
+      }
+    };
 
-<!-- AI 抽屉 -->
-<div id="aiDrawer" class="ai-drawer fixed right-0 top-0 bottom-0 bg-white z-40 flex flex-col border-l border-slate-200">
-  <div class="h-14 px-4 border-b border-slate-200 flex items-center justify-between shrink-0">
-    <div class="min-w-0">
-      <div class="font-semibold flex items-center gap-2">
-        <span class="material-symbols-outlined text-[18px] text-teal-700">smart_toy</span>
-        <span>AI 造价助手</span>
-      </div>
-      <div class="mt-0.5 text-[11px] text-slate-500">本地数据优先 · 不自动改清单</div>
-    </div>
-    <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1">
-      <span class="material-symbols-outlined text-[20px]">close</span>
-    </button>
-  </div>
-  <div id="aiMsgs" class="flex-1 min-h-0 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50"></div>
-  <div class="border-t border-slate-200 p-3 space-y-2 shrink-0 bg-white">
-    <div class="flex gap-2">
-      <input id="aiInput" type="text" placeholder="问点啥：5万m³/d 水池造价区间 / 推荐防水定额 …"
-        class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-teal-600" />
-      <button onclick="window.__app.sendAI()" class="px-4 py-2 text-sm brand-bg text-white">发送</button>
-    </div>
-    <div class="text-[11px] text-gray-400">提示：在「设置」中配置国内大模型 API Key。数据仅在本机与所配置 AI 间传输。</div>
-  </div>
-</div>
+    const rowsEl = document.getElementById("recordRows");
+    const insightsEl = document.getElementById("insightList");
+    const evidenceEl = document.getElementById("evidenceBox");
+    const drawer = document.getElementById("drawer");
+    const drawerTitle = document.getElementById("drawerTitle");
+    const drawerBody = document.getElementById("drawerBody");
+    const closeDrawerButton = document.getElementById("closeDrawer");
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const heroStage = document.querySelector(".hero-stage");
+    const scenarioPanel = document.querySelector(".scenario-panel");
+    const heroSection = document.querySelector(".hero");
+    let refreshTimer;
+    let lastFocusedElement = null;
 
-<!-- 应用入口（ES Module） -->
-<script type="module" src="./app.js?v=4.3"></script>
+    function openDrawer() {
+      lastFocusedElement = document.activeElement;
+      drawer.classList.add("open");
+      closeDrawerButton.focus({ preventScroll: true });
+    }
+
+    function closeDrawer() {
+      if (!drawer.classList.contains("open")) return;
+      drawer.classList.remove("open");
+      if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+        lastFocusedElement.focus({ preventScroll: true });
+      }
+    }
+
+    function setActiveButtons(type) {
+      document.querySelectorAll("[data-type]").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.type === type);
+      });
+    }
+
+    function pulseRefresh() {
+      if (motionQuery.matches) return;
+      window.clearTimeout(refreshTimer);
+      heroStage?.classList.add("is-refreshing");
+      scenarioPanel?.classList.add("is-refreshing");
+      refreshTimer = window.setTimeout(() => {
+        heroStage?.classList.remove("is-refreshing");
+        scenarioPanel?.classList.remove("is-refreshing");
+      }, 460);
+    }
+
+    function renderScenario(type, animate = true) {
+      const data = scenarioData[type] || scenarioData["房建工程"];
+      document.getElementById("queryInput").value = data.query;
+      document.getElementById("recordCount").textContent = data.count;
+      document.getElementById("signalType").textContent = data.signal;
+      document.getElementById("scoreRing").textContent = data.score;
+      document.getElementById("scenarioTitle").textContent = data.title;
+      document.getElementById("scenarioText").textContent = data.text;
+      document.getElementById("scenarioQuote").textContent = data.quote;
+      rowsEl.innerHTML = data.rows.map((row) => `
+        <div class="cost-row">
+          <span>${row[0]}</span>
+          <span class="mono">${row[1]}</span>
+          <span>${row[2]}</span>
+          <span class="status ${row[3] === "预警" || row[3] === "需复核" ? "warn" : ""}">${row[3]}</span>
+        </div>
+      `).join("");
+      insightsEl.innerHTML = data.insights.map((item) => `<div>${item}</div>`).join("");
+      evidenceEl.innerHTML = data.evidence.map((row) => `
+        <button class="evidence-row" type="button" data-detail="${row[0]}|${row[1]}|${row[2]}">
+          <span class="label">${row[0]}</span>
+          <span>${row[1]}</span>
+          <span class="status">查看</span>
+        </button>
+      `).join("");
+      setActiveButtons(type);
+      if (animate) pulseRefresh();
+    }
+
+    document.addEventListener("click", (event) => {
+      const typeButton = event.target.closest("[data-type]");
+      if (typeButton) renderScenario(typeButton.dataset.type);
+
+      const evidence = event.target.closest(".evidence-row");
+      if (evidence) {
+        const [title, body] = evidence.dataset.detail.split("|");
+        drawerTitle.textContent = title;
+        drawerBody.innerHTML = `
+          <p>${body}</p>
+          <p>这里会展示来源项目、价格期、原始文件链接、审批记录和最终采纳状态。演示版使用样例内容，实际接入时按你的字段口径配置。</p>
+        `;
+        openDrawer();
+      }
+    });
+
+    document.getElementById("runQuery").addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      button.classList.add("loading");
+      button.setAttribute("aria-busy", "true");
+      window.setTimeout(() => {
+        button.classList.remove("loading");
+        button.removeAttribute("aria-busy");
+        drawerTitle.textContent = "匹配已运行";
+        drawerBody.innerHTML = "<p>已按当前工程类型刷新相似案例。真实产品中会返回可筛选的项目、指标区间、证据来源和复核建议。</p>";
+        openDrawer();
+      }, 320);
+    });
+
+    closeDrawerButton.addEventListener("click", closeDrawer);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeDrawer();
+    });
+
+    document.getElementById("copyReport").addEventListener("click", async () => {
+      const text = "工程造价数据库样例报告：本次检索将相似项目、指标区间、偏差项和复核动作关联为一条可追溯证据链。";
+      try {
+        await navigator.clipboard.writeText(text);
+        drawerTitle.textContent = "已复制样例报告";
+        drawerBody.innerHTML = `<p>${text}</p>`;
+      } catch (_) {
+        drawerTitle.textContent = "样例报告";
+        drawerBody.innerHTML = `<p>${text}</p><p>当前环境不允许自动复制，请手动选取这段内容。</p>`;
+      }
+      openDrawer();
+    });
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) entry.target.classList.add("visible");
+      });
+    }, { threshold: 0.14 });
+    document.querySelectorAll("[data-reveal]").forEach((el) => observer.observe(el));
+
+    function setupHeroDepth() {
+      if (motionQuery.matches || !heroSection || !heroStage) return;
+      let ticking = false;
+      const update = () => {
+        ticking = false;
+        const rect = heroSection.getBoundingClientRect();
+        const progress = Math.min(1, Math.max(0, -rect.top / Math.max(1, rect.height)));
+        heroStage.style.setProperty("--stage-y", `${Math.round(progress * -18)}px`);
+        heroStage.style.setProperty("--asset-y", `${Math.round(progress * 16)}px`);
+      };
+      const requestUpdate = () => {
+        if (!ticking) {
+          ticking = true;
+          window.requestAnimationFrame(update);
+        }
+      };
+      update();
+      window.addEventListener("scroll", requestUpdate, { passive: true });
+      window.addEventListener("resize", requestUpdate);
+    }
+
+    renderScenario("房建工程", false);
+    setupHeroDepth();
+  </script>
 </body>
 </html>

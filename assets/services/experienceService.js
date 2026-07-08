@@ -20,6 +20,14 @@ const DEFAULT_QUESTIONS = [
   { id: 'boundary', label: '适用边界', prompt: '这条经验在哪些条件下不适用？' },
 ];
 
+const GAP_QUESTIONS = {
+  boundary: { id: 'followup_boundary', label: '适用边界', prompt: '这条经验在哪些项目规模、工艺或合同条件下不能直接复用？' },
+  evidence: { id: 'followup_evidence', label: '证据链', prompt: '这次判断应保留哪些证据：询价、历史版本、图纸还是质量报告？' },
+  risk: { id: 'followup_risk', label: '风险边界', prompt: '如果下次照搬这条口径，最可能在哪个环节出错？' },
+  lesson: { id: 'followup_lesson', label: '经验结论', prompt: '请把这次判断压缩成一句以后能直接复用的报价口径。' },
+  reuse: { id: 'followup_reuse', label: '复用条件', prompt: '以后遇到什么项目类型、工艺或清单特征时，可以优先引用这条经验？' },
+};
+
 export const experienceService = {
   async startReview({ projectId, versionId = '', sourceType = 'manual_review' } = {}) {
     const [project, lines, version, reports] = await Promise.all([
@@ -50,6 +58,7 @@ export const experienceService = {
       createdAt: now,
       updatedAt: now,
     };
+    session.extraction = assessExtraction(session);
     await experienceSessionRepo.upsert(session);
     return session;
   },
@@ -60,11 +69,12 @@ export const experienceService = {
     const mergedAnswers = { ...(session.answers || {}), ...answers };
     let draft = await draftWithLLM(session, mergedAnswers);
     if (!draft) draft = localDraft(session, mergedAnswers);
-    draft = normalizeDraft(draft, session);
+    draft = withExtraction(normalizeDraft(draft, session), session, mergedAnswers);
     const now = new Date().toISOString();
     await experienceSessionRepo.update(sessionId, {
       answers: mergedAnswers,
       draft,
+      extraction: draft.extraction,
       status: 'draft_ready',
       updatedAt: now,
     });
@@ -86,12 +96,15 @@ export const experienceService = {
         level: 'L2',
       }))
       .slice(0, 2);
+    const updatedQuestions = [...currentQuestions, ...followUps];
+    const extraction = assessExtraction({ ...session, questions: updatedQuestions }, mergedAnswers, session.draft);
     const now = new Date().toISOString();
     const updated = {
       ...session,
       answers: mergedAnswers,
-      questions: [...currentQuestions, ...followUps],
+      questions: updatedQuestions,
       followUpSource: followUpResult.source,
+      extraction,
       status: 'follow_up',
       updatedAt: now,
     };
@@ -99,6 +112,7 @@ export const experienceService = {
       answers: updated.answers,
       questions: updated.questions,
       followUpSource: updated.followUpSource,
+      extraction: updated.extraction,
       status: updated.status,
       updatedAt: now,
     });
@@ -108,11 +122,12 @@ export const experienceService = {
   async confirmCard(sessionId, patch = {}) {
     const session = await experienceSessionRepo.findById(sessionId);
     if (!session) throw new Error('复盘会话不存在');
-    const draft = normalizeDraft({ ...(session.draft || localDraft(session, session.answers || {})), ...patch }, session);
+    const draft = withExtraction(normalizeDraft({ ...(session.draft || localDraft(session, session.answers || {})), ...patch }, session), session, session.answers || {});
     const now = new Date().toISOString();
     const card = {
       id: uid(),
       ...knowledgeFields(draft, session),
+      ...extractionFields(draft.extraction),
       projectId: session.projectId,
       projectNameSnapshot: session.projectNameSnapshot || '',
       versionId: session.versionId || '',
@@ -129,6 +144,7 @@ export const experienceService = {
     await experienceSessionRepo.update(sessionId, {
       status: 'confirmed',
       draft,
+      extraction: draft.extraction,
       confirmedCardId: card.id,
       confirmedAt: now,
       updatedAt: now,
@@ -216,6 +232,7 @@ export const experienceService = {
       pendingSessions: sessions.filter(s => s.status !== 'confirmed'),
       expiredCards: normalizedCards.filter(c => isExpired(c, now)),
       highReuseCards: normalizedCards.filter(c => Number(c.reuseCount || 0) >= 3),
+      lowQualityCards: normalizedCards.filter(c => c.reviewStatus === 'confirmed' && Number(c.extractionScore || 0) < 70),
     };
   },
 };
@@ -326,6 +343,7 @@ context=${JSON.stringify(context)}`;
 async function followUpQuestionsWithLLM(session, answers) {
   const cfg = getAIConfig();
   if (!cfg.api_key) return null;
+  const extraction = assessExtraction(session, answers);
   const prompt = `请基于一轮报价复盘回答，继续生成 1-2 个上下文补问。只返回 JSON，不要 Markdown。
 JSON 格式：{"questions":[{"id":"snake_case","label":"不超过6个字","prompt":"具体补问"}]}
 要求：
@@ -335,7 +353,8 @@ JSON 格式：{"questions":[{"id":"snake_case","label":"不超过6个字","promp
 - 每个 prompt 不超过 60 个汉字。
 context=${JSON.stringify(session.context)}
 questions=${JSON.stringify(session.questions || [])}
-answers=${JSON.stringify(answers)}`;
+answers=${JSON.stringify(answers)}
+extraction_quality=${JSON.stringify(extraction)}`;
   try {
     const resp = await fetch(cfg.base_url.replace(/\/$/, '') + '/chat/completions', {
       method: 'POST',
@@ -361,18 +380,12 @@ answers=${JSON.stringify(answers)}`;
 }
 
 function buildLocalFollowUps(session, answers) {
-  const intents = pickAnswersByIntent(session.questions || [], answers || {});
-  const questions = [];
-  if (!intents.boundary) {
-    questions.push({ id: 'followup_boundary', label: '适用边界', prompt: '这条经验在哪些项目规模、工艺或合同条件下不能直接复用？' });
-  }
-  if (!hasEvidenceAnswer(session.questions || [], answers || {})) {
-    questions.push({ id: 'followup_evidence', label: '证据链', prompt: '这次判断应保留哪些证据：询价、历史版本、图纸还是质量报告？' });
-  }
-  if (!intents.risk) {
-    questions.push({ id: 'followup_risk', label: '风险边界', prompt: '如果下次照搬这条口径，最可能在哪个环节出错？' });
-  }
-  return questions.slice(0, 2);
+  const extraction = assessExtraction(session, answers);
+  const gaps = new Map((extraction.gaps || []).map(gap => [gap.key, gap]));
+  return ['boundary', 'evidence', 'risk', 'lesson', 'reuse']
+    .map(key => gaps.get(key)?.question)
+    .filter(Boolean)
+    .slice(0, 2);
 }
 
 function normalizeQuestions(questions, min = 3, max = 6) {
@@ -391,10 +404,13 @@ function normalizeQuestions(questions, min = 3, max = 6) {
 async function draftWithLLM(session, answers) {
   const cfg = getAIConfig();
   if (!cfg.api_key) return null;
+  const extraction = assessExtraction(session, answers);
   const prompt = `请把以下工程造价报价复盘整理成一张 JSON 经验卡。只返回 JSON，不要 Markdown。
 字段：title, category, tags, trigger, evidence, lesson, applicability, risks, expiresAt, confidence。
+要求：必须补足可复用结论、证据来源、适用边界、风险提示、有效期和可信度；对缺口不要编造，应用“需复核”表达。
 context=${JSON.stringify(session.context)}
-answers=${JSON.stringify(answers)}`;
+answers=${JSON.stringify(answers)}
+extraction_quality=${JSON.stringify(extraction)}`;
   try {
     const resp = await fetch(cfg.base_url.replace(/\/$/, '') + '/chat/completions', {
       method: 'POST',
@@ -498,6 +514,148 @@ function normalizeDraft(draft, session) {
   };
 }
 
+function withExtraction(draft, session, answers = {}) {
+  const extraction = assessExtraction(session, answers, draft);
+  return {
+    ...draft,
+    ...extractionFields(extraction),
+  };
+}
+
+function extractionFields(extraction) {
+  const normalized = normalizeExtraction(extraction);
+  return {
+    extraction: normalized,
+    extractionScore: normalized.score,
+    extractionLevel: normalized.level,
+    extractionGaps: normalized.gaps,
+    extractionChecks: normalized.checks,
+    extractionSummary: normalized.summary,
+  };
+}
+
+function assessExtraction(session = {}, answers = {}, draft = null) {
+  const ctx = session.context || {};
+  const project = ctx.project || {};
+  const questions = session.questions || [];
+  const intents = pickAnswersByIntent(questions, answers || {});
+  const allAnswers = Object.values(answers || {}).map(v => String(v || '').trim()).filter(Boolean).join('\n');
+  const contextRiskCount = Number(ctx.missingPriceCount || 0) + Number(ctx.zeroQtyCount || 0) + Number(ctx.factorRiskCount || 0) + Number(ctx.unmatchedQuotaCount || 0);
+  const hasContextFacts = Boolean(project.name || session.projectNameSnapshot || ctx.lineCount || ctx.topCategories?.length || ctx.evidence?.qualityLevel);
+  const lessonText = [draft?.lesson, intents.lesson].filter(Boolean).join('\n');
+  const evidenceText = [draft?.evidence, allAnswers].filter(Boolean).join('\n');
+  const boundaryText = [draft?.applicability, intents.boundary].filter(Boolean).join('\n');
+  const riskText = [draft?.risks, intents.risk].filter(Boolean).join('\n');
+  const reuseText = [intents.lesson, answers.reuse, draft?.lesson].filter(Boolean).join('\n');
+  const hasUserEvidence = hasEvidenceAnswer(questions, answers || {}) || evidencePattern(evidenceText);
+  const checks = [
+    extractionCheck('facts', '事实背景', 15, hasContextFacts ? 1 : 0, '已提取项目、版本、清单或质量报告事实', '缺少可引用的项目/清单事实'),
+    extractionCheck('lesson', '经验结论', 20, strongText(lessonText, 12) ? 1 : allAnswers ? 0.5 : 0, '已形成可复用报价判断', '结论还没有压缩成可复用口径', GAP_QUESTIONS.lesson),
+    extractionCheck('evidence', '证据链', 20, hasUserEvidence ? 1 : hasContextFacts ? 0.55 : 0, '已关联询价、版本、图纸、报告或复盘依据', '缺少能支撑判断的证据来源', GAP_QUESTIONS.evidence),
+    extractionCheck('boundary', '适用边界', 18, boundaryPattern(boundaryText) ? 1 : strongText(boundaryText, 12) ? 0.6 : 0, '已说明适用/不适用条件', '适用边界仍不清楚', GAP_QUESTIONS.boundary),
+    extractionCheck('risk', '风险提示', 15, strongText(riskText, 10) ? 1 : contextRiskCount ? 0.65 : 0, '已保留复用风险或异常提醒', '缺少照搬时可能出错的风险', GAP_QUESTIONS.risk),
+    extractionCheck('reuse', '复用条件', 7, reusePattern(reuseText) ? 1 : strongText(reuseText, 12) ? 0.6 : 0, '已描述后续引用场景', '还没说清什么场景可复用', GAP_QUESTIONS.reuse),
+    extractionCheck('lifecycle', '生命周期', 5, draft?.expiresAt && draft?.confidence ? 1 : 0.45, '已有有效期和可信度', '需要补齐有效期与可信度'),
+  ];
+  const score = Math.round(checks.reduce((sum, item) => sum + item.weight * item.ratio, 0));
+  const gaps = checks
+    .filter(item => item.ratio < 0.8 && item.question)
+    .map(item => ({
+      key: item.key,
+      label: item.label,
+      message: item.missing,
+      question: item.question,
+    }));
+  return normalizeExtraction({
+    score,
+    level: extractionLevel(score),
+    summary: extractionSummary(score, gaps.length),
+    checks,
+    gaps,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function extractionCheck(key, label, weight, ratio, ok, missing, question = null) {
+  const clamped = Math.max(0, Math.min(1, Number(ratio || 0)));
+  return {
+    key,
+    label,
+    weight,
+    ratio: clamped,
+    score: Math.round(weight * clamped),
+    status: clamped >= 0.8 ? 'ok' : clamped >= 0.45 ? 'partial' : 'missing',
+    message: clamped >= 0.8 ? ok : missing,
+    missing,
+    question,
+  };
+}
+
+function normalizeExtraction(extraction, source = {}) {
+  const hasStoredShape = source.extractionScore !== undefined || Array.isArray(source.extractionChecks) || Array.isArray(source.extractionGaps);
+  const base = extraction && typeof extraction === 'object' ? extraction : hasStoredShape ? source : assessCardExtraction(source);
+  const score = Math.max(0, Math.min(100, Math.round(Number(base.score ?? source.extractionScore ?? 0))));
+  const checks = Array.isArray(base.checks) ? base.checks : Array.isArray(source.extractionChecks) ? source.extractionChecks : [];
+  const gaps = Array.isArray(base.gaps) ? base.gaps : Array.isArray(source.extractionGaps) ? source.extractionGaps : [];
+  return {
+    score,
+    level: base.level || source.extractionLevel || extractionLevel(score),
+    summary: base.summary || source.extractionSummary || extractionSummary(score, gaps.length),
+    checks,
+    gaps,
+    updatedAt: base.updatedAt || source.updatedAt || '',
+  };
+}
+
+function assessCardExtraction(card = {}) {
+  if (!card || !Object.keys(card).length) return { score: 0, checks: [], gaps: [], level: extractionLevel(0), summary: extractionSummary(0, 0) };
+  return assessExtraction({
+    projectNameSnapshot: card.projectNameSnapshot || '',
+    context: {
+      project: {
+        name: card.projectNameSnapshot || '',
+        type: card.projectType || '',
+        process: card.processType || '',
+        structure: '',
+      },
+      lineCount: card.projectId ? 1 : 0,
+      topCategories: card.costCategory ? [[card.costCategory, 1]] : [],
+      evidence: {},
+    },
+    questions: [],
+  }, {}, card);
+}
+
+function extractionLevel(score) {
+  if (score >= 85) return '可复用';
+  if (score >= 70) return '可入库';
+  if (score >= 55) return '需补充';
+  return '不完整';
+}
+
+function extractionSummary(score, gapCount) {
+  if (score >= 85) return '证据、边界和风险较完整，可优先复用。';
+  if (score >= 70) return gapCount ? `可入库，但还有 ${gapCount} 个萃取缺口建议补齐。` : '可入库，后续复用前仍建议复核。';
+  if (score >= 55) return `建议先补齐 ${gapCount || 1} 个关键缺口，再作为正式经验复用。`;
+  return '当前回答还不足以沉淀为可靠经验。';
+}
+
+function strongText(text, min = 10) {
+  return String(text || '').replace(/\s+/g, '').length >= min;
+}
+
+function evidencePattern(text) {
+  return /询价|图纸|合同|版本|质量报告|报告|结算|市场价|定额|清单|依据|来源|凭证|报价单|供应商/.test(String(text || ''));
+}
+
+function boundaryPattern(text) {
+  return /不适用|不能|仅适用|只适用|除非|边界|条件|规模|工艺|合同|图纸|做法|变化|类似|同类/.test(String(text || ''));
+}
+
+function reusePattern(text) {
+  return /复用|类似|同类|以后|下次|场景|条件|项目类型|工艺|清单特征|口径/.test(String(text || ''));
+}
+
 function knowledgeFields(draft, session) {
   const base = normalizeDraft(draft, session);
   const project = session.context?.project || {};
@@ -530,6 +688,7 @@ function normalizeCard(card) {
     structure: '',
   });
   const reviewStatus = card.reviewStatus || (card.status === 'archived' ? 'archived' : card.status === 'needs_review' ? 'needs_review' : 'confirmed');
+  const extraction = normalizeExtraction(card.extraction, { ...card, tags, keywords, reviewStatus });
   return {
     ...card,
     knowledgeType: card.knowledgeType || '经验卡',
@@ -545,6 +704,7 @@ function normalizeCard(card) {
     reviewNote: card.reviewNote || '',
     status: reviewStatus === 'confirmed' ? 'confirmed' : reviewStatus,
     tags,
+    ...extractionFields(extraction),
   };
 }
 
@@ -583,6 +743,8 @@ function scoreCard(card, terms, ctxTerms, context) {
   if (context.projectId && card.projectId === context.projectId) score += 4;
   if (context.versionId && card.versionId === context.versionId) score += 2;
   if (card.expiresAt && new Date(card.expiresAt).getTime() < Date.now()) score -= 2;
+  score += Math.min(2, Math.floor(Number(card.extractionScore || 0) / 40));
+  if (Number(card.extractionScore || 0) < 55) score -= 2;
   score += Math.min(3, Number(card.reuseCount || 0));
   return score;
 }
@@ -603,6 +765,8 @@ function knowledgeScore(card, terms, now) {
   let score = Number(card.reuseCount || 0);
   if (card.reviewStatus === 'confirmed') score += 5;
   if (card.reviewStatus === 'needs_review') score -= 1;
+  if (Number(card.extractionScore || 0) >= 85) score += 1;
+  if (Number(card.extractionScore || 0) < 55) score -= 2;
   if (isExpired(card, now)) score -= 2;
   const blob = cardBlob(card);
   terms.forEach(term => { if (blob.includes(term)) score += 3; });
@@ -617,6 +781,7 @@ function knowledgeStats(cards, now = Date.now()) {
     archived: cards.filter(c => c.reviewStatus === 'archived').length,
     expired: cards.filter(c => isExpired(c, now)).length,
     highReuse: cards.filter(c => Number(c.reuseCount || 0) >= 3).length,
+    lowQuality: cards.filter(c => c.reviewStatus === 'confirmed' && Number(c.extractionScore || 0) < 70).length,
   };
 }
 

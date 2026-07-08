@@ -259,6 +259,8 @@ async function testExperienceService() {
   assert.equal(session.questions.length >= 3, true);
   assert.equal(session.status, 'drafting');
   assert.equal(session.questionSource, 'local');
+  assert.equal(typeof session.extraction.score, 'number');
+  assert.equal(session.extraction.gaps.some(g => g.key === 'evidence'), true);
 
   globalThis.localStorage.setItem('ai_config', JSON.stringify({
     provider: 'test',
@@ -297,6 +299,8 @@ async function testExperienceService() {
   assert.equal(aiFallbackDraft.lesson.includes('AAO 水厂池壁防水'), true);
   assert.equal(aiFallbackDraft.applicability.includes('中型水厂'), true);
   assert.equal(aiFallbackDraft.risks.includes('暂估设备'), true);
+  assert.equal(typeof aiFallbackDraft.extractionScore, 'number');
+  assert.equal(aiFallbackDraft.extraction.checks.some(item => item.key === 'boundary'), true);
 
   const refinedLocal = await experienceService.refineQuestions(session.id, {
     judgement: '防水按池壁做法计取。',
@@ -304,6 +308,7 @@ async function testExperienceService() {
   assert.equal(refinedLocal.followUpSource, 'local');
   assert.equal(refinedLocal.questions.some(q => q.level === 'L2'), true);
   assert.equal(refinedLocal.questions.some(q => q.id === 'followup_boundary'), true);
+  assert.equal(refinedLocal.extraction.gaps.some(g => g.key === 'boundary'), true);
 
   globalThis.localStorage.setItem('ai_config', JSON.stringify({
     provider: 'test',
@@ -342,6 +347,8 @@ async function testExperienceService() {
   assert.equal(draft.title.includes('经验项目'), true);
   assert.equal(draft.category, '投标报价复盘');
   assert.equal(draft.status, undefined);
+  assert.equal(draft.extractionScore >= 70, true);
+  assert.equal(Array.isArray(draft.extractionGaps), true);
 
   const card = await experienceService.confirmCard(session.id, { title: 'AAO 水厂防水报价复盘' });
   assert.equal(card.status, 'confirmed');
@@ -351,6 +358,9 @@ async function testExperienceService() {
   assert.equal(card.processType, 'AAO');
   assert.equal(card.keywords.includes('防水'), true);
   assert.equal(Array.isArray(card.evidenceRefs), true);
+  assert.equal(card.extractionScore >= 70, true);
+  assert.equal(card.extraction.checks.some(item => item.key === 'evidence'), true);
+  assert.equal(Array.isArray(card.extractionGaps), true);
   assert.equal(card.reuseCount, 0);
   assert.equal(card.projectId, 'p4');
   assert.equal(card.projectNameSnapshot, '经验项目');
@@ -380,6 +390,7 @@ async function testExperienceService() {
   const kbAll = await experienceService.listKnowledgeBase({ keyword: '防水' });
   assert.equal(kbAll.items.some(item => item.id === 'legacy-card' && item.reviewStatus === 'confirmed'), true);
   assert.equal(kbAll.items.some(item => item.id === card.id), true);
+  assert.equal(kbAll.items.find(item => item.id === 'legacy-card').extractionScore > 0, true);
   const kbFiltered = await experienceService.listKnowledgeBase({ projectType: '水厂', processType: 'AAO', status: 'confirmed' });
   assert.equal(kbFiltered.items.some(item => item.id === card.id), true);
   const expired = await experienceService.listKnowledgeBase({ expired: 'expired' });

@@ -1,10 +1,10 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=4.1';
+import * as dashboard from './assets/views/dashboard.js?v=4.9';
 import * as quota     from './assets/views/quota.js?v=3.9';
 import * as projects  from './assets/views/projects.js?v=4.2';
 import * as boq       from './assets/views/boq.js?v=4.2';
-import * as indicators from './assets/views/indicators.js?v=3.9';
-import * as experience from './assets/views/experience.js?v=4.3';
+import * as indicators from './assets/views/indicators.js?v=5.4';
+import * as experience from './assets/views/experience.js?v=4.4';
 import * as settings  from './assets/views/settings.js?v=3.9';
 import * as ai        from './assets/views/ai.js?v=3.9';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
@@ -60,9 +60,17 @@ function go(view, params = {}) {
 }
 
 async function renderWorkspace() {
-  document.getElementById('crumb').textContent = (VIEWS.find(x => x.id === state.currentView) || {}).label || '';
+  const current = VIEWS.find(x => x.id === state.currentView) || VIEWS[0];
+  document.getElementById('crumb').textContent = current.label || '';
+  const crumbIcon = document.getElementById('crumbIcon');
+  const crumbGroup = document.getElementById('crumbGroup');
+  const crumbDesc = document.getElementById('crumbDesc');
+  if (crumbIcon) crumbIcon.textContent = current.icon || 'dashboard';
+  if (crumbGroup) crumbGroup.textContent = current.group || '';
+  if (crumbDesc) crumbDesc.textContent = current.desc || '';
   const v = state.currentView;
   if (v === 'ai') return ai.open();
+  ai.close();
   const r = renderers[v];
   if (r && r.render) await r.render();
 }
@@ -93,6 +101,7 @@ window.__app = {
 
 window.addEventListener('DOMContentLoaded', async () => {
   await ensureDemoData();
+  ai.close();
   renderNav();
   renderWorkspace();
 
@@ -105,6 +114,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const kw = e.target.value.trim();
     if (!kw) return;
     state.currentView = 'quota';
+    ai.close();
     renderNav();
     await quota.render();
     // 设置搜索词

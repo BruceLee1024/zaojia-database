@@ -1,6 +1,6 @@
 # 工程造价数据库 · 企业定额与指标平台
 
-![version](https://img.shields.io/badge/version-v4.3.0-0f766e)
+![version](https://img.shields.io/badge/version-v4.6.0-0f766e)
 ![frontend](https://img.shields.io/badge/frontend-ES%20Modules-0f766e)
 ![storage](https://img.shields.io/badge/storage-IndexedDB-0284c7)
 ![backend](https://img.shields.io/badge/backend-none-64748b)
@@ -10,7 +10,7 @@
 
 一个纯前端的造价数据库、指标分析和 AI 报价辅助工具。应用不需要后端，业务数据保存在浏览器 IndexedDB，AI Key 仅保存在本机 `localStorage`。
 
-当前版本：`v4.3`，重点完善负责人仪表盘、报价版本复盘和 AI 经验萃取知识库。
+当前版本：`v4.6`，重点完善负责人仪表盘、报价版本复盘、AI 经验萃取质量评估、经验知识库、指标主表体验，以及 landing + `/app/` 产品路由。
 
 ## 快速开始
 

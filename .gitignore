@@ -6,3 +6,4 @@ build/
 .cache/
 *.log
 data/*.json
+.vercel

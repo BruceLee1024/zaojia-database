@@ -3,7 +3,7 @@ import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.9';
 import { boqService, groupForLine } from '../services/boqService.js?v=3.9';
 import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=3.9';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
-import { openReview } from './experience.js?v=4.3';
+import { openReview } from './experience.js?v=4.4';
 import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
 import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=3.9';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
