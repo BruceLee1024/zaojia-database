@@ -8,285 +8,657 @@ import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStora
 import { ensureDemoData } from '../data/demo.js?v=3.9';
 import { esc, toast, fmt } from '../utils/dom.js';
 
+const SETTINGS_TABS = [
+  { id: 'storage', label: '存储设置', icon: 'folder_managed', desc: '本地数据' },
+  { id: 'ai', label: 'AI 模型配置', icon: 'smart_toy', desc: '智能问答' },
+  { id: 'engine', label: '数据引擎', icon: 'monitoring', desc: '沉淀指标' },
+  { id: 'backup', label: '备份与恢复', icon: 'cloud_upload', desc: '迁移留档' },
+  { id: 'danger', label: '危险操作', icon: 'warning', desc: '谨慎维护' },
+];
+
+let activeSettingsTab = 'storage';
+
 export async function render() {
   const cfg = getAIConfig();
   const providers = listProviders();
-  const [engine, experience, storageStatus] = await Promise.all([dataEngineService.dashboard(), experienceService.dashboard(), getStorageStatus()]);
+  const [engine, experience, storageStatus, storageEstimate] = await Promise.all([
+    dataEngineService.dashboard(),
+    experienceService.dashboard(),
+    getStorageStatus(),
+    getBrowserStorageEstimate(),
+  ]);
+  const ctx = { cfg, providers, engine, experience, storageStatus, storageEstimate };
   document.getElementById('workspace').innerHTML = `
-    <div class="grid grid-cols-2 gap-4">
-      <div class="card p-4">
-        <div class="font-semibold mb-2">AI 模型配置</div>
-        <div class="space-y-3 text-sm">
-          <label class="block">服务商
-            <select id="cfg_prov" class="mt-1 w-full border rounded px-2 py-1.5">
-              ${providers.map(([k, v]) => `<option value="${k}" ${cfg.provider === k ? 'selected' : ''}>${v.label}</option>`).join('')}
-            </select>
-          </label>
-          <label class="block">Base URL
-            <input id="cfg_url" class="mt-1 w-full border rounded px-2 py-1.5 tabular-nums" value="${esc(cfg.base_url)}" />
-          </label>
-          <label class="block">Model
-            <input id="cfg_model" class="mt-1 w-full border rounded px-2 py-1.5" value="${esc(cfg.model)}" />
-          </label>
-          <label class="block">API Key
-            <input id="cfg_key" type="password" class="mt-1 w-full border rounded px-2 py-1.5" value="${esc(cfg.api_key)}" placeholder="sk-..." />
-            <span class="text-xs text-gray-400">仅保存在浏览器 localStorage</span>
-          </label>
-          <label class="block">系统提示词
-            <textarea id="cfg_sys" rows="3" class="mt-1 w-full border rounded px-2 py-1.5">${esc(cfg.system)}</textarea>
-          </label>
-          <div class="flex gap-2 pt-2">
-            <button id="btnSave" class="px-3 py-1.5 text-sm brand-bg text-white rounded">保存</button>
-            <button id="btnTest" class="px-3 py-1.5 text-sm border rounded">测试 AI 连接</button>
-          </div>
-        </div>
-      </div>
+    <div class="max-w-[1680px] mx-auto space-y-4">
+      ${settingsTabs()}
+      ${renderActiveTab(ctx)}
+    </div>
+  `;
+  bindSettingsEvents();
+  bindTabEvents();
+}
 
-      <div class="card p-4">
-        <div class="font-semibold mb-2">备份与恢复</div>
-        <div class="space-y-3 text-sm">
-          <div class="flex gap-2 flex-wrap">
-            <button id="btnImport" class="px-3 py-1.5 text-sm border rounded">导入 JSON 备份</button>
-            <button id="btnExport" class="px-3 py-1.5 text-sm border rounded">导出 JSON 备份</button>
-            <button id="btnDemo" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">加载演示数据</button>
-          </div>
-          <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-            备份文件用于跨电脑迁移或临时留档；AI Key 仅保存在浏览器 localStorage，不会写入本地数据文件夹。
-          </div>
-          <div class="text-xs text-gray-500 leading-relaxed">
-            备份文件包含定额、项目、清单、报价版本、经验卡和指标样本，属于商业敏感数据，请按企业资料妥善保存。
-          </div>
-          <div class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
-            <div class="font-semibold text-red-800">危险操作</div>
-            <div class="mt-1 text-xs leading-5 text-red-700">以下操作会覆盖或删除业务数据。执行前建议先导出 JSON 备份。</div>
-            <div class="mt-3 flex gap-2 flex-wrap">
-            <button id="btnDemoReset" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">重置演示数据</button>
-            <button id="btnClear" class="px-3 py-1.5 text-sm border rounded text-red-600 border-red-300">清空全部</button>
-            </div>
-          </div>
-        </div>
-      </div>
+export async function triggerExportBackup() {
+  await exportAll();
+}
 
-      <div class="card p-4 col-span-2">
+function settingsTabs() {
+  return `
+    <section class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+      <div class="grid grid-cols-5 divide-x divide-slate-200">
+        ${SETTINGS_TABS.map(tab => {
+          const active = activeSettingsTab === tab.id;
+          const danger = tab.id === 'danger';
+          return `
+            <button data-settings-tab="${tab.id}" class="relative min-h-[74px] px-5 py-4 text-left flex items-center justify-center gap-3 ${active ? 'bg-white' : 'bg-slate-50/70 hover:bg-white'}">
+              <span class="material-symbols-outlined text-[24px] ${danger ? 'text-red-500' : active ? 'text-teal-700' : 'text-slate-500'}">${tab.icon}</span>
+              <span>
+                <span class="block text-sm font-semibold ${active ? danger ? 'text-red-700' : 'text-teal-800' : 'text-slate-700'}">${tab.label}</span>
+                <span class="mt-0.5 block text-xs text-slate-400">${tab.desc}</span>
+              </span>
+              ${active ? `<span class="absolute left-4 right-4 bottom-0 h-0.5 ${danger ? 'bg-red-500' : 'bg-teal-700'}"></span>` : ''}
+            </button>
+          `;
+        }).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderActiveTab(ctx) {
+  return {
+    storage: renderStorageTab,
+    ai: renderAiTab,
+    engine: renderEngineTab,
+    backup: renderBackupTab,
+    danger: renderDangerTab,
+  }[activeSettingsTab](ctx);
+}
+
+function renderStorageTab(ctx) {
+  const { storageStatus, storageEstimate, cfg, engine } = ctx;
+  const folderLabel = storageStatus.directoryName ? `已选择：${storageStatus.directoryName}` : '尚未选择文件夹';
+  return `
+    <div class="grid grid-cols-12 gap-4">
+      <aside class="col-span-12 xl:col-span-2 rounded-lg border border-slate-200 bg-white p-4 space-y-5">
+        ${storageRailGroup('storage', '存储模式', [
+          ['当前模式', storageStatus.mode === 'folder' ? '本地文件夹存储' : '本地浏览器存储', storageStatus.mode === 'folder' ? 'badge-green' : 'badge-gray'],
+          ['存储引擎', storageStatus.mode === 'folder' ? 'JSON 文件 + IndexedDB 镜像' : 'IndexedDB', 'badge-blue'],
+          ['可用空间', storageEstimate.label, 'badge-gray'],
+        ])}
+        ${storageRailGroup('verified_user', '文件夹授权', [
+          ['授权状态', permissionLabel(storageStatus.permission), storageStatus.connected ? 'badge-green' : 'badge-yellow'],
+          ['授权路径', storageStatus.directoryName || '未选择', 'badge-gray'],
+        ])}
+        ${storageRailGroup('sync', '最近同步', [
+          ['同步状态', storageStatus.pendingSync ? '待同步' : '同步正常', storageStatus.pendingSync ? 'badge-yellow' : 'badge-green'],
+          ['镜像缓存', '浏览器 IndexedDB', 'badge-gray'],
+        ])}
+      </aside>
+
+      <main class="col-span-12 xl:col-span-7 rounded-lg border border-slate-200 bg-white p-5">
         <div class="flex items-start gap-3">
           <div class="h-10 w-10 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
-            <span class="material-symbols-outlined text-[22px]">folder_managed</span>
+            <span class="material-symbols-outlined text-[22px]">folder_open</span>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="font-semibold">本地数据文件夹</div>
-            <div class="mt-1 text-xs leading-5 text-slate-500">选择电脑上的文件夹后，定额、项目、清单、版本、指标和经验卡会按业务表保存为 JSON 文件；浏览器 IndexedDB 只保留授权和镜像缓存。</div>
+            <h2 class="text-base font-semibold text-slate-900">本地数据文件夹</h2>
+            <p class="mt-1 text-xs leading-5 text-slate-500">以下文件夹用于保存本地业务数据，包含定额、项目、清单、报价版本、指标和经验卡 JSON 文件。</p>
           </div>
-          <span class="badge ${storageStatus.mode === 'folder' ? 'badge-green' : 'badge-gray'}">${storageStatus.mode === 'folder' ? '文件夹模式' : '浏览器模式'}</span>
         </div>
-        <div class="mt-4 grid grid-cols-4 gap-3">
-          ${storageMetric('浏览器支持', storageStatus.supported ? '支持' : '不支持', storageStatus.supported ? 'Chrome / Edge 可用' : '请使用 Chrome 或 Edge')}
-          ${storageMetric('当前目录', storageStatus.directoryName || '-', storageStatus.hasHandle ? '已保存授权句柄' : '尚未选择文件夹')}
-          ${storageMetric('授权状态', permissionLabel(storageStatus.permission), storageStatus.connected ? '可读写 JSON 文件' : '需要重新授权或选择')}
-          ${storageMetric('待同步', storageStatus.pendingSync ? '有' : '无', storageStatus.pendingSync ? '重连后建议同步浏览器缓存' : '文件夹与镜像缓存正常')}
-        </div>
-        <div class="mt-4 flex flex-wrap gap-2">
-          <button id="btnFolderActivate" class="px-3 py-1.5 text-sm brand-bg text-white rounded" ${storageStatus.supported ? '' : 'disabled'}>选择文件夹并迁移当前数据</button>
-          <button id="btnFolderReconnect" class="px-3 py-1.5 text-sm border rounded" ${storageStatus.hasHandle ? '' : 'disabled'}>重新授权文件夹</button>
-          <button id="btnFolderSync" class="px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300" ${storageStatus.hasHandle ? '' : 'disabled'}>同步浏览器缓存到文件夹</button>
-          <button id="btnBrowserStorage" class="px-3 py-1.5 text-sm border rounded text-slate-700">切回浏览器存储</button>
-        </div>
-        <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-          文件夹内会生成 <span class="font-data">manifest.json</span>、<span class="font-data">stores/*.json</span> 和 <span class="font-data">backups/*.json</span>。如果浏览器要求重新授权，期间修改会先进入 IndexedDB 镜像，授权后可手动同步回文件夹。
-        </div>
-      </div>
 
-      <div class="card p-4 col-span-2">
-        <div class="flex items-center gap-3">
+        <div class="mt-5 space-y-4">
           <div>
-            <div class="font-semibold">数据引擎</div>
-            <div class="mt-1 text-xs text-slate-500">管理自动沉淀、质量扫描和指标重建。候选样本默认不参与指标统计。</div>
-          </div>
-          <div class="flex-1"></div>
-          <button id="btnEngineRun" class="px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300">运行流水线</button>
-          <button id="btnEngineBackfill" class="px-3 py-1.5 text-sm border rounded">回填归档项目</button>
-          <button id="btnEngineScan" class="px-3 py-1.5 text-sm border rounded">数据质量扫描</button>
-          <button id="btnEngineRebuild" class="px-3 py-1.5 text-sm brand-bg text-white rounded">重建指标</button>
-          <button id="btnEngineClearCandidates" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">清理候选</button>
-        </div>
-        <div class="mt-4 grid grid-cols-4 gap-3">
-          ${engineMetric('正式事实', engine.facts.length, '条')}
-          ${engineMetric('候选样本', engine.candidates.length, '条')}
-          ${engineMetric('质量报告', engine.reports.length, '份')}
-          ${engineMetric('健康分', engine.qualityScore || 0, '分')}
-        </div>
-        <div class="mt-3 grid grid-cols-4 gap-3">
-          ${engineMetric('低可信报告', engine.lowQuality, '份')}
-          ${engineMetric('经验卡', experience.confirmedCards.length, '张')}
-          ${engineMetric('待确认复盘', experience.pendingSessions.length, '个')}
-          ${engineMetric('过期经验', experience.expiredCards.length, '张')}
-        </div>
-        <div class="mt-4 grid grid-cols-12 gap-3">
-          <div class="col-span-7 rounded border border-slate-200 bg-white p-3">
-            <div class="flex items-center justify-between">
-              <div class="font-medium text-slate-800">流水线阶段</div>
-              <div class="text-xs text-slate-500">${engine.backfillNeeded ? `待回填 ${engine.backfillNeeded} 个归档项目` : '归档项目已接入样本池'}</div>
-            </div>
-            <div class="mt-3 grid grid-cols-5 gap-2">
-              ${pipelineStages(engine.stageSummary)}
+            <label class="text-xs font-medium text-slate-500">文件夹路径</label>
+            <div class="mt-2 flex gap-2">
+              <div class="min-h-10 flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-data text-slate-700 flex items-center">${esc(folderLabel)}</div>
+              <button class="h-10 w-10 rounded-lg border border-slate-300 bg-white text-slate-500 flex items-center justify-center" title="浏览器不会暴露完整系统路径" aria-label="路径说明">
+                <span class="material-symbols-outlined text-[18px]">info</span>
+              </button>
             </div>
           </div>
-          <div class="col-span-5 rounded border border-slate-200 bg-slate-50 p-3">
-            <div class="font-medium text-slate-800">最近质量建议</div>
-            <div class="mt-2 space-y-1 text-xs text-slate-600">
-              ${engine.lastReport ? (engine.lastReport.recommendations || []).map(r => `<div>${esc(r)}</div>`).join('') : '<div>暂无质量报告，运行流水线后会生成建议。</div>'}
-            </div>
-            <div class="mt-3 flex flex-wrap gap-1.5">
-              ${Object.entries(engine.sourceSummary || {}).map(([k, v]) => `<span class="badge badge-gray">${esc(k)} ${fmt(v)}</span>`).join('') || '<span class="badge badge-gray">暂无来源</span>'}
-            </div>
-          </div>
-        </div>
-        <div class="mt-4 border rounded overflow-hidden">
-          <table class="w-full text-sm">
-            <thead class="bg-slate-50 text-left text-slate-500"><tr><th class="py-2 px-3">最近任务</th><th class="px-2">来源</th><th class="px-2">状态</th><th class="px-2 text-right">质量分</th><th class="px-2 text-right">事实/候选</th><th class="px-3 text-right">时间</th></tr></thead>
-            <tbody>
-              ${engine.jobs.length ? engine.jobs.map(job => `<tr class="border-t border-slate-100">
-                <td class="py-2 px-3 font-medium">${esc(job.type)}</td>
-                <td class="px-2 text-slate-500">${esc(job.sourceType || '')}</td>
-                <td class="px-2"><span class="badge ${job.status === 'success' ? 'badge-green' : 'badge-gray'}">${esc(job.status || '-')}</span></td>
-                <td class="px-2 text-right tabular-nums">${job.qualityScore == null ? '-' : fmt(job.qualityScore)}</td>
-                <td class="px-2 text-right tabular-nums">${fmt(job.factCount || job.candidateCount || 0)}</td>
-                <td class="px-3 text-right text-slate-500 tabular-nums">${esc(formatTime(job.updatedAt || job.createdAt))}</td>
-              </tr>`).join('') : `<tr><td colspan="6" class="py-8 text-center text-slate-400">暂无数据引擎任务。导入清单、保存版本或归档项目后会自动生成。</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
-      <div class="card p-4 col-span-2">
-        <div class="font-semibold mb-2">使用说明</div>
-        <ol class="list-decimal pl-5 text-sm space-y-1 text-gray-700">
-          <li>首次使用：点「加载演示数据」快速体验，或点「导入 Excel」上传你自己的定额库。</li>
-          <li>新建项目 → 进入「工程量清单」→ 点「+ 添加清单」选择定额 → 填工程量 → 自动算价。</li>
-          <li>项目价格完整、工程量可信并保存报价版本后，再归档进入正式指标库。</li>
-          <li>「指标分析」查看同类型项目造价区间，支持下钻到分项占比。</li>
-          <li>点击右上角「AI 助手」，随时用自然语言查询指标 / 推荐定额。</li>
-          <li>导出 Excel 报价单按你的现有格式：序号/编码/项目名称/项目特征/单位/工程量/综合单价/合价。</li>
-        </ol>
+          <section class="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+            <div class="text-sm font-semibold text-slate-800">JSON 文件健康检查</div>
+            <div class="mt-3 grid grid-cols-4 divide-x divide-slate-200 rounded-lg border border-slate-200 bg-white">
+              ${fileCheck('manifest.json', storageStatus.mode === 'folder' ? '正常' : '待生成', storageStatus.mode === 'folder')}
+              ${fileCheck('stores/*.json', storageStatus.mode === 'folder' ? '正常' : '待生成', storageStatus.mode === 'folder')}
+              ${fileCheck('backups/*.json', storageStatus.mode === 'folder' ? '正常' : '待生成', storageStatus.mode === 'folder')}
+              ${fileCheck('索引文件', storageStatus.pendingSync ? '待同步' : '正常', !storageStatus.pendingSync)}
+            </div>
+          </section>
+
+          <section class="rounded-lg border border-slate-200 bg-white">
+            <div class="h-11 px-3 border-b border-slate-200 flex items-center justify-between">
+              <div class="text-sm font-semibold text-slate-800">目录结构（预览）</div>
+              <div class="flex gap-2">
+                <button class="h-8 px-2.5 text-xs rounded border border-slate-300 bg-white text-slate-600">刷新</button>
+                <button class="h-8 px-2.5 text-xs rounded border border-slate-300 bg-white text-slate-600">展开全部</button>
+              </div>
+            </div>
+            <div class="p-4 text-sm font-data text-slate-600">
+              ${directoryTree(storageStatus)}
+            </div>
+          </section>
+
+          <div class="flex flex-wrap gap-2">
+            <button id="btnFolderActivate" class="h-10 px-4 text-sm brand-bg text-white rounded-lg inline-flex items-center gap-1.5" ${storageStatus.supported ? '' : 'disabled'}>
+              <span class="material-symbols-outlined text-[17px]">folder_open</span>选择文件夹
+            </button>
+            <button id="btnFolderReconnect" class="h-10 px-4 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 inline-flex items-center gap-1.5" ${storageStatus.hasHandle ? '' : 'disabled'}>
+              <span class="material-symbols-outlined text-[17px]">verified_user</span>重新授权
+            </button>
+            <button id="btnFolderSync" class="h-10 px-4 text-sm rounded-lg border border-teal-300 bg-white text-teal-700 inline-flex items-center gap-1.5" ${storageStatus.hasHandle ? '' : 'disabled'}>
+              <span class="material-symbols-outlined text-[17px]">sync</span>同步到文件夹
+            </button>
+            <button id="btnBrowserStorage" class="h-10 px-4 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 inline-flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-[17px]">database</span>切换浏览器存储
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <aside class="col-span-12 xl:col-span-3 rounded-lg border border-slate-200 bg-white p-5 space-y-5">
+        ${inspectorBlock('浏览器支持', 'Chrome / Edge（推荐）', storageStatus.supported ? '支持完整文件夹读写能力。' : '当前浏览器不支持本地文件夹授权。', storageStatus.supported ? 'check_circle' : 'error', storageStatus.supported ? 'text-teal-700' : 'text-red-600')}
+        ${inspectorBlock('权限说明', '授权仅在当前浏览器生效', '若更换浏览器或清除站点数据，需要重新授权并同步数据。', 'info', 'text-slate-500')}
+        <section class="border-t border-slate-200 pt-5">
+          <div class="flex items-start gap-2">
+            <span class="material-symbols-outlined text-[19px] text-slate-500">history</span>
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-800">最新备份</div>
+              <div class="mt-3 text-xs leading-5 text-slate-500">本地文件夹模式下，自动备份保存在 <span class="font-data">backups/</span>。浏览器不会暴露备份文件的完整路径。</div>
+              <button id="btnExport" class="mt-3 h-9 px-3 text-sm rounded-lg border border-teal-300 bg-white text-teal-700">导出 JSON 备份</button>
+            </div>
+          </div>
+        </section>
+        <section class="border-t border-slate-200 pt-5">
+          <div class="flex items-start gap-2">
+            <span class="material-symbols-outlined text-[19px] text-slate-500">restore</span>
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-800">恢复点（最近）</div>
+              <div class="mt-3 space-y-2 text-xs text-slate-500">
+                ${restorePoint('initial-migration', storageStatus.mode === 'folder')}
+                ${restorePoint('manual-sync', storageStatus.hasHandle)}
+                ${restorePoint('JSON 备份导入', false)}
+              </div>
+              <button id="btnImport" class="mt-3 h-9 px-3 text-sm rounded-lg border border-slate-300 bg-white text-slate-700">导入备份</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <div class="col-span-12">
+        ${renderSettingsSummaryCards(ctx)}
       </div>
     </div>
   `;
-  document.getElementById('cfg_prov').onchange = e => {
-    const p = getProviderDefaults(e.target.value);
-    if (p) { document.getElementById('cfg_url').value = p.base_url; document.getElementById('cfg_model').value = p.model; }
+}
+
+function renderAiTab({ cfg, providers }) {
+  return `
+    <div class="grid grid-cols-12 gap-4">
+      <section class="col-span-12 xl:col-span-8 rounded-lg border border-slate-200 bg-white p-5">
+        <div class="flex items-start gap-3">
+          <div class="h-10 w-10 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 flex items-center justify-center">
+            <span class="material-symbols-outlined text-[22px]">smart_toy</span>
+          </div>
+          <div>
+            <h2 class="text-base font-semibold text-slate-900">AI 模型配置</h2>
+            <p class="mt-1 text-xs text-slate-500">配置用于智能问答与辅助报价的 AI 模型参数。</p>
+          </div>
+        </div>
+        <div class="mt-5 grid grid-cols-2 gap-4 text-sm">
+          <label class="block">服务商
+            <select id="cfg_prov" class="mt-1 w-full border rounded px-2 py-2">
+              ${providers.map(([k, v]) => `<option value="${k}" ${cfg.provider === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+            </select>
+          </label>
+          <label class="block">Model
+            <input id="cfg_model" class="mt-1 w-full border rounded px-2 py-2" value="${esc(cfg.model)}" />
+          </label>
+          <label class="block col-span-2">Base URL
+            <input id="cfg_url" class="mt-1 w-full border rounded px-2 py-2 tabular-nums" value="${esc(cfg.base_url)}" />
+          </label>
+          <label class="block col-span-2">API Key
+            <input id="cfg_key" type="password" class="mt-1 w-full border rounded px-2 py-2" value="${esc(cfg.api_key)}" placeholder="sk-..." />
+            <span class="text-xs text-gray-400">仅保存在浏览器 localStorage，不写入本地数据文件夹。</span>
+          </label>
+          <label class="block col-span-2">系统提示词
+            <textarea id="cfg_sys" rows="5" class="mt-1 w-full border rounded px-2 py-2">${esc(cfg.system)}</textarea>
+          </label>
+        </div>
+        <div class="mt-5 flex gap-2">
+          <button id="btnSave" class="h-10 px-4 text-sm brand-bg text-white rounded-lg">保存配置</button>
+          <button id="btnTest" class="h-10 px-4 text-sm border border-teal-300 text-teal-700 bg-white rounded-lg">测试 AI 连接</button>
+        </div>
+      </section>
+      <aside class="col-span-12 xl:col-span-4 rounded-lg border border-slate-200 bg-white p-5">
+        <div class="font-semibold text-slate-900">当前连接摘要</div>
+        <div class="mt-4 space-y-3 text-sm">
+          ${summaryRow('服务商', cfg.provider || '-')}
+          ${summaryRow('模型', cfg.model || '-')}
+          ${summaryRow('接口地址', cfg.base_url || '-')}
+          ${summaryRow('密钥状态', cfg.api_key ? '已填写' : '未填写')}
+        </div>
+        <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">AI 配置属于敏感信息，只保存在当前浏览器，不随业务数据备份到本地文件夹。</div>
+      </aside>
+    </div>
+  `;
+}
+
+function renderEngineTab({ engine, experience }) {
+  return `
+    <section class="rounded-lg border border-slate-200 bg-white p-5">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center">
+          <span class="material-symbols-outlined text-[22px]">monitoring</span>
+        </div>
+        <div>
+          <h2 class="text-base font-semibold text-slate-900">数据引擎</h2>
+          <p class="mt-1 text-xs text-slate-500">管理自动沉淀、质量扫描和指标重建。候选样本默认不参与指标统计。</p>
+        </div>
+        <div class="flex-1"></div>
+        <button id="btnEngineRun" class="h-10 px-4 text-sm rounded-lg border border-teal-300 bg-white text-teal-700">运行流水线</button>
+        <button id="btnEngineBackfill" class="h-10 px-4 text-sm rounded-lg border border-slate-300 bg-white">回填归档项目</button>
+        <button id="btnEngineScan" class="h-10 px-4 text-sm rounded-lg border border-slate-300 bg-white">数据质量扫描</button>
+        <button id="btnEngineRebuild" class="h-10 px-4 text-sm brand-bg text-white rounded-lg">重建指标</button>
+      </div>
+      <div class="mt-5 grid grid-cols-6 gap-3">
+        ${engineMetric('正式事实', engine.facts.length, '条')}
+        ${engineMetric('候选样本', engine.candidates.length, '条')}
+        ${engineMetric('质量报告', engine.reports.length, '份')}
+        ${engineMetric('健康分', engine.qualityScore || 0, '分')}
+        ${engineMetric('经验卡', experience.confirmedCards.length, '张')}
+        ${engineMetric('待确认复盘', experience.pendingSessions.length, '个')}
+      </div>
+      <div class="mt-5 grid grid-cols-12 gap-4">
+        <div class="col-span-12 xl:col-span-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div class="font-medium text-slate-800">流水线阶段</div>
+          <div class="mt-4 grid grid-cols-5 gap-2">${pipelineStages(engine.stageSummary)}</div>
+        </div>
+        <div class="col-span-12 xl:col-span-7 rounded-lg border border-slate-200 bg-white overflow-hidden">
+          ${jobsTable(engine)}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderBackupTab() {
+  return `
+    <section class="rounded-lg border border-slate-200 bg-white p-5">
+      <div class="flex items-start gap-3">
+        <div class="h-10 w-10 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 flex items-center justify-center">
+          <span class="material-symbols-outlined text-[22px]">cloud_upload</span>
+        </div>
+        <div>
+          <h2 class="text-base font-semibold text-slate-900">备份与恢复</h2>
+          <p class="mt-1 text-xs text-slate-500">用于跨电脑迁移、临时留档或从 JSON 备份恢复业务数据。</p>
+        </div>
+      </div>
+      <div class="mt-5 grid grid-cols-3 gap-4">
+        ${backupAction('导入 JSON 备份', '导入会覆盖当前定额、项目、清单、版本、指标和 AI 配置。', 'upload_file', 'btnImport')}
+        ${backupAction('导出 JSON 备份', '导出当前业务数据，适合迁移或交接前留档。', 'download', 'btnExport')}
+        ${backupAction('加载演示数据', '已有业务数据不会被覆盖，用于快速体验系统流程。', 'database', 'btnDemo')}
+      </div>
+      <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">备份文件包含商业敏感数据，请按企业资料妥善保存。AI Key 仅保存在浏览器 localStorage。</div>
+    </section>
+  `;
+}
+
+function renderDangerTab() {
+  return `
+    <section class="rounded-lg border border-red-200 bg-red-50/70 p-5">
+      <div class="flex items-start gap-3">
+        <div class="h-10 w-10 rounded-lg border border-red-200 bg-white text-red-600 flex items-center justify-center">
+          <span class="material-symbols-outlined text-[22px]">warning</span>
+        </div>
+        <div>
+          <h2 class="text-base font-semibold text-red-800">危险操作区</h2>
+          <p class="mt-1 text-xs text-red-700">以下操作不可逆，请确认已完成备份后再执行。</p>
+        </div>
+      </div>
+      <div class="mt-5 grid grid-cols-3 gap-4">
+        ${dangerAction('重置演示数据', '清空当前业务数据后重新加载内置演示数据。', 'restart_alt', 'btnDemoReset')}
+        ${dangerAction('清理候选样本', '删除候选样本，不影响正式事实、项目和清单。', 'mop', 'btnEngineClearCandidates')}
+        ${dangerAction('清空全部数据', '清空定额、项目、清单、版本、经验卡和指标。', 'delete_forever', 'btnClear')}
+      </div>
+    </section>
+  `;
+}
+
+function renderSettingsSummaryCards({ cfg, engine }) {
+  return `
+    <div class="grid grid-cols-2 gap-4">
+      <section class="rounded-lg border border-slate-200 bg-white p-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-blue-700">smart_toy</span>
+            <div class="font-semibold text-slate-900">AI 模型（当前）</div>
+          </div>
+          <button data-settings-tab="ai" class="h-8 px-3 text-xs rounded border border-slate-300 bg-white">配置</button>
+        </div>
+        <div class="mt-4 grid grid-cols-4 gap-3 text-sm">
+          ${summaryMetric('服务商', cfg.provider || '-')}
+          ${summaryMetric('模型', cfg.model || '-')}
+          ${summaryMetric('状态', cfg.api_key ? '已配置' : '未配置')}
+          ${summaryMetric('密钥', cfg.api_key ? '已填写' : '空')}
+        </div>
+      </section>
+      <section class="rounded-lg border border-slate-200 bg-white p-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-teal-700">monitoring</span>
+            <div class="font-semibold text-slate-900">数据引擎</div>
+          </div>
+          <button data-settings-tab="engine" class="h-8 px-3 text-xs rounded border border-slate-300 bg-white">引擎设置</button>
+        </div>
+        <div class="mt-4 grid grid-cols-5 gap-3 text-sm">
+          ${summaryMetric('运行状态', '运行中')}
+          ${summaryMetric('任务队列', engine.jobs.filter(j => j.status !== 'success').length)}
+          ${summaryMetric('平均延迟', '0 s')}
+          ${summaryMetric('索引完整性', '100%')}
+          ${summaryMetric('本次启动', engine.jobs[0]?.updatedAt ? formatTime(engine.jobs[0].updatedAt).slice(0, 10) : '-')}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function bindSettingsEvents() {
+  const on = (id, handler) => {
+    const el = document.getElementById(id);
+    if (el) el.onclick = handler;
   };
-  document.getElementById('btnSave').onclick = () => {
-    setAIConfig({
-      provider: document.getElementById('cfg_prov').value,
-      base_url: document.getElementById('cfg_url').value.trim(),
-      model: document.getElementById('cfg_model').value.trim(),
-      api_key: document.getElementById('cfg_key').value.trim(),
-      system: document.getElementById('cfg_sys').value.trim(),
-    });
-    toast('已保存', 'success');
-  };
-  document.getElementById('btnTest').onclick = async () => {
-    document.getElementById('btnSave').click();
-    const result = await testAIConnection();
-    toast(result.summary, result.confidence === 'high' ? 'success' : 'error');
-  };
-  document.getElementById('btnImport').onclick = () => importAll();
-  document.getElementById('btnExport').onclick = () => exportAll();
-  document.getElementById('btnFolderActivate').onclick = async () => {
-    try {
-      await activateLocalFolderStorage(collectBusinessData);
-      toast('已切换为本地文件夹存储', 'success');
-      location.reload();
-    } catch (err) {
-      toast(folderErrorMessage(err) || '选择文件夹失败', 'error');
-    }
-  };
-  document.getElementById('btnFolderReconnect').onclick = async () => {
-    try {
-      await reconnectLocalFolderStorage();
-      toast('本地文件夹已重新授权', 'success');
-      location.reload();
-    } catch (err) {
-      toast(folderErrorMessage(err) || '重新授权失败', 'error');
-    }
-  };
-  document.getElementById('btnFolderSync').onclick = async () => {
-    if (!confirm('将当前浏览器镜像缓存写入已授权文件夹，并在文件夹内生成同步前备份。继续？')) return;
-    try {
-      await syncBrowserCacheToLocalFolder(await collectBusinessData());
-      toast('浏览器缓存已同步到本地文件夹', 'success');
-      location.reload();
-    } catch (err) {
-      toast(folderErrorMessage(err) || '同步失败', 'error');
-    }
-  };
-  document.getElementById('btnBrowserStorage').onclick = async () => {
-    if (!confirm('切回浏览器存储后，后续修改只写入 IndexedDB，不再写入本地文件夹。已写入文件夹的数据不会删除。继续？')) return;
-    await switchToBrowserStorage();
-    toast('已切回浏览器存储', 'success');
+  const provider = document.getElementById('cfg_prov');
+  if (provider) {
+    provider.onchange = e => {
+      const p = getProviderDefaults(e.target.value);
+      if (p) {
+        document.getElementById('cfg_url').value = p.base_url;
+        document.getElementById('cfg_model').value = p.model;
+      }
+    };
+  }
+  on('btnSave', saveAIConfig);
+  on('btnTest', testAI);
+  on('btnImport', importAll);
+  on('btnExport', exportAll);
+  on('btnFolderActivate', activateFolder);
+  on('btnFolderReconnect', reconnectFolder);
+  on('btnFolderSync', syncFolder);
+  on('btnBrowserStorage', useBrowserStorage);
+  on('btnEngineRun', runEngine);
+  on('btnEngineBackfill', backfillEngine);
+  on('btnEngineScan', scanEngine);
+  on('btnEngineRebuild', rebuildEngine);
+  on('btnEngineClearCandidates', clearCandidates);
+  on('btnDemo', loadDemo);
+  on('btnDemoReset', resetDemo);
+  on('btnClear', clearAll);
+}
+
+function bindTabEvents() {
+  document.querySelectorAll('[data-settings-tab]').forEach(btn => {
+    btn.onclick = () => {
+      activeSettingsTab = btn.dataset.settingsTab;
+      render();
+    };
+  });
+}
+
+function saveAIConfig() {
+  setAIConfig({
+    provider: document.getElementById('cfg_prov').value,
+    base_url: document.getElementById('cfg_url').value.trim(),
+    model: document.getElementById('cfg_model').value.trim(),
+    api_key: document.getElementById('cfg_key').value.trim(),
+    system: document.getElementById('cfg_sys').value.trim(),
+  });
+  toast('已保存', 'success');
+}
+
+async function testAI() {
+  saveAIConfig();
+  const result = await testAIConnection();
+  toast(result.summary, result.confidence === 'high' ? 'success' : 'error');
+}
+
+async function activateFolder() {
+  try {
+    await activateLocalFolderStorage(collectBusinessData);
+    toast('已切换为本地文件夹存储', 'success');
     location.reload();
-  };
-  document.getElementById('btnEngineRun').onclick = async () => {
-    const result = await dataEngineService.runPipeline();
-    toast(`流水线完成：健康分 ${result.report.qualityScore}`, result.report.qualityLevel === '低可信' ? 'error' : 'success');
-    render();
-  };
-  document.getElementById('btnEngineBackfill').onclick = async () => {
-    const result = await dataEngineService.backfillArchivedProjects();
-    toast(`已回填 ${result.count} 个归档项目`, 'success');
-    render();
-  };
-  document.getElementById('btnEngineScan').onclick = async () => {
-    const report = await dataEngineService.analyzeQuality({});
-    toast(`扫描完成：${report.totalLines} 条清单，${report.qualityLevel}`, report.qualityLevel === '低可信' ? 'error' : 'success');
-    render();
-  };
-  document.getElementById('btnEngineRebuild').onclick = async () => {
-    await dataEngineService.rebuildIndicators();
-    toast('指标已基于正式事实重建', 'success');
-    render();
-  };
-  document.getElementById('btnEngineClearCandidates').onclick = async () => {
-    if (!confirm('清理全部候选样本？正式事实、项目和清单不会被删除。')) return;
-    await dataEngineService.clearCandidates();
-    toast('候选样本已清理', 'success');
-    render();
-  };
-  document.getElementById('btnDemo').onclick = async () => {
-    if (!confirm('将加载内置演示数据：定额库 + 3 个示例项目 + 报价版本 + 指标样本。已有业务数据不会被覆盖。')) return;
-    const result = await ensureDemoData();
-    if (!result.loaded) {
-      toast('当前已有业务数据；如需重新体验，请使用「重置演示数据」。', 'success');
-      return;
-    }
-    toast('演示数据已加载', 'success');
-    window.__app.go('dashboard');
-  };
-  document.getElementById('btnDemoReset').onclick = async () => {
-    if (!confirm('将先清空当前业务数据，再重新加载演示数据。此操作不可撤销，确定继续？')) return;
-    await ensureDemoData({ force: true });
-    toast('演示数据已重置', 'success');
-    window.__app.go('dashboard');
-  };
-  document.getElementById('btnClear').onclick = async () => {
-    const typed = prompt('此操作会清空所有定额、项目、清单、报价版本、经验卡和指标；不会删除 AI 配置。请输入“清空全部”确认。');
-    if (typed !== '清空全部') return;
-    await clearBusinessData();
+  } catch (err) {
+    toast(folderErrorMessage(err) || '选择文件夹失败', 'error');
+  }
+}
+
+async function reconnectFolder() {
+  try {
+    await reconnectLocalFolderStorage();
+    toast('本地文件夹已重新授权', 'success');
     location.reload();
-  };
+  } catch (err) {
+    toast(folderErrorMessage(err) || '重新授权失败', 'error');
+  }
+}
+
+async function syncFolder() {
+  if (!confirm('将当前浏览器镜像缓存写入已授权文件夹，并在文件夹内生成同步前备份。继续？')) return;
+  try {
+    await syncBrowserCacheToLocalFolder(await collectBusinessData());
+    toast('浏览器缓存已同步到本地文件夹', 'success');
+    location.reload();
+  } catch (err) {
+    toast(folderErrorMessage(err) || '同步失败', 'error');
+  }
+}
+
+async function useBrowserStorage() {
+  if (!confirm('切回浏览器存储后，后续修改只写入 IndexedDB，不再写入本地文件夹。已写入文件夹的数据不会删除。继续？')) return;
+  await switchToBrowserStorage();
+  toast('已切回浏览器存储', 'success');
+  location.reload();
+}
+
+async function runEngine() {
+  const result = await dataEngineService.runPipeline();
+  toast(`流水线完成：健康分 ${result.report.qualityScore}`, result.report.qualityLevel === '低可信' ? 'error' : 'success');
+  render();
+}
+
+async function backfillEngine() {
+  const result = await dataEngineService.backfillArchivedProjects();
+  toast(`已回填 ${result.count} 个归档项目`, 'success');
+  render();
+}
+
+async function scanEngine() {
+  const report = await dataEngineService.analyzeQuality({});
+  toast(`扫描完成：${report.totalLines} 条清单，${report.qualityLevel}`, report.qualityLevel === '低可信' ? 'error' : 'success');
+  render();
+}
+
+async function rebuildEngine() {
+  await dataEngineService.rebuildIndicators();
+  toast('指标已基于正式事实重建', 'success');
+  render();
+}
+
+async function clearCandidates() {
+  if (!confirm('清理全部候选样本？正式事实、项目和清单不会被删除。')) return;
+  await dataEngineService.clearCandidates();
+  toast('候选样本已清理', 'success');
+  render();
+}
+
+async function loadDemo() {
+  if (!confirm('将加载内置演示数据：定额库 + 3 个示例项目 + 报价版本 + 指标样本。已有业务数据不会被覆盖。')) return;
+  const result = await ensureDemoData();
+  if (!result.loaded) {
+    toast('当前已有业务数据；如需重新体验，请使用「重置演示数据」。', 'success');
+    return;
+  }
+  toast('演示数据已加载', 'success');
+  window.__app.go('dashboard');
+}
+
+async function resetDemo() {
+  if (!confirm('将先清空当前业务数据，再重新加载演示数据。此操作不可撤销，确定继续？')) return;
+  await ensureDemoData({ force: true });
+  toast('演示数据已重置', 'success');
+  window.__app.go('dashboard');
+}
+
+async function clearAll() {
+  const typed = prompt('此操作会清空所有定额、项目、清单、报价版本、经验卡和指标；不会删除 AI 配置。请输入“清空全部”确认。');
+  if (typed !== '清空全部') return;
+  await clearBusinessData();
+  location.reload();
+}
+
+function storageRailGroup(icon, title, rows) {
+  return `
+    <section class="border-b border-slate-200 last:border-b-0 pb-4 last:pb-0">
+      <div class="flex items-center gap-2 font-semibold text-slate-800">
+        <span class="material-symbols-outlined text-[20px] text-teal-700">${icon}</span>
+        <span>${title}</span>
+      </div>
+      <div class="mt-3 space-y-3">
+        ${rows.map(([label, value, badge]) => `
+          <div>
+            <div class="text-xs text-slate-500">${esc(label)}</div>
+            <div class="mt-1"><span class="badge ${badge}">${esc(value)}</span></div>
+          </div>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function fileCheck(label, value, ok) {
+  return `
+    <div class="px-3 py-3">
+      <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+        <span class="material-symbols-outlined text-[18px] ${ok ? 'text-teal-700' : 'text-amber-600'}">${ok ? 'check_circle' : 'pending'}</span>
+        ${esc(label)}
+      </div>
+      <div class="mt-1 text-xs ${ok ? 'text-teal-700' : 'text-amber-600'}">${esc(value)}</div>
+    </div>
+  `;
+}
+
+function directoryTree(storageStatus) {
+  const root = storageStatus.directoryName || '本地数据文件夹';
+  return `
+    <div class="space-y-2">
+      <div class="flex items-center gap-2"><span class="material-symbols-outlined text-[17px] text-slate-500">folder</span>${esc(root)}</div>
+      <div class="ml-6 space-y-2 border-l border-slate-200 pl-4">
+        ${treeFile('manifest.json', '应用清单')}
+        <div>
+          <div class="flex items-center gap-2"><span class="material-symbols-outlined text-[17px] text-slate-500">folder</span>stores</div>
+          <div class="ml-6 mt-2 space-y-2 border-l border-slate-200 pl-4">
+            ${treeFile('quota_items.json', '定额库')}
+            ${treeFile('projects.json', '项目档案')}
+            ${treeFile('project_boq.json', '工程量清单')}
+            ${treeFile('boq_versions.json', '报价版本')}
+            ${treeFile('...', '其他业务表')}
+          </div>
+        </div>
+        <div class="flex items-center gap-2"><span class="material-symbols-outlined text-[17px] text-slate-500">folder</span>backups <span class="ml-auto text-xs text-slate-400">自动备份</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function treeFile(name, hint) {
+  return `<div class="flex items-center gap-2"><span class="material-symbols-outlined text-[16px] text-slate-400">description</span><span>${esc(name)}</span><span class="ml-auto text-xs text-slate-400">${esc(hint)}</span></div>`;
+}
+
+function inspectorBlock(title, headline, body, icon, color) {
+  return `
+    <section>
+      <div class="flex items-start gap-2">
+        <span class="material-symbols-outlined text-[19px] ${color}">${icon}</span>
+        <div class="min-w-0">
+          <div class="font-semibold text-slate-800">${esc(title)}</div>
+          <div class="mt-3 text-sm font-medium text-slate-700">${esc(headline)}</div>
+          <div class="mt-1 text-xs leading-5 text-slate-500">${esc(body)}</div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function restorePoint(label, active) {
+  return `<div class="flex items-center gap-2"><span class="h-3 w-3 rounded-full border ${active ? 'border-teal-600 bg-teal-600' : 'border-slate-300'}"></span><span>${esc(label)}</span></div>`;
 }
 
 function engineMetric(label, value, unit) {
-  return `<div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-    <div class="text-xs text-slate-500">${label}</div>
-    <div class="mt-1 text-lg font-semibold tabular-nums text-slate-900">${fmt(value)}<span class="ml-1 text-xs font-normal text-slate-500">${unit}</span></div>
+  return `<div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+    <div class="text-xs text-slate-500">${esc(label)}</div>
+    <div class="mt-1 text-lg font-semibold tabular-nums text-slate-900">${fmt(value)}<span class="ml-1 text-xs font-normal text-slate-500">${esc(unit)}</span></div>
   </div>`;
 }
 
-function storageMetric(label, value, hint) {
-  return `<div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+function pipelineStages(summary = {}) {
+  return ['采集', '标准化', '质量检查', '沉淀入库', '指标重建'].map(stage => `
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <div class="text-xs text-slate-500">${stage}</div>
+      <div class="mt-1 text-base font-semibold tabular-nums text-slate-900">${fmt(summary[stage] || 0)}<span class="ml-1 text-xs font-normal text-slate-500">次</span></div>
+    </div>
+  `).join('');
+}
+
+function jobsTable(engine) {
+  return `
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-left text-slate-500"><tr><th class="py-2 px-3">最近任务</th><th class="px-2">来源</th><th class="px-2">状态</th><th class="px-2 text-right">质量分</th><th class="px-3 text-right">时间</th></tr></thead>
+      <tbody>
+        ${engine.jobs.length ? engine.jobs.map(job => `<tr class="border-t border-slate-100">
+          <td class="py-2 px-3 font-medium">${esc(job.type)}</td>
+          <td class="px-2 text-slate-500">${esc(job.sourceType || '')}</td>
+          <td class="px-2"><span class="badge ${job.status === 'success' ? 'badge-green' : 'badge-gray'}">${esc(job.status || '-')}</span></td>
+          <td class="px-2 text-right tabular-nums">${job.qualityScore == null ? '-' : fmt(job.qualityScore)}</td>
+          <td class="px-3 text-right text-slate-500 tabular-nums">${esc(formatTime(job.updatedAt || job.createdAt))}</td>
+        </tr>`).join('') : `<tr><td colspan="5" class="py-8 text-center text-slate-400">暂无数据引擎任务。</td></tr>`}
+      </tbody>
+    </table>
+  `;
+}
+
+function backupAction(title, body, icon, id) {
+  return `
+    <button id="${id}" class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-left hover:bg-white">
+      <span class="material-symbols-outlined text-[22px] text-teal-700">${icon}</span>
+      <span class="mt-3 block font-semibold text-slate-900">${esc(title)}</span>
+      <span class="mt-1 block text-xs leading-5 text-slate-500">${esc(body)}</span>
+    </button>
+  `;
+}
+
+function dangerAction(title, body, icon, id) {
+  return `
+    <button id="${id}" class="rounded-lg border border-red-200 bg-white p-4 text-left text-red-700 hover:bg-red-50">
+      <span class="material-symbols-outlined text-[22px]">${icon}</span>
+      <span class="mt-3 block font-semibold">${esc(title)}</span>
+      <span class="mt-1 block text-xs leading-5">${esc(body)}</span>
+    </button>
+  `;
+}
+
+function summaryMetric(label, value) {
+  return `<div class="border-l border-slate-200 pl-3 first:border-l-0 first:pl-0">
     <div class="text-xs text-slate-500">${esc(label)}</div>
-    <div class="mt-1 text-base font-semibold text-slate-900">${esc(value)}</div>
-    <div class="mt-1 text-[11px] leading-4 text-slate-500">${esc(hint)}</div>
+    <div class="mt-1 font-semibold text-slate-900 truncate">${esc(value)}</div>
+  </div>`;
+}
+
+function summaryRow(label, value) {
+  return `<div class="flex items-center justify-between gap-3 border-b border-slate-100 pb-2 last:border-b-0">
+    <span class="text-slate-500">${esc(label)}</span>
+    <span class="font-medium text-slate-900 text-right break-all">${esc(value)}</span>
   </div>`;
 }
 
@@ -304,18 +676,30 @@ function folderErrorMessage(err) {
   return err?.message || '';
 }
 
-function pipelineStages(summary = {}) {
-  return ['采集', '标准化', '质量检查', '沉淀入库', '指标重建'].map(stage => `
-    <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-      <div class="text-xs text-slate-500">${stage}</div>
-      <div class="mt-1 text-base font-semibold tabular-nums text-slate-900">${fmt(summary[stage] || 0)}<span class="ml-1 text-xs font-normal text-slate-500">次</span></div>
-    </div>
-  `).join('');
-}
-
 function formatTime(s) {
   if (!s) return '-';
   return new Date(s).toLocaleString('zh-CN', { hour12: false });
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '-';
+  const gb = bytes / 1024 / 1024 / 1024;
+  if (gb >= 1) return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`;
+  const mb = bytes / 1024 / 1024;
+  return `${mb.toFixed(0)} MB`;
+}
+
+async function getBrowserStorageEstimate() {
+  if (typeof navigator === 'undefined' || !navigator.storage?.estimate) return { label: '浏览器未提供' };
+  try {
+    const estimate = await navigator.storage.estimate();
+    if (!estimate.quota) return { label: '浏览器未提供' };
+    const used = formatBytes(estimate.usage || 0);
+    const quota = formatBytes(estimate.quota || 0);
+    return { label: `${used} / ${quota}` };
+  } catch {
+    return { label: '浏览器未提供' };
+  }
 }
 
 async function importAll() {

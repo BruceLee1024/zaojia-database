@@ -6,7 +6,7 @@ import * as projects  from './assets/views/projects.js?v=4.6';
 import * as boq       from './assets/views/boq.js?v=4.5';
 import * as indicators from './assets/views/indicators.js?v=5.7';
 import * as experience from './assets/views/experience.js?v=4.6';
-import * as settings  from './assets/views/settings.js?v=4.2';
+import * as settings  from './assets/views/settings.js?v=4.3';
 import * as ai        from './assets/views/ai.js?v=4.0';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
@@ -116,10 +116,7 @@ function escapeHtml(value) {
 }
 
 function exportAll() {
-  // 复用 settings 的导出逻辑
-  import('./assets/views/settings.js?v=3.9').then(m => m.render());
-  // 简化：直接跳到设置页
-  setTimeout(() => document.querySelector('#btnExport')?.click(), 100);
+  import('./assets/views/settings.js?v=4.3').then(m => m.triggerExportBackup());
   go('settings');
 }
 
