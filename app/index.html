@@ -153,7 +153,7 @@
         </div>
         <div class="sidebar-stat px-3 py-2">
           <div class="text-slate-500">数据</div>
-          <div class="mt-0.5 font-semibold text-teal-100">IndexedDB</div>
+          <div id="sidebarStorageLabel" class="mt-0.5 font-semibold text-teal-100">IndexedDB</div>
         </div>
       </div>
     </div>
@@ -165,7 +165,7 @@
       </div>
       <div class="flex items-center gap-2 text-slate-400">
         <span class="pulse-dot"></span>
-        <span>浏览器本地存储</span>
+        <span id="footerStorageLabel">浏览器本地存储</span>
       </div>
     </div>
   </aside>
@@ -190,7 +190,7 @@
         <div class="flex-1"></div>
         <div class="hidden xl:flex items-center gap-2 text-xs text-slate-500 shrink-0">
           <span class="inline-flex h-2 w-2 rounded-full bg-teal-500"></span>
-          <span>本地数据 · IndexedDB</span>
+          <span id="headerStorageLabel">本地数据 · IndexedDB</span>
         </div>
         <div class="relative hidden md:block w-[min(420px,32vw)] min-w-[260px]">
           <input id="globalSearch" type="text" placeholder="搜索定额 / 项目 / 指标 / 经验…"

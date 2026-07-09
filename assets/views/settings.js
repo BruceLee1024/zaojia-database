@@ -4,13 +4,14 @@ import { testAIConnection } from '../services/aiAssistService.js?v=1.0';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
 import { experienceService } from '../services/experienceService.js?v=3.9';
 import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from '../data/repository.js?v=3.9';
+import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, switchToBrowserStorage, syncBrowserCacheToLocalFolder } from '../data/storage.js?v=1.0';
 import { ensureDemoData } from '../data/demo.js?v=3.9';
 import { esc, toast, fmt } from '../utils/dom.js';
 
 export async function render() {
   const cfg = getAIConfig();
   const providers = listProviders();
-  const [engine, experience] = await Promise.all([dataEngineService.dashboard(), experienceService.dashboard()]);
+  const [engine, experience, storageStatus] = await Promise.all([dataEngineService.dashboard(), experienceService.dashboard(), getStorageStatus()]);
   document.getElementById('workspace').innerHTML = `
     <div class="grid grid-cols-2 gap-4">
       <div class="card p-4">
@@ -50,7 +51,7 @@ export async function render() {
             <button id="btnDemo" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">加载演示数据</button>
           </div>
           <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-            所有业务数据保存在当前浏览器 IndexedDB；AI Key 仅保存在本机 localStorage。换电脑、更换浏览器或清理浏览器数据前，请先导出 JSON 备份。
+            备份文件用于跨电脑迁移或临时留档；AI Key 仅保存在浏览器 localStorage，不会写入本地数据文件夹。
           </div>
           <div class="text-xs text-gray-500 leading-relaxed">
             备份文件包含定额、项目、清单、报价版本、经验卡和指标样本，属于商业敏感数据，请按企业资料妥善保存。
@@ -63,6 +64,34 @@ export async function render() {
             <button id="btnClear" class="px-3 py-1.5 text-sm border rounded text-red-600 border-red-300">清空全部</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="card p-4 col-span-2">
+        <div class="flex items-start gap-3">
+          <div class="h-10 w-10 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+            <span class="material-symbols-outlined text-[22px]">folder_managed</span>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="font-semibold">本地数据文件夹</div>
+            <div class="mt-1 text-xs leading-5 text-slate-500">选择电脑上的文件夹后，定额、项目、清单、版本、指标和经验卡会按业务表保存为 JSON 文件；浏览器 IndexedDB 只保留授权和镜像缓存。</div>
+          </div>
+          <span class="badge ${storageStatus.mode === 'folder' ? 'badge-green' : 'badge-gray'}">${storageStatus.mode === 'folder' ? '文件夹模式' : '浏览器模式'}</span>
+        </div>
+        <div class="mt-4 grid grid-cols-4 gap-3">
+          ${storageMetric('浏览器支持', storageStatus.supported ? '支持' : '不支持', storageStatus.supported ? 'Chrome / Edge 可用' : '请使用 Chrome 或 Edge')}
+          ${storageMetric('当前目录', storageStatus.directoryName || '-', storageStatus.hasHandle ? '已保存授权句柄' : '尚未选择文件夹')}
+          ${storageMetric('授权状态', permissionLabel(storageStatus.permission), storageStatus.connected ? '可读写 JSON 文件' : '需要重新授权或选择')}
+          ${storageMetric('待同步', storageStatus.pendingSync ? '有' : '无', storageStatus.pendingSync ? '重连后建议同步浏览器缓存' : '文件夹与镜像缓存正常')}
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button id="btnFolderActivate" class="px-3 py-1.5 text-sm brand-bg text-white rounded" ${storageStatus.supported ? '' : 'disabled'}>选择文件夹并迁移当前数据</button>
+          <button id="btnFolderReconnect" class="px-3 py-1.5 text-sm border rounded" ${storageStatus.hasHandle ? '' : 'disabled'}>重新授权文件夹</button>
+          <button id="btnFolderSync" class="px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300" ${storageStatus.hasHandle ? '' : 'disabled'}>同步浏览器缓存到文件夹</button>
+          <button id="btnBrowserStorage" class="px-3 py-1.5 text-sm border rounded text-slate-700">切回浏览器存储</button>
+        </div>
+        <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+          文件夹内会生成 <span class="font-data">manifest.json</span>、<span class="font-data">stores/*.json</span> 和 <span class="font-data">backups/*.json</span>。如果浏览器要求重新授权，期间修改会先进入 IndexedDB 镜像，授权后可手动同步回文件夹。
         </div>
       </div>
 
@@ -162,6 +191,40 @@ export async function render() {
   };
   document.getElementById('btnImport').onclick = () => importAll();
   document.getElementById('btnExport').onclick = () => exportAll();
+  document.getElementById('btnFolderActivate').onclick = async () => {
+    try {
+      await activateLocalFolderStorage(collectBusinessData);
+      toast('已切换为本地文件夹存储', 'success');
+      location.reload();
+    } catch (err) {
+      toast(folderErrorMessage(err) || '选择文件夹失败', 'error');
+    }
+  };
+  document.getElementById('btnFolderReconnect').onclick = async () => {
+    try {
+      await reconnectLocalFolderStorage();
+      toast('本地文件夹已重新授权', 'success');
+      location.reload();
+    } catch (err) {
+      toast(folderErrorMessage(err) || '重新授权失败', 'error');
+    }
+  };
+  document.getElementById('btnFolderSync').onclick = async () => {
+    if (!confirm('将当前浏览器镜像缓存写入已授权文件夹，并在文件夹内生成同步前备份。继续？')) return;
+    try {
+      await syncBrowserCacheToLocalFolder(await collectBusinessData());
+      toast('浏览器缓存已同步到本地文件夹', 'success');
+      location.reload();
+    } catch (err) {
+      toast(folderErrorMessage(err) || '同步失败', 'error');
+    }
+  };
+  document.getElementById('btnBrowserStorage').onclick = async () => {
+    if (!confirm('切回浏览器存储后，后续修改只写入 IndexedDB，不再写入本地文件夹。已写入文件夹的数据不会删除。继续？')) return;
+    await switchToBrowserStorage();
+    toast('已切回浏览器存储', 'success');
+    location.reload();
+  };
   document.getElementById('btnEngineRun').onclick = async () => {
     const result = await dataEngineService.runPipeline();
     toast(`流水线完成：健康分 ${result.report.qualityScore}`, result.report.qualityLevel === '低可信' ? 'error' : 'success');
@@ -217,6 +280,28 @@ function engineMetric(label, value, unit) {
     <div class="text-xs text-slate-500">${label}</div>
     <div class="mt-1 text-lg font-semibold tabular-nums text-slate-900">${fmt(value)}<span class="ml-1 text-xs font-normal text-slate-500">${unit}</span></div>
   </div>`;
+}
+
+function storageMetric(label, value, hint) {
+  return `<div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+    <div class="text-xs text-slate-500">${esc(label)}</div>
+    <div class="mt-1 text-base font-semibold text-slate-900">${esc(value)}</div>
+    <div class="mt-1 text-[11px] leading-4 text-slate-500">${esc(hint)}</div>
+  </div>`;
+}
+
+function permissionLabel(permission) {
+  return {
+    granted: '已授权',
+    prompt: '待授权',
+    denied: '已拒绝',
+    missing: '未选择',
+  }[permission] || permission || '-';
+}
+
+function folderErrorMessage(err) {
+  if (err?.name === 'AbortError' || /aborted/i.test(err?.message || '')) return '已取消或未完成文件夹授权，请重新点击按钮并在弹窗中选择文件夹。';
+  return err?.message || '';
 }
 
 function pipelineStages(summary = {}) {
@@ -283,6 +368,18 @@ async function clearBusinessData() {
 
 async function exportAll() {
   const data = {
+    ...(await collectBusinessData()),
+    ai_config:   JSON.parse(localStorage.getItem('ai_config') || 'null'),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `造价数据库备份-${Date.now()}.json`;
+  a.click();
+}
+
+async function collectBusinessData() {
+  return {
     quota_items: await quotaRepo.all(),
     projects:    await projectRepo.all(),
     project_boq: await boqRepo.all(),
@@ -294,11 +391,5 @@ async function exportAll() {
     data_quality_reports: await dataQualityReportRepo.all(),
     experience_sessions: await experienceSessionRepo.all(),
     experience_cards: await experienceCardRepo.all(),
-    ai_config:   JSON.parse(localStorage.getItem('ai_config') || 'null'),
   };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `造价数据库备份-${Date.now()}.json`;
-  a.click();
 }

@@ -6,11 +6,12 @@ import * as projects  from './assets/views/projects.js?v=4.6';
 import * as boq       from './assets/views/boq.js?v=4.5';
 import * as indicators from './assets/views/indicators.js?v=5.7';
 import * as experience from './assets/views/experience.js?v=4.6';
-import * as settings  from './assets/views/settings.js?v=4.1';
+import * as settings  from './assets/views/settings.js?v=4.2';
 import * as ai        from './assets/views/ai.js?v=4.0';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
 import { smartSearch } from './assets/services/aiAssistService.js?v=1.0';
+import { getStorageStatus } from './assets/data/storage.js?v=1.0';
 import { openModal, closeModal, esc } from './assets/utils/dom.js';
 
 const VIEWS = [
@@ -122,6 +123,22 @@ function exportAll() {
   go('settings');
 }
 
+async function renderStorageBadge() {
+  const status = await getStorageStatus();
+  const label = status.mode === 'folder'
+    ? `本地文件夹${status.connected ? '' : ' · 待授权'}`
+    : 'IndexedDB';
+  const fullLabel = status.mode === 'folder'
+    ? `本地数据 · ${label}`
+    : '本地数据 · IndexedDB';
+  const sidebar = document.getElementById('sidebarStorageLabel');
+  const footer = document.getElementById('footerStorageLabel');
+  const header = document.getElementById('headerStorageLabel');
+  if (sidebar) sidebar.textContent = label;
+  if (footer) footer.textContent = status.mode === 'folder' ? '本地文件夹存储' : '浏览器本地存储';
+  if (header) header.textContent = fullLabel;
+}
+
 async function runGlobalSearch(keyword, { openFirst = false } = {}) {
   const kw = String(keyword || '').trim();
   if (!kw) return;
@@ -198,6 +215,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await ensureDemoData();
   ai.close();
   renderNav();
+  renderStorageBadge();
   renderWorkspace();
 
   document.getElementById('aiInput').addEventListener('keydown', e => {

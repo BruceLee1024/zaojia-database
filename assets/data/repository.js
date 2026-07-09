@@ -1,6 +1,6 @@
-// Repository 层：所有 IndexedDB 访问的唯一入口
-// 业务层不准直接碰 idb-keyval，必须走这里
-import { idb } from './idb-bridge.js?v=3.9';
+// Repository 层：所有业务数据访问的唯一入口
+// 业务层不准直接碰 IndexedDB 或本地文件夹，必须走这里
+import { storageGet, storageSet } from './storage.js?v=1.0';
 
 export const STORES = {
   quota_items: 'quota_items',
@@ -16,8 +16,8 @@ export const STORES = {
   experience_cards: 'experience_cards',
 };
 
-export const dbGetAll = async store => (await idb.get(store)) || [];
-export const dbSetAll = (store, arr) => idb.set(store, arr);
+export const dbGetAll = async store => (await storageGet(store)) || [];
+export const dbSetAll = (store, arr) => storageSet(store, arr);
 
 // 通用 CRUD
 export async function dbAdd(store, obj) {

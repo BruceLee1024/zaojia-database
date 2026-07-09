@@ -2,13 +2,13 @@
 
 ![version](https://img.shields.io/badge/version-v5.13.0-0f766e)
 ![frontend](https://img.shields.io/badge/frontend-ES%20Modules-0f766e)
-![storage](https://img.shields.io/badge/storage-IndexedDB-0284c7)
+![storage](https://img.shields.io/badge/storage-IndexedDB%20%2B%20Local%20JSON-0284c7)
 ![backend](https://img.shields.io/badge/backend-none-64748b)
 ![AI](https://img.shields.io/badge/AI-experience%20knowledge%20base-f59e0b)
 
-标签：`工程造价` `企业定额` `工程量清单` `报价版本` `指标分析` `AI 助手` `经验知识库` `IndexedDB` `纯前端`
+标签：`工程造价` `企业定额` `工程量清单` `报价版本` `指标分析` `AI 助手` `经验知识库` `本地 JSON` `IndexedDB` `纯前端`
 
-一个纯前端的造价数据库、指标分析和 AI 报价辅助工具。应用不需要后端，业务数据保存在浏览器 IndexedDB，AI Key 仅保存在本机 `localStorage`。
+一个纯前端的造价数据库、指标分析和 AI 报价辅助工具。应用不需要后端，业务数据默认保存在浏览器 IndexedDB，也可在设置页切换为用户授权的本地文件夹 JSON 存储；AI Key 仅保存在本机 `localStorage`。
 
 当前版本：`v5.13`，重点完善导入中心、定额库工作台、项目工作台、报价编制首屏、归档安全校验、跨模块搜索、本地 vendor 依赖、基础可访问性，以及清单、导入、项目、版本、审查、指标和定额录入 AI 辅助补全。
 
@@ -33,7 +33,7 @@ python3 -m http.server 8000
 | 指标分析 | 基于数据引擎正式样本统计极值、分位数、中位数和均值 |
 | AI 助手 | 本地指令 + 远端模型，用于查造价、推荐定额、检查缺单价 |
 | 经验萃取 | 将报价审查、版本调整和项目归档里的判断沉淀为可检索、可复核的经验知识库 |
-| 设置 | AI 配置、数据引擎、JSON 备份恢复、演示数据加载和重置 |
+| 设置 | AI 配置、本地数据文件夹、数据引擎、JSON 备份恢复、演示数据加载和重置 |
 
 ## 文件结构
 
@@ -44,7 +44,7 @@ python3 -m http.server 8000
 ├─ assets/
 │  ├─ views/               # 各功能页面
 │  ├─ services/            # 业务逻辑
-│  ├─ data/                # IndexedDB、Excel、演示数据
+│  ├─ data/                # 存储适配、IndexedDB、Excel、演示数据
 │  ├─ ai/                  # 本地指令和远端 LLM 调用
 │  └─ utils/               # DOM、统计、造价计算等工具
 ├─ data/                   # JSON 备份建议存放目录
@@ -61,7 +61,7 @@ python3 -m http.server 8000
 
 ## 数据自动沉淀
 
-系统内置本地数据引擎，所有数据仍保存在浏览器 IndexedDB，不上传服务器。第一版采用审慎自动策略：
+系统内置本地数据引擎，所有数据保存在当前本机存储模式中，不上传服务器。第一版采用审慎自动策略：
 
 - 导入工程量清单 Excel 后，自动生成候选样本和质量报告。
 - 保存报价版本后，自动沉淀为不可变版本样本。
@@ -82,7 +82,7 @@ python3 -m http.server 8000
 - AI 助手查询经验时优先检索已确认经验卡，并记录复用次数。
 - 经验卡不参与造价指标计算，只作为复盘、报价辅助和管理判断的知识资产。
 
-设置页可导出 JSON 备份，也可导入备份恢复到另一台机器。导入 JSON 会覆盖当前定额、项目、清单、报价版本、指标和 AI 配置，建议先导出当前备份。
+设置页可选择本地数据文件夹，启用后会生成 `manifest.json`、`stores/*.json` 和 `backups/*.json`；Chrome / Edge 支持最佳。设置页也可导出 JSON 备份，或导入备份恢复到另一台机器。导入 JSON 会覆盖当前定额、项目、清单、报价版本、指标和 AI 配置，建议先导出当前备份。
 
 ## 测试
 

@@ -65,8 +65,62 @@ function testExcelRows() {
   assert.equal(nameColumnBoq.unit, '根');
 }
 
+class MemoryDirectoryHandle {
+  constructor(name) {
+    this.name = name;
+    this.kind = 'directory';
+    this.directories = new Map();
+    this.files = new Map();
+  }
+
+  async getDirectoryHandle(name, options = {}) {
+    if (!this.directories.has(name)) {
+      if (!options.create) throw notFound();
+      this.directories.set(name, new MemoryDirectoryHandle(name));
+    }
+    return this.directories.get(name);
+  }
+
+  async getFileHandle(name, options = {}) {
+    if (!this.files.has(name)) {
+      if (!options.create) throw notFound();
+      this.files.set(name, new MemoryFileHandle(name));
+    }
+    return this.files.get(name);
+  }
+
+  async queryPermission() { return 'granted'; }
+  async requestPermission() { return 'granted'; }
+}
+
+class MemoryFileHandle {
+  constructor(name) {
+    this.name = name;
+    this.kind = 'file';
+    this.content = '';
+  }
+
+  async getFile() {
+    return { text: async () => this.content };
+  }
+
+  async createWritable() {
+    return {
+      write: async value => { this.content = String(value); },
+      close: async () => {},
+    };
+  }
+}
+
+function notFound() {
+  const err = new Error('Not found');
+  err.name = 'NotFoundError';
+  return err;
+}
+
 testCosting();
 testExcelRows();
+await testLocalFolderJsonStorage();
 await testVersions();
 await testArchiveEligibility();
 await testDataEngine();
@@ -75,6 +129,40 @@ await testAIAssistService();
 await testExperienceService();
 await testBuiltinDemoData();
 console.log('All tests passed');
+
+async function testLocalFolderJsonStorage() {
+  globalThis.localStorage = {
+    getItem: () => null,
+    setItem: () => {},
+  };
+  globalThis.window = {
+    idbKeyval: {
+      get: async () => null,
+      set: async () => {},
+    },
+  };
+  const storage = await import('../assets/data/storage.js?v=test-folder-json');
+  const root = new MemoryDirectoryHandle('污水造价数据库');
+  await storage.writeStoresToDirectory(root, {
+    projects: [{ id: 'p-local', name: '本地项目' }],
+    project_boq: [{ id: 'b-local', projectId: 'p-local', name: '土方' }],
+  }, { backupLabel: 'test' });
+
+  const projects = await storage.readStoreFromDirectory(root, 'projects');
+  assert.equal(projects.length, 1);
+  assert.equal(projects[0].name, '本地项目');
+  const storesDir = await root.getDirectoryHandle('stores');
+  const projectsFile = await storesDir.getFileHandle('projects.json');
+  const projectsPayload = JSON.parse(await (await projectsFile.getFile()).text());
+  assert.equal(projectsPayload.store, 'projects');
+  assert.equal(Array.isArray(projectsPayload.records), true);
+  const manifestFile = await root.getFileHandle('manifest.json');
+  const manifest = JSON.parse(await (await manifestFile.getFile()).text());
+  assert.equal(manifest.storage, 'local-folder-json');
+  assert.equal(manifest.stores.projects.file, 'stores/projects.json');
+  const backupsDir = await root.getDirectoryHandle('backups');
+  assert.equal([...backupsDir.files.keys()].some(name => name.startsWith('test-') && name.endsWith('.json')), true);
+}
 
 async function testVersions() {
   const memory = new Map();
