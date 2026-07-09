@@ -1,0 +1,155 @@
+// 全局搜索：聚合定额、项目、指标、经验和常用入口
+import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo } from '../data/repository.js?v=3.9';
+import { fmtMoney } from '../utils/dom.js';
+import { hasMissingPrice } from '../utils/costing.js?v=3.9';
+
+const TYPE_META = {
+  quota: { label: '定额', icon: 'menu_book' },
+  project: { label: '项目', icon: 'folder_managed' },
+  indicator: { label: '指标', icon: 'analytics' },
+  experience: { label: '经验', icon: 'psychology_alt' },
+  import_action: { label: '导入', icon: 'upload_file' },
+};
+
+export async function searchAll(keyword = '') {
+  const kw = String(keyword || '').trim().toLowerCase();
+  if (!kw) return [];
+  const [quotas, projects, boq, versions, indicators, cards] = await Promise.all([
+    quotaRepo.all(),
+    projectRepo.all(),
+    boqRepo.all(),
+    versionRepo.all(),
+    indicatorRepo.all(),
+    experienceCardRepo.all(),
+  ]);
+  return [
+    ...importActionResults(kw),
+    ...quotaResults(quotas, kw),
+    ...projectResults(projects, boq, versions, kw),
+    ...indicatorResults(indicators, kw),
+    ...experienceResults(cards, kw),
+  ].sort((a, b) => b.score - a.score).slice(0, 24);
+}
+
+export function searchGroups(results = []) {
+  return ['quota', 'project', 'indicator', 'experience', 'import_action']
+    .map(type => ({ type, meta: TYPE_META[type], items: results.filter(r => r.type === type) }))
+    .filter(group => group.items.length);
+}
+
+function result(type, id, title, subtitle, targetView, params, score = 1, excerpt = '') {
+  return {
+    id: `${type}:${id}`,
+    type,
+    title,
+    subtitle,
+    excerpt,
+    score,
+    icon: TYPE_META[type]?.icon || 'search',
+    actionLabel: `打开${TYPE_META[type]?.label || ''}`,
+    targetView,
+    params,
+  };
+}
+
+function quotaResults(rows, kw) {
+  return rows.filter(item => includes(item, kw, ['name', 'feature', 'category', 'unit', 'tags']))
+    .slice(0, 8)
+    .map(item => result(
+      'quota',
+      item.id,
+      item.name || '未命名定额',
+      `${item.category || '未分类'} · ${item.unit || '-'} · ${hasMissingPrice(item.priceTotal) ? '缺单价' : fmtMoney(item.priceTotal)}`,
+      'quota',
+      { keyword: item.name || kw, selectedId: item.id, priceStatus: hasMissingPrice(item.priceTotal) ? 'missing' : '' },
+      scoreText(item.name, kw) + 20,
+      item.feature || ''
+    ));
+}
+
+function projectResults(projects, lines, versions, kw) {
+  return projects.filter(project => includes(project, kw, ['name', 'type', 'scale', 'process', 'structure', 'status']))
+    .slice(0, 8)
+    .map(project => {
+      const projectLines = lines.filter(line => line.projectId === project.id);
+      const missing = projectLines.filter(line => hasMissingPrice(line.unitPrice)).length;
+      const projectVersions = versions.filter(version => version.projectId === project.id).length;
+      return result(
+        'project',
+        project.id,
+        project.name || '未命名项目',
+        `${project.type || '未分类'} · ${projectLines.length} 条清单 · ${missing ? `缺价 ${missing}` : '价格完整'} · ${projectVersions} 个版本`,
+        missing ? 'boq' : 'projects',
+        missing ? { projectId: project.id, priceStatus: 'missing' } : { keyword: project.name || kw, selectedId: project.id },
+        scoreText(project.name, kw) + 18,
+        [project.scale, project.process, project.structure].filter(Boolean).join(' / ')
+      );
+    });
+}
+
+function indicatorResults(rows, kw) {
+  return rows.filter(item => includes(item, kw, ['metric', 'typeKey', 'category', 'confidence']))
+    .slice(0, 6)
+    .map(item => result(
+      'indicator',
+      `${item.metric}:${item.typeKey}`,
+      item.metric || '未命名指标',
+      `${item.typeKey || '未分桶'} · 样本 ${item.n || 0} · ${item.confidence || '无评级'}`,
+      'indicators',
+      { keyword: item.metric || kw, selectedFamily: familyOf(item.metric) },
+      scoreText(item.metric, kw) + 12,
+      item.category || ''
+    ));
+}
+
+function experienceResults(rows, kw) {
+  return rows.filter(card => (card.reviewStatus || card.status) !== 'archived')
+    .filter(card => includes(card, kw, ['title', 'lesson', 'summary', 'projectNameSnapshot', 'costCategory', 'processType', 'keywords', 'tags']))
+    .slice(0, 6)
+    .map(card => result(
+      'experience',
+      card.id,
+      card.title || '未命名经验',
+      `${card.projectNameSnapshot || '未关联项目'} · ${card.reviewStatus || card.status || '经验'}`,
+      'experience',
+      { keyword: kw, selectedId: card.id, projectId: card.projectId || '' },
+      scoreText(card.title, kw) + 10,
+      card.lesson || card.summary || ''
+    ));
+}
+
+function importActionResults(kw) {
+  const actions = [
+    ['boq', '导入项目工程量清单', 'Excel 清单入库，先质检再写入项目', { view: 'importer', params: { mode: 'boq' } }],
+    ['quota', '导入企业定额库', '上传定额 Excel，进入定额库检查价格', { view: 'importer', params: { action: 'quota' } }],
+    ['backup', '导入 JSON 备份', '恢复本地 IndexedDB 业务数据', { view: 'settings', params: { section: 'backup' } }],
+    ['version', '历史报价 / 版本', '打开工程量清单保存或管理报价版本', { view: 'boq', params: {} }],
+  ];
+  return actions
+    .filter(([id, title, subtitle]) => `${id} ${title} ${subtitle}`.toLowerCase().includes(kw))
+    .map(([id, title, subtitle, target]) => result('import_action', id, title, subtitle, target.view, target.params, 8));
+}
+
+function includes(obj, kw, fields) {
+  return fields.some(field => {
+    const value = obj?.[field];
+    return Array.isArray(value)
+      ? value.join(' ').toLowerCase().includes(kw)
+      : String(value || '').toLowerCase().includes(kw);
+  });
+}
+
+function scoreText(value, kw) {
+  const text = String(value || '').toLowerCase();
+  if (text === kw) return 100;
+  if (text.startsWith(kw)) return 70;
+  if (text.includes(kw)) return 40;
+  return 0;
+}
+
+function familyOf(metric = '') {
+  if (metric.includes('单水')) return '单水造价';
+  if (metric.includes('单方')) return '单方造价';
+  if (metric.includes('分项')) return '分项造价';
+  return '总造价';
+}

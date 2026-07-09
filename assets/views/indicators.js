@@ -1,6 +1,7 @@
 // 视图：指标分析
 import { indicatorService } from '../services/indicatorService.js?v=3.9';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=1.0';
 import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=3.9';
 import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js';
 
@@ -20,6 +21,11 @@ let cache = { indicators: [], projects: [], archived: [], benchmark: null, estim
 const chartState = { confidence: null, year: null };
 
 export async function render() {
+  const params = window.__app?.state?.routeParams || {};
+  if (params.keyword != null) state.keyword = params.keyword;
+  if (params.selectedFamily) state.selectedFamily = params.selectedFamily;
+  if (params.benchmarkProjectId) state.benchmarkProjectId = params.benchmarkProjectId;
+  if (params.filters) state.filters = { ...state.filters, ...params.filters };
   await indicatorService.recompute(scopeOptions());
   cache.projects = await projectRepo.all();
   cache.archived = cache.projects.filter(p => p.status === 'archived');
@@ -35,14 +41,42 @@ export async function render() {
   document.getElementById('workspace').innerHTML = `
     <div class="min-h-full flex flex-col gap-3 max-w-[1680px] mx-auto">
       ${decisionHeader()}
+      ${trustExplainer()}
       ${decisionFilters()}
       ${decisionCanvas()}
+      ${estimateView()}
       <section class="card p-0 overflow-hidden">
         ${benchmarkQueue()}
       </section>
     </div>
   `;
   drawCharts();
+}
+
+function trustExplainer() {
+  return `<section class="rounded-lg border border-slate-200 bg-white px-4 py-3">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 text-sm">
+      ${trustTile('保存版本', '不可变报价快照，可用于回退、对比和版本样本；默认不等同于正式项目归档。', 'history')}
+      ${trustTile('归档项目', '价格完整、工程量可信且已有版本后，才沉淀为正式指标样本。', 'inventory_2')}
+      ${trustTile('经验卡', '来自报价审查、版本保存或项目归档复盘，供 AI 检索复用，不参与指标计算。', 'psychology_alt')}
+    </div>
+    <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+      <span>样本不足时建议：</span>
+      <button onclick="window.__app.go('projects')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-teal-700">去项目管理归档</button>
+      <button onclick="window.__app.go('boq')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-teal-700">去清单保存版本</button>
+      <button onclick="window.__app.go('settings')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-teal-700">去设置重建指标</button>
+    </div>
+  </section>`;
+}
+
+function trustTile(title, desc, icon) {
+  return `<div class="rounded border border-slate-200 bg-slate-50 px-3 py-2 flex items-start gap-3">
+    <span class="material-symbols-outlined mt-0.5 text-[20px] text-teal-700">${icon}</span>
+    <span>
+      <span class="block font-semibold text-slate-900">${title}</span>
+      <span class="mt-1 block text-xs leading-5 text-slate-500">${desc}</span>
+    </span>
+  </div>`;
 }
 
 function expose() {
@@ -59,6 +93,19 @@ function expose() {
     updateKeyword: async value => { state.keyword = value; await render(); },
     selectFamily: async family => { state.selectedFamily = family; await render(); },
     addEstimate: () => toast('已加入估算参考，可在快速估算中继续调整', 'success'),
+    parseEstimate: async () => {
+      const text = document.getElementById('estimatePrompt')?.value || '';
+      const result = parseEstimatePrompt(text);
+      (result.suggestions || []).forEach(item => {
+        if (item.field === 'area') state.estimate.area = item.suggestedValue;
+        if (item.field === 'dailyCapacity') state.estimate.dailyCapacity = item.suggestedValue;
+        if (item.field === 'process') state.filters.process = item.suggestedValue;
+        if (item.field === 'type') state.filters.type = item.suggestedValue;
+      });
+      toast(result.summary || '已提取估算参数', 'success');
+      await render();
+    },
+    explainEstimate: () => showAiIndicatorExplain(),
     showMouth: () => showIndicatorMouth(),
     drill: idx => drill(cache.indicators[idx]),
     selectProject: async value => { state.benchmarkProjectId = value; await render(); },
@@ -576,7 +623,7 @@ function showIndicatorMouth() {
       ${lineageTile('适用边界', bucketParts(it?.typeKey).join(' / ') || '当前筛选口径')}
       ${lineageTile('风险提示', Number(it?.n || 0) < 3 ? '样本数量不足，仅可作为早期估算或复核提示。' : '可用于同类项目快速校核，正式报价前仍需结合清单复核。')}
     </div>
-  `, `<button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>`);
+  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>`);
 }
 
 function escAttr(value) {
@@ -975,6 +1022,12 @@ function estimateView() {
       <div class="font-semibold">快速估算输入</div>
       <div class="mt-1 text-xs text-slate-500">沿用顶部筛选条件作为估算口径。</div>
       <div class="mt-4 space-y-3">
+        <label class="block text-xs font-medium text-slate-500">一句话描述项目
+          <textarea id="estimatePrompt" rows="3" class="mt-1 w-full rounded border border-slate-300 px-2 py-2 text-sm" placeholder="例如：新建 5 万吨/日 AAO 污水厂，占地 4 公顷"></textarea>
+        </label>
+        <button onclick="window.__indicators.parseEstimate()" class="h-9 w-full rounded border border-teal-300 bg-teal-50 text-sm text-teal-700 inline-flex items-center justify-center gap-1">
+          <span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 提取估算参数
+        </button>
         <label class="block text-xs font-medium text-slate-500">建筑面积（㎡）
           <input value="${esc(state.estimate.area)}" oninput="window.__indicators.updateEstimate('area', this.value)" type="number" step="0.01" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm tabular-nums" />
         </label>
@@ -987,11 +1040,27 @@ function estimateView() {
       ${estimateCard('按单方造价估算', est.byArea, est.areaInd)}
       ${estimateCard('按单水造价估算', est.byWater, est.waterInd)}
       <div class="col-span-2 card p-4">
-        <div class="font-semibold">估算说明</div>
+        <div class="flex items-center justify-between gap-3">
+          <div class="font-semibold">估算说明</div>
+          <button onclick="window.__indicators.explainEstimate()" class="px-2.5 py-1.5 text-xs rounded border border-teal-300 bg-teal-50 text-teal-700 inline-flex items-center gap-1">
+            <span class="material-symbols-outlined text-[15px]">auto_awesome</span>AI 解读指标
+          </button>
+        </div>
         <p class="mt-2 text-sm leading-6 text-slate-600">估算区间使用同类历史样本的 P25 / 中位数 / P75 生成。样本数不足或顶部筛选过窄时，请放宽筛选后再用于报价决策。</p>
       </div>
     </div>
   </div>`;
+}
+
+function showAiIndicatorExplain() {
+  const result = explainIndicators({ estimate: cache.estimate, filters: state.filters });
+  openModal('AI 指标解读', `
+    <div class="space-y-3 text-sm">
+      <div class="rounded border border-teal-200 bg-teal-50 p-3 text-teal-900 whitespace-pre-line">${esc(result.summary)}</div>
+      ${(result.warnings || []).length ? `<div class="rounded border border-amber-200 bg-amber-50 p-3 text-amber-800">${result.warnings.map(esc).join('<br>')}</div>` : ''}
+      <div class="text-xs text-slate-500">指标解读基于当前筛选和样本池，样本不足时不能作为强结论。</div>
+    </div>
+  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">知道了</button>`);
 }
 
 function estimateCard(title, data, indicator) {
@@ -1136,7 +1205,7 @@ function showLineage(id) {
         </div>
       </div>
     </div>
-  `, `<button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>`);
+  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>`);
 }
 
 function lineageTile(label, value) {
@@ -1287,7 +1356,7 @@ function drill(it) {
         <canvas id="drillChart" height="120"></canvas>
       </div>
     </div>
-  `, `<button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">关闭</button>`);
+  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">关闭</button>`);
   if (!values.length || typeof Chart === 'undefined') return;
   const bins = 6;
   const min = values[0], max = values[values.length - 1];

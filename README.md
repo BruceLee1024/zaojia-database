@@ -1,6 +1,6 @@
 # 工程造价数据库 · 企业定额与指标平台
 
-![version](https://img.shields.io/badge/version-v4.6.0-0f766e)
+![version](https://img.shields.io/badge/version-v5.13.0-0f766e)
 ![frontend](https://img.shields.io/badge/frontend-ES%20Modules-0f766e)
 ![storage](https://img.shields.io/badge/storage-IndexedDB-0284c7)
 ![backend](https://img.shields.io/badge/backend-none-64748b)
@@ -10,7 +10,7 @@
 
 一个纯前端的造价数据库、指标分析和 AI 报价辅助工具。应用不需要后端，业务数据保存在浏览器 IndexedDB，AI Key 仅保存在本机 `localStorage`。
 
-当前版本：`v4.6`，重点完善负责人仪表盘、报价版本复盘、AI 经验萃取质量评估、经验知识库、指标主表体验，以及 landing + `/app/` 产品路由。
+当前版本：`v5.13`，重点完善导入中心、定额库工作台、项目工作台、报价编制首屏、归档安全校验、跨模块搜索、本地 vendor 依赖、基础可访问性，以及清单、导入、项目、版本、审查、指标和定额录入 AI 辅助补全。
 
 ## 快速开始
 
@@ -86,7 +86,7 @@ python3 -m http.server 8000
 
 ## 测试
 
-当前没有构建步骤。运行轻量逻辑测试：
+当前没有构建步骤，Vercel 以静态文件方式部署 `/app/`；前端依赖已放在 `assets/vendor/`，避免运行时依赖公共 CDN。运行轻量逻辑测试：
 
 ```bash
 node tests/run.mjs

@@ -1,6 +1,6 @@
 // 视图：设置
 import { getAIConfig, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=3.9';
-import { testConnection } from '../ai/remoteLLM.js?v=3.9';
+import { testAIConnection } from '../services/aiAssistService.js?v=1.0';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
 import { experienceService } from '../services/experienceService.js?v=3.9';
 import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from '../data/repository.js?v=3.9';
@@ -36,23 +36,32 @@ export async function render() {
           </label>
           <div class="flex gap-2 pt-2">
             <button id="btnSave" class="px-3 py-1.5 text-sm brand-bg text-white rounded">保存</button>
-            <button id="btnTest" class="px-3 py-1.5 text-sm border rounded">连通测试</button>
+            <button id="btnTest" class="px-3 py-1.5 text-sm border rounded">测试 AI 连接</button>
           </div>
         </div>
       </div>
 
       <div class="card p-4">
-        <div class="font-semibold mb-2">数据管理</div>
+        <div class="font-semibold mb-2">备份与恢复</div>
         <div class="space-y-3 text-sm">
           <div class="flex gap-2 flex-wrap">
             <button id="btnImport" class="px-3 py-1.5 text-sm border rounded">导入 JSON 备份</button>
             <button id="btnExport" class="px-3 py-1.5 text-sm border rounded">导出 JSON 备份</button>
             <button id="btnDemo" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">加载演示数据</button>
-            <button id="btnDemoReset" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">重置演示数据</button>
-            <button id="btnClear" class="px-3 py-1.5 text-sm border rounded text-red-600 border-red-300">清空全部</button>
+          </div>
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+            所有业务数据保存在当前浏览器 IndexedDB；AI Key 仅保存在本机 localStorage。换电脑、更换浏览器或清理浏览器数据前，请先导出 JSON 备份。
           </div>
           <div class="text-xs text-gray-500 leading-relaxed">
-            所有业务数据保存在浏览器 IndexedDB；AI Key 仅保存在本机 localStorage。<br>• 备份：导出 JSON 文件，可在另一台机器导入还原，请按商业敏感数据妥善保存。<br>• 导入备份会覆盖当前定额、项目、清单、报价版本、经验卡与指标。<br>• 演示数据：3 个项目（产品水池/预处理车间/变电站）+ 现有定额库，自动入库用于体验。
+            备份文件包含定额、项目、清单、报价版本、经验卡和指标样本，属于商业敏感数据，请按企业资料妥善保存。
+          </div>
+          <div class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
+            <div class="font-semibold text-red-800">危险操作</div>
+            <div class="mt-1 text-xs leading-5 text-red-700">以下操作会覆盖或删除业务数据。执行前建议先导出 JSON 备份。</div>
+            <div class="mt-3 flex gap-2 flex-wrap">
+            <button id="btnDemoReset" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">重置演示数据</button>
+            <button id="btnClear" class="px-3 py-1.5 text-sm border rounded text-red-600 border-red-300">清空全部</button>
+            </div>
           </div>
         </div>
       </div>
@@ -124,9 +133,9 @@ export async function render() {
         <ol class="list-decimal pl-5 text-sm space-y-1 text-gray-700">
           <li>首次使用：点「加载演示数据」快速体验，或点「导入 Excel」上传你自己的定额库。</li>
           <li>新建项目 → 进入「工程量清单」→ 点「+ 添加清单」选择定额 → 填工程量 → 自动算价。</li>
-          <li>项目完工后，编辑项目把状态改为「已归档」，指标库会自动重算。</li>
+          <li>项目价格完整、工程量可信并保存报价版本后，再归档进入正式指标库。</li>
           <li>「指标分析」查看同类型项目造价区间，支持下钻到分项占比。</li>
-          <li>点击右上角「AI 助手」或左侧菜单，随时用自然语言查询指标 / 推荐定额。</li>
+          <li>点击右上角「AI 助手」，随时用自然语言查询指标 / 推荐定额。</li>
           <li>导出 Excel 报价单按你的现有格式：序号/编码/项目名称/项目特征/单位/工程量/综合单价/合价。</li>
         </ol>
       </div>
@@ -148,8 +157,8 @@ export async function render() {
   };
   document.getElementById('btnTest').onclick = async () => {
     document.getElementById('btnSave').click();
-    try { await testConnection(); toast('✅ 连通成功', 'success'); }
-    catch (e) { toast('❌ ' + e.message, 'error'); }
+    const result = await testAIConnection();
+    toast(result.summary, result.confidence === 'high' ? 'success' : 'error');
   };
   document.getElementById('btnImport').onclick = () => importAll();
   document.getElementById('btnExport').onclick = () => exportAll();
@@ -196,7 +205,8 @@ export async function render() {
     window.__app.go('dashboard');
   };
   document.getElementById('btnClear').onclick = async () => {
-    if (!confirm('清空所有定额、项目、清单、报价版本、经验卡和指标？建议先导出 JSON 备份。')) return;
+    const typed = prompt('此操作会清空所有定额、项目、清单、报价版本、经验卡和指标；不会删除 AI 配置。请输入“清空全部”确认。');
+    if (typed !== '清空全部') return;
     await clearBusinessData();
     location.reload();
   };

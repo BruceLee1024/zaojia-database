@@ -3,9 +3,13 @@ import { tryLocalCommand } from '../ai/localCommands.js?v=3.9';
 import { callLLM } from '../ai/remoteLLM.js?v=3.9';
 
 const history = [];
+let aiReturnFocus = null;
 
 export function open() {
+  aiReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   document.body.classList.add('ai-open');
+  document.getElementById('aiDrawer')?.setAttribute('aria-hidden', 'false');
+  document.getElementById('aiOpenButton')?.setAttribute('aria-expanded', 'true');
   document.getElementById('aiInput').focus();
   if (!document.getElementById('aiMsgs').children.length) {
     addMsg('assistant',
@@ -15,7 +19,17 @@ export function open() {
     addSuggestions();
   }
 }
-export function close() { document.body.classList.remove('ai-open'); }
+export function close() {
+  document.body.classList.remove('ai-open');
+  document.getElementById('aiDrawer')?.setAttribute('aria-hidden', 'true');
+  document.getElementById('aiOpenButton')?.setAttribute('aria-expanded', 'false');
+  if (aiReturnFocus && document.contains(aiReturnFocus)) aiReturnFocus.focus();
+  aiReturnFocus = null;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('ai-open')) close();
+});
 
 function addMsg(role, text) {
   const div = document.createElement('div');

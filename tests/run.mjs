@@ -68,7 +68,10 @@ function testExcelRows() {
 testCosting();
 testExcelRows();
 await testVersions();
+await testArchiveEligibility();
 await testDataEngine();
+await testGlobalSearch();
+await testAIAssistService();
 await testExperienceService();
 await testBuiltinDemoData();
 console.log('All tests passed');
@@ -190,6 +193,11 @@ async function testDataEngine() {
   assert.equal((await repo.dataFactRepo.all()).length, 1);
   assert.equal((await repo.dataCandidateRepo.all()).length, 1);
 
+  const { versionService } = await import('../assets/services/versionService.js?v=test-data-engine');
+  await repo.boqRepo.replaceAll([
+    { id: 'l21', projectId: 'p2', quotaItemId: 'q1', code: '001', name: '土方', feature: '综合', unit: 'm³', qty: 10, factor: 1, unitPrice: 10, amount: 100 },
+  ]);
+  await versionService.createFromCurrent('p2', { name: '归档前版本' });
   await projectService.archive('p2');
   const facts = await repo.dataFactRepo.all();
   assert.equal(facts.some(f => f.factType === 'project_cost' && f.sourceType === 'archived_project'), true);
@@ -224,6 +232,130 @@ async function testDataEngine() {
   };
   assert.equal(Array.isArray(backupShape.data_facts), true);
   assert.equal(Array.isArray(backupShape.data_quality_reports), true);
+}
+
+async function testArchiveEligibility() {
+  const memory = new Map();
+  globalThis.localStorage = {
+    getItem: key => memory.has(`wf:${key}`) ? memory.get(`wf:${key}`) : null,
+    setItem: (key, value) => memory.set(`wf:${key}`, value),
+  };
+  globalThis.window = {
+    idbKeyval: {
+      get: async key => memory.get(key),
+      set: async (key, value) => memory.set(key, value),
+    },
+  };
+  const repo = await import('../assets/data/repository.js?v=test-workflow');
+  const { archiveEligibility } = await import('../assets/services/projectWorkflow.js?v=test-workflow');
+  const { projectService } = await import('../assets/services/projectService.js?v=test-workflow');
+  const { versionService } = await import('../assets/services/versionService.js?v=test-workflow');
+
+  const project = { id: 'pa', name: '归档校验项目', status: 'doing', totalCost: 0 };
+  await repo.projectRepo.replaceAll([project]);
+  await repo.boqRepo.replaceAll([
+    { id: 'la1', projectId: 'pa', name: '缺价项', unit: 'm²', qty: 0, factor: 1, unitPrice: 0, amount: 0 },
+  ]);
+  await repo.versionRepo.replaceAll([]);
+  let eligibility = archiveEligibility(project, await repo.boqRepo.byProject('pa'), []);
+  assert.equal(eligibility.allowed, false);
+  assert.equal(eligibility.blockers.some(b => b.id === 'missing_price'), true);
+  assert.equal(eligibility.blockers.some(b => b.id === 'zero_qty'), true);
+  assert.equal(eligibility.blockers.some(b => b.id === 'no_version'), true);
+  await assert.rejects(() => projectService.archive('pa'), err => err.code === 'ARCHIVE_BLOCKED');
+
+  await repo.boqRepo.replaceAll([
+    { id: 'la1', projectId: 'pa', quotaItemId: 'q1', name: '合格项', unit: 'm²', qty: 10, factor: 1, unitPrice: 20, amount: 200 },
+  ]);
+  eligibility = archiveEligibility(project, await repo.boqRepo.byProject('pa'), []);
+  assert.equal(eligibility.allowed, false);
+  assert.equal(eligibility.blockers.some(b => b.id === 'no_version'), true);
+  await versionService.createFromCurrent('pa', { name: '合格版本' });
+  eligibility = archiveEligibility(project, await repo.boqRepo.byProject('pa'), await repo.versionRepo.byProject('pa'));
+  assert.equal(eligibility.allowed, true);
+}
+
+async function testGlobalSearch() {
+  const memory = new Map();
+  globalThis.localStorage = {
+    getItem: key => memory.has(`gs:${key}`) ? memory.get(`gs:${key}`) : null,
+    setItem: (key, value) => memory.set(`gs:${key}`, value),
+  };
+  globalThis.window = {
+    idbKeyval: {
+      get: async key => memory.get(key),
+      set: async (key, value) => memory.set(key, value),
+    },
+  };
+  const repo = await import('../assets/data/repository.js?v=test-search');
+  const { searchAll } = await import('../assets/services/globalSearchService.js?v=test-search');
+  await repo.quotaRepo.replaceAll([{ id: 'q-search', name: '水池防水定额', feature: '池壁', category: '防水防腐', unit: 'm²', priceTotal: 118 }]);
+  await repo.projectRepo.replaceAll([{ id: 'p-search', name: '水池项目', type: '水厂', scale: '中型', process: 'AAO', structure: '钢筋砼', status: 'doing' }]);
+  await repo.boqRepo.replaceAll([{ id: 'b-search', projectId: 'p-search', name: '水池防水', unit: 'm²', qty: 1, unitPrice: 0, amount: 0 }]);
+  await repo.versionRepo.replaceAll([{ id: 'v-search', projectId: 'p-search', name: '水池版本', totalCost: 0, lines: [] }]);
+  await repo.indicatorRepo.replaceAll([{ metric: '水池单水造价(元/(m³·d))', typeKey: '水厂 / 中型 / 钢筋砼', n: 2, confidence: '仅参考' }]);
+  await repo.experienceCardRepo.replaceAll([{ id: 'e-search', title: '水池防水报价经验', lesson: '防水报价需核对基层条件', reviewStatus: 'confirmed', projectNameSnapshot: '水池项目' }]);
+  const results = await searchAll('水池');
+  const types = new Set(results.map(r => r.type));
+  assert.equal(types.has('quota'), true);
+  assert.equal(types.has('project'), true);
+  assert.equal(types.has('indicator'), true);
+  assert.equal(types.has('experience'), true);
+  assert.equal(results.every(r => r.targetView && r.params), true);
+}
+
+async function testAIAssistService() {
+  const memory = new Map();
+  globalThis.localStorage = {
+    getItem: key => memory.has(`ai:${key}`) ? memory.get(`ai:${key}`) : null,
+    setItem: (key, value) => memory.set(`ai:${key}`, value),
+  };
+  globalThis.window = {
+    idbKeyval: {
+      get: async key => memory.get(key),
+      set: async (key, value) => memory.set(key, value),
+    },
+  };
+  const repo = await import('../assets/data/repository.js?v=test-ai-assist');
+  const ai = await import('../assets/services/aiAssistService.js?v=test-ai-assist');
+  await repo.quotaRepo.replaceAll([
+    { id: 'q-ai-1', name: 'C30 钢筋混凝土池壁', feature: '混凝土强度等级：C30', category: '混凝土与钢筋', unit: 'm³', priceTotal: 780, tags: ['混凝土', '池壁'] },
+    { id: 'q-ai-2', name: '池壁防水涂料', feature: '污水池内壁', category: '防水防腐', unit: 'm²', priceTotal: 118, tags: ['防水'] },
+  ]);
+  await repo.projectRepo.replaceAll([{ id: 'p-ai', name: '5 万吨/日 AAO 污水厂', type: '水厂', process: 'AAO' }]);
+  await repo.boqRepo.replaceAll([
+    { id: 'b-ai-1', projectId: 'p-ai', name: 'C30 钢筋混凝土池壁', feature: '', unit: '', qty: 10, factor: 1, unitPrice: 0, amount: 0 },
+  ]);
+  await repo.versionRepo.replaceAll([{ id: 'v-ai-1', projectId: 'p-ai', name: '上一版', totalCost: 100, lines: [] }]);
+  await repo.indicatorRepo.replaceAll([{ metric: '总造价(元)', typeKey: '水厂', n: 1 }]);
+  await repo.experienceCardRepo.replaceAll([{ id: 'e-ai', title: '防水经验', lesson: '防水需复核基层', reviewStatus: 'confirmed' }]);
+
+  const line = (await repo.boqRepo.byProject('p-ai'))[0];
+  const lineSuggestion = await ai.suggestBoqLine(line);
+  assert.equal(lineSuggestion.suggestions.some(s => s.field === 'unit'), true);
+  assert.equal(lineSuggestion.suggestions.some(s => s.field === 'unitPrice' && Number(s.suggestedValue) > 0), true);
+
+  const missing = await ai.suggestMissingPrices([line]);
+  assert.equal(missing.suggestions.length, 1);
+  assert.equal(missing.suggestions[0].confidence, 'high');
+
+  const mapping = await ai.suggestImportMapping(['项目名称', '工程量', '综合单价'], [{ 项目名称: '土方', 工程量: '10', 综合单价: '20' }]);
+  assert.equal(mapping.suggestions.some(s => s.targetField === 'name' && s.sourceHeader === '项目名称'), true);
+  assert.equal(mapping.suggestions.some(s => s.targetField === 'qty' && s.sourceHeader === '工程量'), true);
+
+  const project = ai.suggestProjectInfo('某县污水厂二期 5 万吨/日 AAO 改扩建');
+  assert.equal(project.suggestions.some(s => s.field === 'dailyCapacity' && s.suggestedValue === 5), true);
+  assert.equal(project.suggestions.some(s => s.field === 'process' && s.suggestedValue === 'AAO'), true);
+
+  const version = await ai.suggestVersionSummary('p-ai');
+  assert.equal(version.suggestions.some(s => s.field === 'name'), true);
+  assert.equal(version.suggestions.some(s => s.field === 'note'), true);
+
+  const smart = await ai.smartSearch('找缺价最多的项目');
+  assert.equal(smart.suggestions.some(s => s.targetView === 'boq' && s.params.priceStatus === 'missing'), true);
+
+  const connection = await ai.testAIConnection();
+  assert.equal(connection.confidence, 'low');
 }
 
 async function testExperienceService() {

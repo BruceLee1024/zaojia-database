@@ -15,6 +15,10 @@ const experienceState = {
 };
 
 export async function render() {
+  const params = window.__app?.state?.routeParams || {};
+  if (params.keyword != null) experienceState.keyword = params.keyword;
+  if (params.selectedId) experienceState.selectedId = params.selectedId;
+  if (params.projectId) experienceState.projectId = params.projectId;
   const [projects, dashboard, kb] = await Promise.all([
     projectRepo.all(),
     experienceService.dashboard(),
@@ -205,12 +209,12 @@ function renderReview(session, draft = null) {
           <span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 补问
         </button>
         <button id="expDraft" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100">
-          <span class="material-symbols-outlined text-[16px]">edit_note</span>生成草稿
+          <span class="material-symbols-outlined text-[16px]">edit_note</span>AI 生成草稿
         </button>
         <button id="expConfirm" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm brand-bg text-white rounded ${draft ? '' : 'opacity-50'}">
           <span class="material-symbols-outlined text-[16px]">inventory_2</span>确认入库
         </button>
-        <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border border-slate-300 bg-white rounded">关闭</button>
+        <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border border-slate-300 bg-white rounded">关闭</button>
       </div>
     </div>
   `);
@@ -367,7 +371,12 @@ function emptyKnowledgeList() {
         </div>
         <div class="min-w-0">
           <div class="font-medium text-slate-800">暂无经验条目</div>
-          <div class="mt-1 text-xs leading-5 text-slate-500">生成并确认复盘后，知识卡会在这里按一条一条的列表展示，方便快速扫描和打开维护。</div>
+          <div class="mt-1 text-xs leading-5 text-slate-500">经验卡来自报价审查、保存版本或项目归档复盘；确认后可被 AI 检索复用，但不参与指标计算。</div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button onclick="window.__app.go('boq')" class="rounded border border-teal-300 bg-white px-2.5 py-1 text-xs text-teal-700">去报价审查</button>
+            <button onclick="window.__app.go('boq')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700">去保存版本</button>
+            <button onclick="window.__app.go('projects')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700">去项目归档</button>
+          </div>
         </div>
       </div>
     </div>

@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>工程造价数据库 · 企业定额与指标平台</title>
 
-<!-- 依赖：Tailwind(CDN) / SheetJS(Excel 解析导出) / Chart.js(图表) / idb-keyval(IndexedDB) -->
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6.2.1/dist/umd.js"></script>
+<!-- 依赖：本地 vendor / SheetJS(Excel 解析导出) / Chart.js(图表) / idb-keyval(IndexedDB) -->
+<link href="../assets/vendor/material-symbols/material-symbols.css" rel="stylesheet" />
+<link href="../assets/vendor/fonts/fonts.css" rel="stylesheet" />
+<script src="../assets/vendor/tailwind/tailwindcss-cdn.js"></script>
+<script src="../assets/vendor/xlsx/xlsx.full.min.js"></script>
+<script src="../assets/vendor/chartjs/chart.umd.min.js"></script>
+<script src="../assets/vendor/idb-keyval/idb-keyval.umd.js"></script>
 
 <style>
   :root {
@@ -161,7 +161,7 @@
     <div class="px-5 py-4 text-[11px] text-slate-500 border-t border-slate-800 space-y-2">
       <div class="flex items-center justify-between">
         <span>运行版本</span>
-        <span class="font-data text-slate-400">v5.4</span>
+        <span class="font-data text-slate-400">v5.13</span>
       </div>
       <div class="flex items-center gap-2 text-slate-400">
         <span class="pulse-dot"></span>
@@ -198,7 +198,7 @@
           <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]" aria-hidden="true">search</span>
           <span class="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-data text-slate-400">Enter</span>
         </div>
-        <button onclick="window.__app.openAI()" class="h-9 px-3 text-sm brand-bg text-white flex items-center gap-1.5 shrink-0">
+        <button id="aiOpenButton" onclick="window.__app.openAI()" aria-controls="aiDrawer" aria-expanded="false" class="h-9 px-3 text-sm brand-bg text-white flex items-center gap-1.5 shrink-0">
           <span class="material-symbols-outlined text-[17px]" aria-hidden="true">auto_awesome</span>
           <span>AI 助手</span>
         </button>
@@ -213,12 +213,12 @@
 </div>
 
 <!-- 通用弹窗 -->
-<div id="modal" class="hidden fixed inset-0 z-50 modal-mask flex items-center justify-center p-6">
-  <div class="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden">
+<div id="modal" class="hidden fixed inset-0 z-50 modal-mask flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
+  <div id="modalPanel" tabindex="-1" class="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
       <div id="modalTitle" class="font-semibold"></div>
-      <button onclick="document.getElementById('modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-1">
-        <span class="material-symbols-outlined text-[20px]">close</span>
+      <button type="button" onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-1" aria-label="关闭弹窗">
+        <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
       </button>
     </div>
     <div id="modalBody" class="flex-1 overflow-auto scroll-thin p-5 bg-slate-50"></div>
@@ -227,20 +227,20 @@
 </div>
 
 <!-- AI 抽屉 -->
-<div id="aiDrawer" class="ai-drawer fixed right-0 top-0 bottom-0 bg-white z-40 flex flex-col border-l border-slate-200">
+<div id="aiDrawer" class="ai-drawer fixed right-0 top-0 bottom-0 bg-white z-40 flex flex-col border-l border-slate-200" role="dialog" aria-modal="false" aria-labelledby="aiDrawerTitle" aria-hidden="true">
   <div class="h-14 px-4 border-b border-slate-200 flex items-center justify-between shrink-0">
     <div class="min-w-0">
       <div class="font-semibold flex items-center gap-2">
         <span class="material-symbols-outlined text-[18px] text-teal-700">smart_toy</span>
-        <span>AI 造价助手</span>
+        <span id="aiDrawerTitle">AI 造价助手</span>
       </div>
       <div class="mt-0.5 text-[11px] text-slate-500">本地数据优先 · 不自动改清单</div>
     </div>
-    <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1">
-      <span class="material-symbols-outlined text-[20px]">close</span>
+    <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1" aria-label="关闭 AI 助手">
+      <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
     </button>
   </div>
-  <div id="aiMsgs" class="flex-1 min-h-0 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50"></div>
+  <div id="aiMsgs" class="flex-1 min-h-0 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50" role="log" aria-live="polite" aria-relevant="additions"></div>
   <div class="border-t border-slate-200 p-3 space-y-2 shrink-0 bg-white">
     <div class="flex gap-2">
       <input id="aiInput" type="text" placeholder="问点啥：5万m³/d 水池造价区间 / 推荐防水定额 …"
@@ -252,6 +252,6 @@
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="../app.js?v=5.4"></script>
+<script type="module" src="../app.js?v=5.13"></script>
 </body>
 </html>

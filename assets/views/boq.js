@@ -1,18 +1,23 @@
 // 视图：工程量清单
 import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.9';
 import { boqService, groupForLine } from '../services/boqService.js?v=3.9';
+import { projectService } from '../services/projectService.js?v=3.9';
 import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=3.9';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=1.0';
 import { openReview } from './experience.js?v=4.4';
 import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
 import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=3.9';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=1.0';
 
+const BOQ_PAGE_SIZE = 500;
 const boqState = {
   keyword: '',
   priceStatus: '',
   riskStatus: '',
+  page: 1,
   selectedIds: new Set(),
   activeId: '',
   treeKeyword: '',
@@ -67,14 +72,30 @@ export async function render() {
     return;
   }
   window.__app.state.currentProjectId = proj.id;
+  const routeParams = window.__app.state.routeParams || {};
+  if ((!routeParams.projectId || routeParams.projectId === proj.id) && routeParams.priceStatus) {
+    boqState.priceStatus = routeParams.priceStatus;
+  }
+  if ((!routeParams.projectId || routeParams.projectId === proj.id) && routeParams.riskStatus) {
+    boqState.riskStatus = routeParams.riskStatus;
+  }
+  if ((!routeParams.projectId || routeParams.projectId === proj.id) && routeParams.keyword) {
+    boqState.keyword = routeParams.keyword;
+  }
   boqState.expandedProjectIds.add(proj.id);
 
   const allProjectBoq = await boqRepo.all();
   const boq = allProjectBoq.filter(line => line.projectId === proj.id);
+  const versions = await versionService.listByProject(proj.id);
   if (boqState.treeGroup && !structureGroups(boq, proj).some(group => group.id === boqState.treeGroup)) {
     boqState.treeGroup = '';
   }
   const filteredBoq = filterLines(boq);
+  const pageCount = Math.max(1, Math.ceil(filteredBoq.length / BOQ_PAGE_SIZE));
+  if (boqState.page > pageCount) boqState.page = pageCount;
+  if (boqState.page < 1) boqState.page = 1;
+  const pageStart = (boqState.page - 1) * BOQ_PAGE_SIZE;
+  const pageRows = filteredBoq.slice(pageStart, pageStart + BOQ_PAGE_SIZE);
   if (boqState.activeId && !filteredBoq.find(b => b.id === boqState.activeId)) boqState.activeId = '';
   const activeLine = boq.find(b => b.id === boqState.activeId) || filteredBoq[0] || null;
   if (!boqState.activeId && activeLine) boqState.activeId = activeLine.id;
@@ -84,59 +105,14 @@ export async function render() {
   const selectedCount = boq.filter(b => boqState.selectedIds.has(b.id)).length;
   const selectedTotal = boq.filter(b => boqState.selectedIds.has(b.id)).reduce((s, b) => s + (b.amount || 0), 0);
   const categories = groupByCategory(boq);
+  const workbench = boqWorkbenchStatus(proj, boq, versions, { selectedCount, selectedTotal, imported: routeParams.imported && (!routeParams.projectId || routeParams.projectId === proj.id) });
 
   document.getElementById('workspace').innerHTML = `
     <div class="h-full min-h-0 flex flex-col gap-3">
-      <section class="card p-4">
-        <div class="flex items-center gap-3">
-          <div class="text-sm text-slate-500">当前项目</div>
-          <select id="projSel" class="h-9 min-w-72 rounded border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800">
-            ${projects.map(p => `<option value="${p.id}" ${p.id === proj.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
-          </select>
-          <div class="flex-1"></div>
-          <button id="btnSaveVer" class="h-9 px-3 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">保存版本</button>
-          <button id="btnVersions" class="h-9 px-3 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">版本管理</button>
-          <button id="btnExp" class="h-9 px-3 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5">
-            <span class="material-symbols-outlined text-[18px]">download</span>导出报价单
-          </button>
-        </div>
-        <div class="mt-4 grid grid-cols-5 gap-3">
-          ${boqMetric('清单条目', boq.length, '条')}
-          ${boqMetric('缺单价风险', missingPriceCount, '处', missingPriceCount ? 'text-amber-700' : '')}
-          ${boqMetric('选中条目', selectedCount, '条')}
-          ${boqMetric('选中合价', fmtMoney(selectedTotal), '')}
-          ${boqMetric('项目总造价', fmtMoney(totalCost), '')}
-        </div>
-      </section>
-
-      <section class="card p-3">
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="relative flex-1 min-w-[280px]">
-            <span class="material-symbols-outlined pointer-events-none absolute left-3 top-2 text-[18px] text-slate-400">search</span>
-            <input id="boqKw" value="${esc(boqState.keyword)}" class="h-9 w-full rounded border border-slate-300 bg-white pl-9 pr-3 text-sm" placeholder="搜索编码 / 清单名称 / 项目特征..." />
-          </div>
-          <select id="boqPriceStatus" class="h-9 rounded border border-slate-300 bg-white px-2 text-sm">
-            <option value="" ${!boqState.priceStatus ? 'selected' : ''}>全部价格</option>
-            <option value="missing" ${boqState.priceStatus === 'missing' ? 'selected' : ''}>仅缺单价</option>
-            <option value="priced" ${boqState.priceStatus === 'priced' ? 'selected' : ''}>已有单价</option>
-          </select>
-          <select id="boqRiskStatus" class="h-9 rounded border border-slate-300 bg-white px-2 text-sm">
-            <option value="" ${!boqState.riskStatus ? 'selected' : ''}>全部状态</option>
-            <option value="missingPrice" ${boqState.riskStatus === 'missingPrice' ? 'selected' : ''}>缺单价</option>
-            <option value="zeroQty" ${boqState.riskStatus === 'zeroQty' ? 'selected' : ''}>工程量为 0</option>
-            <option value="factorRisk" ${boqState.riskStatus === 'factorRisk' ? 'selected' : ''}>系数异常</option>
-            <option value="unmatchedQuota" ${boqState.riskStatus === 'unmatchedQuota' ? 'selected' : ''}>未匹配定额</option>
-          </select>
-          <button id="btnAdd" class="h-9 inline-flex items-center gap-1.5 px-3 brand-bg text-white text-sm font-medium">
-            <span class="material-symbols-outlined text-[18px]">add</span>添加清单
-          </button>
-          <button id="btnImportBOQ" class="h-9 px-3 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">导入 Excel</button>
-          <button id="btnAdj" class="h-9 px-3 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">全部调价</button>
-          <button id="btnBatchSelected" class="h-9 px-3 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 ${selectedCount ? '' : 'opacity-50'}">选中调价</button>
-          <button id="btnAudit" class="h-9 px-3 text-sm rounded border border-amber-300 text-amber-700 bg-white hover:bg-amber-50">报价审查</button>
-          <button id="btnClearSelection" class="h-9 px-3 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 ${selectedCount ? '' : 'hidden'}">清除选择</button>
-        </div>
-      </section>
+      ${boqWorkbenchHeader(proj, projects, workbench)}
+      ${boqWorkflowStrip(workbench)}
+      ${boqNextBanner(workbench)}
+      ${boqToolbar(selectedCount)}
 
       <div class="grid grid-cols-[300px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
         ${projectTree(proj, boq)}
@@ -144,11 +120,12 @@ export async function render() {
           <section class="bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden flex-1 min-h-[220px]">
             <div class="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center justify-between text-sm shrink-0">
               <div class="flex items-center gap-4 text-slate-500">
-                <span>显示 ${filteredBoq.length} / ${boq.length} 项${boqState.treeGroup ? ` · ${esc(groupLabel(boqState.treeGroup))}` : ''}</span>
+                <span>显示 ${filteredBoq.length} / ${boq.length} 项${boqState.treeGroup ? ` · ${esc(groupLabel(boqState.treeGroup))}` : ''}${filteredBoq.length > BOQ_PAGE_SIZE ? ` · 第 ${boqState.page}/${pageCount} 页` : ''}</span>
                 ${boqState.treeGroup ? '<button id="btnClearTreeGroup" class="text-teal-700 hover:underline">清除结构筛选</button>' : ''}
                 ${missingPriceCount ? `<button id="btnOnlyMissing" class="text-amber-700 hover:underline">定位缺单价 ${missingPriceCount}</button>` : '<span>无缺单价风险</span>'}
               </div>
               <div class="flex items-center gap-2 text-xs text-slate-500">
+                ${filteredBoq.length > BOQ_PAGE_SIZE ? `<button id="btnPagePrev" class="h-7 px-2 rounded border border-slate-300 bg-white ${boqState.page <= 1 ? 'opacity-40' : ''}">上一页</button><button id="btnPageNext" class="h-7 px-2 rounded border border-slate-300 bg-white ${boqState.page >= pageCount ? 'opacity-40' : ''}">下一页</button>` : ''}
                 ${categories.slice(0, 3).map(c => `<span class="badge badge-gray">${esc(c.name)} ${fmtMoney(c.amount)}</span>`).join('')}
               </div>
             </div>
@@ -238,18 +215,58 @@ export async function render() {
   document.getElementById('btnImportBOQ').onclick = () => importBOQExcel(proj.id, boq.length);
   document.getElementById('btnAdj').onclick = batchAdjust;
   document.getElementById('btnBatchSelected').onclick = () => batchAdjust(true);
+  document.getElementById('btnAiMissing')?.addEventListener('click', () => showAiMissingPrices(proj.id));
   document.getElementById('btnClearSelection')?.addEventListener('click', () => { boqState.selectedIds.clear(); render(); });
   document.getElementById('btnOnlyMissing')?.addEventListener('click', () => { boqState.priceStatus = 'missing'; render(); });
   document.getElementById('btnClearTreeGroup')?.addEventListener('click', () => { boqState.treeGroup = ''; render(); });
   document.getElementById('btnSaveVer').onclick = () => saveVersion(proj.id);
   document.getElementById('btnVersions').onclick = () => manageVersions(proj.id);
+  document.getElementById('btnNextMissing')?.addEventListener('click', () => { boqState.priceStatus = 'missing'; render(); });
+  document.getElementById('btnNextZeroQty')?.addEventListener('click', () => { boqState.riskStatus = 'zeroQty'; render(); });
+  document.getElementById('btnNextSaveVer')?.addEventListener('click', () => saveVersion(proj.id));
+  document.getElementById('btnNextAdd')?.addEventListener('click', pickQuota);
+  document.getElementById('btnNextBlocked')?.addEventListener('click', () => {
+    const action = workbench.eligibility?.primaryAction;
+    if (!action) return;
+    if (action.params?.priceStatus) boqState.priceStatus = action.params.priceStatus;
+    if (action.params?.riskStatus) boqState.riskStatus = action.params.riskStatus;
+    boqState.page = 1;
+    render();
+  });
+  document.getElementById('btnNextArchive')?.addEventListener('click', async () => {
+    if (!confirm('归档会把当前项目清单写入数据引擎样本池，并用于后续指标统计。确定归档？')) return;
+    try {
+      const updated = await projectService.archive(proj.id);
+      toast('项目已归档，指标样本已同步', 'success');
+      if (updated?.status === 'archived') openReview({ projectId: updated.id, sourceType: 'project_archive' });
+      render();
+    } catch (err) {
+      if (err?.code === 'ARCHIVE_BLOCKED') {
+        toast(`暂不能归档：${archiveBlockerText(err.eligibility)}`, 'error');
+        return;
+      }
+      throw err;
+    }
+  });
+  document.getElementById('btnNextIndicators')?.addEventListener('click', () => window.__app.go('indicators'));
   document.getElementById('boqKw').oninput = e => {
     boqState.keyword = e.target.value;
+    boqState.page = 1;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => render(), 180);
   };
-  document.getElementById('boqPriceStatus').onchange = e => { boqState.priceStatus = e.target.value; render(); };
-  document.getElementById('boqRiskStatus').onchange = e => { boqState.riskStatus = e.target.value; render(); };
+  document.getElementById('boqPriceStatus').onchange = e => { boqState.priceStatus = e.target.value; boqState.page = 1; render(); };
+  document.getElementById('boqRiskStatus').onchange = e => { boqState.riskStatus = e.target.value; boqState.page = 1; render(); };
+  document.getElementById('btnClearBoqFilters')?.addEventListener('click', () => {
+    boqState.keyword = '';
+    boqState.priceStatus = '';
+    boqState.riskStatus = '';
+    boqState.treeGroup = '';
+    boqState.page = 1;
+    render();
+  });
+  document.getElementById('btnPagePrev')?.addEventListener('click', () => { if (boqState.page > 1) { boqState.page--; render(); } });
+  document.getElementById('btnPageNext')?.addEventListener('click', () => { if (boqState.page < pageCount) { boqState.page++; render(); } });
   document.getElementById('btnAudit').onclick = () => showQuoteAudit(proj.id);
   document.getElementById('boqSelectAll')?.addEventListener('change', e => {
     filteredBoq.forEach(b => e.target.checked ? boqState.selectedIds.add(b.id) : boqState.selectedIds.delete(b.id));
@@ -263,10 +280,10 @@ export async function render() {
   };
 
   const tbody = document.getElementById('boqList');
-  tbody.innerHTML = filteredBoq.map((b, i) => `
+  tbody.innerHTML = pageRows.map((b, i) => `
     <tr class="border-b border-slate-100 hover:bg-slate-50/80 ${b.id === boqState.activeId ? 'bg-teal-50/60' : ''}" data-id="${b.id}" draggable="true">
       <td class="px-3 py-2"><input type="checkbox" data-select="${b.id}" ${boqState.selectedIds.has(b.id) ? 'checked' : ''} /></td>
-      <td class="px-2 py-2 text-slate-400">${i + 1}</td>
+      <td class="px-2 py-2 text-slate-400">${pageStart + i + 1}</td>
       <td class="px-2"><input class="w-full bg-transparent text-slate-700 border-0 px-0 py-1" value="${esc(b.code || '')}" /></td>
       <td class="px-2">${riskBadges(b)}</td>
       <td class="px-2 font-medium text-slate-800 cursor-pointer" title="${esc(b.name || '')}" data-open-detail>${esc(b.name)}</td>
@@ -280,7 +297,18 @@ export async function render() {
       <td class="px-2 text-right tabular-nums font-semibold ${hasMissingPrice(b.unitPrice) ? 'text-amber-700' : 'text-slate-900'}" data-amount>${fmtMoney(b.amount || 0)}</td>
       <td class="px-2 text-right"><button class="text-red-600 hover:underline text-xs" data-del="${b.id}">删除</button></td>
     </tr>
-  `).join('') || `<tr><td colspan="12" class="py-20">
+  `).join('') || (boq.length ? `<tr><td colspan="12" class="py-16">
+    <div class="flex flex-col items-center justify-center text-center">
+      <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded border border-amber-200 bg-amber-50 text-amber-700">
+        <span class="material-symbols-outlined text-[24px]">filter_alt_off</span>
+      </div>
+      <div class="text-base font-semibold text-slate-700 mb-2">当前筛选没有结果</div>
+      <div class="text-slate-500 mb-5 max-w-md">项目共有 ${boq.length} 条清单，但当前搜索、价格状态、风险状态或结构分组筛选后为空。</div>
+      <button id="btnClearBoqFilters" class="inline-flex items-center gap-2 px-4 py-2 border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50">
+        <span class="material-symbols-outlined text-[18px]">close</span>清除筛选查看全部
+      </button>
+    </div>
+  </td></tr>` : `<tr><td colspan="12" class="py-20">
     <div class="flex flex-col items-center justify-center text-center">
       <div class="w-64 h-44 mb-6 bg-white border border-slate-200 rounded-xl flex flex-col items-center justify-center gap-4">
           <div class="w-16 h-16 rounded-lg bg-teal-50 flex items-center justify-center text-teal-700">
@@ -295,7 +323,7 @@ export async function render() {
         <span class="material-symbols-outlined text-[20px] text-teal-700">add</span>立即添加清单
       </button>
     </div>
-  </td></tr>`;
+  </td></tr>`);
 
   tbody.querySelectorAll('tr[data-id]').forEach(tr => bindRowEvents(tr, proj.id));
   tbody.querySelectorAll('tr[data-id]').forEach(tr => {
@@ -313,6 +341,14 @@ export async function render() {
     if (confirm('删除该清单项？')) { await boqService.remove(b.dataset.del); render(); }
   });
   document.getElementById('btnEmptyAdd')?.addEventListener('click', pickQuota);
+  document.getElementById('btnClearBoqFilters')?.addEventListener('click', () => {
+    boqState.keyword = '';
+    boqState.priceStatus = '';
+    boqState.riskStatus = '';
+    boqState.treeGroup = '';
+    boqState.page = 1;
+    render();
+  });
   document.getElementById('boqResize')?.addEventListener('pointerdown', startBoqResize);
   document.getElementById('detailToggle')?.addEventListener('click', () => {
     boqState.detailCollapsed = !boqState.detailCollapsed;
@@ -320,6 +356,7 @@ export async function render() {
     render();
   });
   document.getElementById('detailSave')?.addEventListener('click', () => saveDetail(activeLine?.id));
+  document.getElementById('detailAiFill')?.addEventListener('click', () => showAiLineAssist(activeLine, proj));
   document.querySelectorAll('[data-replace-quota]').forEach(btn => btn.onclick = async () => {
     if (!activeLine) return;
     if (!confirm('用该定额替换当前清单的名称、特征、单位和综合单价？工程量和系数会保留。')) return;
@@ -336,6 +373,216 @@ export async function render() {
     render();
   });
   if (!boqState.detailCollapsed) applyBoqDetailHeight();
+}
+
+function boqWorkbenchStatus(project, lines, versions, extra = {}) {
+  const missing = lines.filter(line => hasMissingPrice(line.unitPrice)).length;
+  const zeroQty = lines.filter(line => !(Number(line.qty) > 0)).length;
+  const factorRisk = lines.filter(line => Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8).length;
+  const unmatched = lines.filter(line => !line.quotaItemId).length;
+  const priced = lines.length - missing;
+  const completion = lines.length ? Math.round(priced / lines.length * 100) : 0;
+  const totalCost = lines.reduce((s, b) => s + Number(b.amount || 0), 0);
+  const eligibility = archiveEligibility(project, lines, versions);
+  const next = boqNextAction(project, { lines, versions, missing, zeroQty, imported: extra.imported, eligibility });
+  return {
+    project,
+    lines,
+    versions,
+    lineCount: lines.length,
+    missing,
+    zeroQty,
+    factorRisk,
+    unmatched,
+    versionCount: versions.length,
+    completion,
+    totalCost,
+    selectedCount: extra.selectedCount || 0,
+    selectedTotal: extra.selectedTotal || 0,
+    imported: !!extra.imported,
+    eligibility,
+    next,
+  };
+}
+
+function boqNextAction(project, { lines, versions, missing, zeroQty, imported, eligibility }) {
+  if (!lines.length) return {
+    icon: 'post_add',
+    tone: 'slate',
+    title: '当前项目还没有清单',
+    desc: '先添加清单或导入 Excel，才能形成报价和指标样本。',
+    button: '添加清单',
+    id: 'btnNextAdd',
+  };
+  if (missing) return {
+    icon: imported ? 'download_done' : 'priority_high',
+    tone: 'amber',
+    title: imported ? `刚导入清单，可先补齐 ${missing} 条缺单价` : `下一步：补齐 ${missing} 条缺单价`,
+    desc: '缺单价会低估项目总造价，建议先定位处理，再保存报价版本。',
+    button: '定位缺单价',
+    id: 'btnNextMissing',
+  };
+  if (zeroQty) return {
+    icon: 'warning',
+    tone: 'amber',
+    title: `下一步：复核 ${zeroQty} 条 0 工程量`,
+    desc: '0 工程量可能是暂估项，也可能会遗漏计价依据。',
+    button: '查看风险项',
+    id: 'btnNextZeroQty',
+  };
+  if (!versions.length) return {
+    icon: imported ? 'download_done' : 'history',
+    tone: 'teal',
+    title: imported ? '刚导入完成，建议保存第一个报价版本' : '下一步：保存报价版本',
+    desc: '版本是后续对比、恢复和沉淀指标样本的基准。',
+    button: '保存版本',
+    id: 'btnNextSaveVer',
+  };
+  if (project.status !== 'archived' && eligibility?.allowed) return {
+    icon: 'inventory_2',
+    tone: 'slate',
+    title: '下一步：归档进入指标库',
+    desc: '价格完整且已有版本，可归档沉淀为正式指标样本。',
+    button: '归档项目',
+    id: 'btnNextArchive',
+  };
+  if (project.status !== 'archived') {
+    const text = archiveBlockerText(eligibility);
+    return {
+      icon: 'lock',
+      tone: 'amber',
+      title: `暂不能归档：${text}`,
+      desc: '正式指标样本需要价格完整、工程量可信，并至少保留一个报价版本。',
+      button: eligibility?.primaryAction?.label || '处理阻断项',
+      id: 'btnNextBlocked',
+    };
+  }
+  return {
+    icon: 'analytics',
+    tone: 'teal',
+    title: '下一步：查看指标对标',
+    desc: '项目已归档，可进入指标分析查看造价区间和样本口径。',
+    button: '查看指标',
+    id: 'btnNextIndicators',
+  };
+}
+
+function boqWorkflowStrip(status) {
+  const steps = [
+    ['工作稿', status.lineCount ? '完成' : '待建立', status.lineCount ? 'teal' : 'slate'],
+    ['保存版本', status.versionCount ? `${status.versionCount} 个` : '待保存', status.versionCount ? 'teal' : 'amber'],
+    ['归档项目', status.project.status === 'archived' ? '已归档' : (status.eligibility.allowed ? '可归档' : '受阻'), status.project.status === 'archived' || status.eligibility.allowed ? 'teal' : 'amber'],
+    ['指标对标', status.project.status === 'archived' ? '可引用' : '归档后可用', status.project.status === 'archived' ? 'teal' : 'slate'],
+    ['经验复盘', '可沉淀', 'slate'],
+  ];
+  return `<section class="rounded-lg border border-slate-200 bg-white px-4 py-2 shrink-0">
+    <div class="flex flex-wrap items-center gap-2 text-xs">
+      ${steps.map(([label, state, tone], index) => {
+        const cls = tone === 'teal' ? 'border-teal-200 bg-teal-50 text-teal-700'
+          : tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-700'
+            : 'border-slate-200 bg-slate-50 text-slate-500';
+        return `${index ? '<span class="text-slate-300">→</span>' : ''}<span class="inline-flex items-center gap-2 rounded border ${cls} px-2.5 py-1.5"><b class="font-medium">${label}</b><span>${state}</span></span>`;
+      }).join('')}
+      <span class="ml-auto text-slate-500">版本是可回退快照，归档项目才进入正式指标；经验卡供 AI 复用，不参与指标计算。</span>
+    </div>
+  </section>`;
+}
+
+function boqWorkbenchHeader(project, projects, status) {
+  return `<section class="rounded-lg border border-slate-200 bg-white p-4 shrink-0">
+    <div class="flex items-start gap-4">
+      <div>
+        <h1 class="text-xl font-semibold text-slate-950">报价编制工作台</h1>
+        <div class="mt-1 text-xs text-slate-500">集中处理清单、价格风险、报价版本和归档样本。</div>
+      </div>
+      <label class="ml-auto h-10 min-w-[300px] rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 flex items-center gap-2">
+        <span class="material-symbols-outlined text-[18px] text-teal-700">domain</span>
+        <select id="projSel" class="w-full bg-transparent outline-none">
+          ${projects.map(p => `<option value="${p.id}" ${p.id === project.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+        </select>
+      </label>
+    </div>
+    <div class="mt-4 grid grid-cols-5 gap-3">
+      ${boqMetric('项目总造价', fmtMoney(status.totalCost), '')}
+      ${boqMetric('价格完整度', `${status.completion}%`, '', status.missing ? 'text-amber-700' : 'text-teal-700')}
+      ${boqMetric('报价版本', status.versionCount, '个', status.versionCount ? '' : 'text-amber-700')}
+      ${boqMetric('风险状态', status.missing + status.zeroQty + status.factorRisk + status.unmatched, '处', status.missing ? 'text-amber-700' : '')}
+      ${boqMetric('选中合价', fmtMoney(status.selectedTotal), '')}
+    </div>
+  </section>`;
+}
+
+function boqNextBanner(status) {
+  const tone = status.next.tone === 'amber'
+    ? 'border-amber-200 bg-amber-50 text-amber-800'
+    : status.next.tone === 'teal'
+      ? 'border-teal-200 bg-teal-50 text-teal-800'
+      : 'border-slate-200 bg-white text-slate-700';
+  return `<section class="rounded-lg border ${tone} px-4 py-3 flex items-center gap-3 shrink-0">
+    <span class="material-symbols-outlined text-[22px]">${status.next.icon}</span>
+    <div class="min-w-0">
+      <div class="font-semibold">${esc(status.next.title)}</div>
+      <div class="mt-0.5 text-xs opacity-80">${esc(status.next.desc)}</div>
+    </div>
+    <div class="flex-1"></div>
+    <button id="${status.next.id}" class="h-9 px-4 rounded border border-current bg-white/70 text-sm font-medium">${esc(status.next.button)}</button>
+  </section>`;
+}
+
+function boqToolbar(selectedCount) {
+  return `<section class="rounded-lg border border-slate-200 bg-white p-3 shrink-0">
+    <div class="flex items-center gap-2 flex-wrap">
+      <div class="relative flex-1 min-w-[280px]">
+        <span class="material-symbols-outlined pointer-events-none absolute left-3 top-2 text-[18px] text-slate-400">search</span>
+        <input id="boqKw" value="${esc(boqState.keyword)}" class="h-9 w-full rounded border border-slate-300 bg-white pl-9 pr-3 text-sm" placeholder="搜索编码 / 清单名称 / 项目特征..." />
+      </div>
+      <select id="boqPriceStatus" class="h-9 rounded border border-slate-300 bg-white px-2 text-sm">
+        <option value="" ${!boqState.priceStatus ? 'selected' : ''}>全部价格</option>
+        <option value="missing" ${boqState.priceStatus === 'missing' ? 'selected' : ''}>仅缺单价</option>
+        <option value="priced" ${boqState.priceStatus === 'priced' ? 'selected' : ''}>已有单价</option>
+      </select>
+      <select id="boqRiskStatus" class="h-9 rounded border border-slate-300 bg-white px-2 text-sm">
+        <option value="" ${!boqState.riskStatus ? 'selected' : ''}>全部状态</option>
+        <option value="missingPrice" ${boqState.riskStatus === 'missingPrice' ? 'selected' : ''}>缺单价</option>
+        <option value="zeroQty" ${boqState.riskStatus === 'zeroQty' ? 'selected' : ''}>工程量为 0</option>
+        <option value="factorRisk" ${boqState.riskStatus === 'factorRisk' ? 'selected' : ''}>系数异常</option>
+        <option value="unmatchedQuota" ${boqState.riskStatus === 'unmatchedQuota' ? 'selected' : ''}>未匹配定额</option>
+      </select>
+      ${toolbarGroup('数据', [
+        ['btnAdd', 'add', '添加清单', 'primary'],
+        ['btnImportBOQ', 'upload_file', '导入 Excel', 'plain'],
+      ])}
+      ${toolbarGroup('调价', [
+        ['btnAdj', 'percent', '全部调价', 'plain'],
+        ['btnBatchSelected', 'tune', '选中调价', selectedCount ? 'plain' : 'disabled'],
+        ['btnAiMissing', 'auto_awesome', 'AI 补缺价', 'warn'],
+      ])}
+      ${toolbarGroup('版本', [
+        ['btnSaveVer', 'history', '保存版本', 'plain'],
+        ['btnVersions', 'manage_history', '版本管理', 'plain'],
+      ])}
+      ${toolbarGroup('输出', [
+        ['btnAudit', 'fact_check', '报价审查', 'warn'],
+        ['btnExp', 'download', '导出报价单', 'plain'],
+      ])}
+      <button id="btnClearSelection" class="h-9 px-3 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50 ${selectedCount ? '' : 'hidden'}">清除选择</button>
+    </div>
+  </section>`;
+}
+
+function toolbarGroup(label, buttons) {
+  return `<div class="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
+    <span class="px-1.5 text-[11px] font-medium text-slate-500">${esc(label)}</span>
+    ${buttons.map(([id, icon, text, kind]) => {
+      const cls = kind === 'primary' ? 'brand-bg text-white'
+        : kind === 'warn' ? 'border border-amber-300 bg-white text-amber-700 hover:bg-amber-50'
+          : kind === 'disabled' ? 'border border-slate-300 bg-white text-slate-400 opacity-50'
+            : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
+      return `<button id="${id}" class="h-8 px-2.5 text-xs rounded ${cls} inline-flex items-center gap-1.5">
+        <span class="material-symbols-outlined text-[16px]">${icon}</span>${esc(text)}
+      </button>`;
+    }).join('')}
+  </div>`;
 }
 
 function filterLines(lines) {
@@ -523,7 +770,7 @@ function detailPanel(line, recommendations = []) {
         </div>
         <div class="flex items-center gap-2">
           <button id="detailToggle" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">${collapsed ? '展开明细' : '收起明细'}</button>
-          ${line && !collapsed ? '<button id="detailDelete" class="px-3 py-1.5 text-sm rounded border border-red-200 text-red-600 hover:bg-red-50">删除</button><button id="detailSave" class="px-3 py-1.5 text-sm rounded brand-bg text-white">保存明细</button>' : ''}
+          ${line && !collapsed ? '<button id="detailAiFill" class="px-3 py-1.5 text-sm rounded border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100 inline-flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 补全明细</button><button id="detailDelete" class="px-3 py-1.5 text-sm rounded border border-red-200 text-red-600 hover:bg-red-50">删除</button><button id="detailSave" class="px-3 py-1.5 text-sm rounded brand-bg text-white">保存明细</button>' : ''}
         </div>
       </div>
     </div>`;
@@ -661,6 +908,119 @@ async function saveDetail(id) {
   render();
 }
 
+async function showAiLineAssist(line, project) {
+  if (!line) return;
+  const result = await suggestBoqLine({
+    ...line,
+    name: document.getElementById('detailName')?.value || line.name,
+    feature: document.getElementById('detailFeature')?.value || line.feature,
+    unit: document.getElementById('detailUnit')?.value || line.unit,
+    unitPrice: parseFloat(document.getElementById('detailUnitPrice')?.value) || line.unitPrice,
+  }, { project });
+  const rows = result.suggestions || [];
+  openModal('AI 补全清单明细', `
+    <div class="space-y-4 text-sm">
+      <div class="rounded border border-teal-200 bg-teal-50 p-3 text-teal-900">
+        <div class="font-medium">${esc(result.summary)}</div>
+        <div class="mt-1 text-xs opacity-80">AI 只生成建议，勾选后才会应用到当前清单行。</div>
+      </div>
+      <div class="overflow-hidden rounded border border-slate-200 bg-white">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-left text-xs text-slate-500"><tr><th class="py-2 px-3 w-10">应用</th><th class="px-3">字段</th><th class="px-3">当前值</th><th class="px-3">AI 建议</th><th class="px-3">依据</th></tr></thead>
+          <tbody>
+            ${rows.map((row, index) => `<tr class="border-t">
+              <td class="py-2 px-3"><input type="checkbox" data-ai-line="${index}" ${row.apply ? 'checked' : ''} /></td>
+              <td class="px-3 font-medium">${fieldLabel(row.field)}</td>
+              <td class="px-3 text-slate-500 truncate max-w-[180px]">${esc(displayValue(row.currentValue))}</td>
+              <td class="px-3 text-slate-800 truncate max-w-[260px]">${esc(displayValue(row.suggestedValue))}<span class="ml-2 badge ${confidenceBadgeClass(row.confidence)}">${confidenceLabel(row.confidence)}</span></td>
+              <td class="px-3 text-xs text-slate-500">${esc(row.reason || '')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${result.warnings?.length ? `<div class="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">${result.warnings.map(esc).join('<br>')}</div>` : ''}
+    </div>
+  `, `
+    <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
+    <button id="aiLineApply" class="px-3 py-1.5 text-sm brand-bg text-white rounded">应用到清单行</button>
+  `);
+  document.getElementById('aiLineApply').onclick = async () => {
+    const patch = {};
+    document.querySelectorAll('[data-ai-line]:checked').forEach(input => {
+      const row = rows[Number(input.dataset.aiLine)];
+      if (!row) return;
+      if (row.field === 'feature') patch.feature = row.suggestedValue;
+      if (row.field === 'unit') patch.unit = row.suggestedValue;
+      if (row.field === 'unitPrice') patch.unitPrice = Number(row.suggestedValue || 0);
+      if (row.field === 'quotaId') patch.quotaItemId = row.suggestedValue;
+    });
+    if (!Object.keys(patch).length) {
+      toast('请选择要应用的建议', 'error');
+      return;
+    }
+    await boqService.update(line.id, patch);
+    closeModal();
+    toast('AI 建议已应用，请复核后保存版本', 'success');
+    render();
+  };
+}
+
+async function showAiMissingPrices(projectId) {
+  const lines = await boqService.listByProject(projectId);
+  const result = await suggestMissingPrices(lines);
+  const rows = result.suggestions || [];
+  if (!rows.length) {
+    toast('当前项目没有缺单价清单', 'success');
+    return;
+  }
+  const before = lines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+  const delta = rows.reduce((sum, row) => {
+    const line = lines.find(item => item.id === row.lineId);
+    return sum + calculatePreviewAmount(line, row.suggestedPrice);
+  }, 0);
+  openModal('AI 补缺价', `
+    <div class="space-y-4 text-sm">
+      <div class="grid grid-cols-3 gap-2">
+        ${versionSummary('缺价清单', rows.length)}
+        ${versionSummary('当前总造价', fmtMoney(before))}
+        ${versionSummary('应用后增量', fmtMoney(delta))}
+      </div>
+      <div class="rounded border border-slate-200 bg-white max-h-[52vh] overflow-auto scroll-thin">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-left text-xs text-slate-500 sticky top-0"><tr><th class="py-2 px-3 w-10">应用</th><th class="px-3">清单</th><th class="px-3 w-20">单位</th><th class="px-3 text-right w-28">建议单价</th><th class="px-3">来源</th><th class="px-3">依据</th></tr></thead>
+          <tbody>
+            ${rows.map((row, index) => `<tr class="border-t">
+              <td class="py-2 px-3"><input type="checkbox" data-ai-price="${index}" ${row.apply ? 'checked' : ''} /></td>
+              <td class="px-3 font-medium">${esc(row.lineName)}</td>
+              <td class="px-3">${esc(row.unit || '-')}</td>
+              <td class="px-3 text-right tabular-nums">${fmtMoney(row.suggestedPrice)}</td>
+              <td class="px-3">${esc(row.sourceLabel)} <span class="ml-2 badge ${confidenceBadgeClass(row.confidence)}">${confidenceLabel(row.confidence)}</span></td>
+              <td class="px-3 text-xs text-slate-500">${esc(row.reason)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${result.warnings?.length ? `<div class="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">${result.warnings.map(esc).join('<br>')}</div>` : ''}
+    </div>
+  `, `
+    <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
+    <button id="aiPriceApply" class="px-3 py-1.5 text-sm brand-bg text-white rounded">应用选中建议</button>
+  `);
+  document.getElementById('aiPriceApply').onclick = async () => {
+    const selected = Array.from(document.querySelectorAll('[data-ai-price]:checked')).map(input => rows[Number(input.dataset.aiPrice)]).filter(Boolean);
+    if (!selected.length) {
+      toast('请选择要应用的补价建议', 'error');
+      return;
+    }
+    for (const row of selected) {
+      await boqService.update(row.lineId, { unit: row.unit, unitPrice: Number(row.suggestedPrice || 0) });
+    }
+    closeModal();
+    toast(`已应用 ${selected.length} 条 AI 补价建议`, 'success');
+    render();
+  };
+}
+
 async function pickQuota() {
   const items = await quotaRepo.all();
   openModal('选择定额条目', `
@@ -673,7 +1033,7 @@ async function pickQuota() {
         <tbody id="pickBody"></tbody>
       </table>
     </div>
-  `, `<button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>`);
+  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>`);
 
   const renderChoices = (kw = '') => {
     const rows = items.filter(it => {
@@ -747,7 +1107,7 @@ function importBOQExcel(projectId, currentLineCount = 0) {
           ${missing ? '<div class="text-amber-700 text-xs">提示：综合单价为空或为 0 的清单会按 0 计入合价，导入后请优先补价。</div>' : ''}
         </div>
       `, `
-        <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
+        <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
         <button id="boq_import_ok" class="px-3 py-1.5 text-sm brand-bg text-white rounded">确认导入</button>
       `);
       document.getElementById('boq_import_ok').onclick = async () => {
@@ -793,7 +1153,7 @@ function showImportResult(result, engine) {
       </div>
       <div class="text-xs text-slate-500">候选样本不会直接参与默认指标统计，可在「指标分析 / 样本池」中查看并提升为正式样本。</div>
     </div>
-  `, `<button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">知道了</button>`);
+  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">知道了</button>`);
 }
 
 function resultMetric(label, value, unit) {
@@ -817,7 +1177,7 @@ function batchAdjust(selectedOnly = false) {
       </label>
     </div>
   `, `
-    <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
+    <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
     <button id="ba_ok" class="px-3 py-1.5 text-sm brand-bg text-white rounded">应用</button>
   `);
   document.getElementById('ba_ok').onclick = async () => {
@@ -847,6 +1207,9 @@ function saveVersion(projectId) {
         <div class="mb-2 text-xs font-medium text-slate-500">版本说明模板</div>
         <div class="flex flex-wrap gap-2">
           ${['初版', '调价版', '报审版', '最终版'].map(t => `<button data-ver-template="${t}" class="rounded border border-slate-200 bg-white px-3 py-1.5 text-xs hover:bg-slate-50">${t}</button>`).join('')}
+          <button id="verAiSummary" class="rounded border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs text-teal-700 hover:bg-teal-100 inline-flex items-center gap-1">
+            <span class="material-symbols-outlined text-[15px]">auto_awesome</span>AI 生成版本说明
+          </button>
         </div>
       </div>
       <label class="block">版本名称
@@ -858,7 +1221,7 @@ function saveVersion(projectId) {
       <div class="text-xs text-gray-500">版本保存为不可变快照；后续修改当前清单不会影响已保存版本。</div>
     </div>
   `, `
-    <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
+    <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
     <button id="ver_save" class="px-3 py-1.5 text-sm brand-bg text-white rounded">保存版本</button>
   `);
   document.querySelectorAll('[data-ver-template]').forEach(btn => btn.onclick = () => {
@@ -871,6 +1234,14 @@ function saveVersion(projectId) {
       最终版: '最终报价版本，导出前保留快照。',
     }[label] || '';
   });
+  document.getElementById('verAiSummary').onclick = async () => {
+    const result = await suggestVersionSummary(projectId);
+    (result.suggestions || []).forEach(item => {
+      if (item.field === 'name') document.getElementById('ver_name').value = item.suggestedValue || '';
+      if (item.field === 'note') document.getElementById('ver_note').value = item.suggestedValue || '';
+    });
+    toast(result.summary || '已生成版本说明', 'success');
+  };
   document.getElementById('ver_save').onclick = async () => {
     const version = await versionService.createFromCurrent(projectId, {
       name: document.getElementById('ver_name').value,
@@ -878,6 +1249,7 @@ function saveVersion(projectId) {
     });
     closeModal();
     toast(`已保存版本：${version.name}，${version.lineCount} 条，${fmtMoney(version.totalCost)}`, 'success');
+    await render();
     openModal('报价版本已保存', `
       <div class="space-y-3 text-sm text-slate-700">
         <div class="rounded border border-slate-200 bg-white p-3">
@@ -890,7 +1262,7 @@ function saveVersion(projectId) {
       </div>
     `, `
       <button id="verReviewNow" class="px-3 py-1.5 text-sm brand-bg text-white rounded">生成报价复盘</button>
-      <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">稍后</button>
+      <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">稍后</button>
     `);
     document.getElementById('verReviewNow').onclick = () => openReview({ projectId, versionId: version.id, sourceType: 'version_saved' });
   };
@@ -943,7 +1315,7 @@ async function manageVersions(projectId) {
         </table>
       </div>
     </div>
-  `, `<button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">关闭</button>`);
+  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">关闭</button>`);
 
   document.getElementById('ver_compare').onclick = async () => {
     const left = document.getElementById('ver_left').value;
@@ -990,7 +1362,7 @@ function viewVersion(version, projectId) {
     </div>
   `, `
     <button id="ver_back" class="px-3 py-1.5 text-sm border rounded">返回版本管理</button>
-    <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>
+    <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>
   `);
   document.getElementById('ver_back').onclick = () => manageVersions(projectId);
 }
@@ -1024,53 +1396,51 @@ function showVersionDiff(diff, projectId) {
   `, `
     <button id="ver_diff_back" class="px-3 py-1.5 text-sm border rounded">返回版本管理</button>
     <button id="ver_diff_export" class="px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300">导出对比报告</button>
-    <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>
+    <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>
   `);
   document.getElementById('ver_diff_back').onclick = () => manageVersions(projectId);
   document.getElementById('ver_diff_export').onclick = () => exportDiffReport(diff);
 }
 
 async function showQuoteAudit(projectId) {
-  const audit = await boqService.audit(projectId);
-  const issueBlocks = [
-    ['缺单价', audit.issues.missingPrice, '综合单价为空或为 0，会低估报价。'],
-    ['工程量为 0', audit.issues.zeroQty, '请确认是否为暂估项或漏填。'],
-    ['系数异常', audit.issues.factorRisk, '调整系数小于 0.8 或大于 1.2，需复核依据。'],
-    ['未匹配定额', audit.issues.unmatchedQuota, '影响后续推荐、追溯和指标归类。'],
-    ['疑似重复', audit.issues.duplicate, '名称、特征、单位相同，需检查是否重复计量。'],
-    ['未保存版本', audit.issues.noVersion, '关键调整前建议保存报价快照。'],
-  ];
-  openModal('报价审查', `
+  const audit = await reviewQuote(projectId);
+  const meta = audit.meta || {};
+  const issueBlocks = audit.suggestions || [];
+  openModal('AI 报价审查报告', `
     <div class="space-y-4 text-sm">
       <div class="grid grid-cols-4 gap-2">
-        ${versionSummary('审查结论', audit.level)}
-        ${versionSummary('健康分', audit.score)}
-        ${versionSummary('清单条数', audit.lines.length)}
-        ${versionSummary('历史版本', audit.versions.length)}
+        ${versionSummary('审查结论', meta.level || '-')}
+        ${versionSummary('健康分', meta.score ?? '-')}
+        ${versionSummary('清单条数', meta.lineCount || 0)}
+        ${versionSummary('历史版本', meta.versionCount || 0)}
+      </div>
+      <div class="rounded border border-teal-200 bg-teal-50 p-3 text-teal-900">
+        <div class="font-medium">${esc(audit.summary)}</div>
+        <div class="mt-1 text-xs opacity-80">AI 审查只提供风险线索；正式报审前仍需人工复核。</div>
       </div>
       <div class="grid grid-cols-2 gap-3">
-        ${issueBlocks.map(([title, rows, desc]) => `
-          <div class="rounded border ${rows.length ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-white'} p-3">
+        ${issueBlocks.length ? issueBlocks.map(issue => `
+          <div class="rounded border ${issue.count ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-white'} p-3">
             <div class="flex items-center justify-between">
-              <div class="font-medium text-slate-800">${title}</div>
-              <span class="badge ${rows.length ? 'badge-yellow' : 'badge-green'}">${rows.length}</span>
+              <div class="font-medium text-slate-800">${esc(issue.title)}</div>
+              <span class="badge ${issue.count ? 'badge-yellow' : 'badge-green'}">${issue.count || 0}</span>
             </div>
-            <div class="mt-1 text-xs text-slate-500">${desc}</div>
+            <div class="mt-1 text-xs text-slate-500">${esc(issue.action || '')}</div>
             <div class="mt-2 max-h-24 overflow-auto scroll-thin text-xs text-slate-600">
-              ${rows.slice(0, 6).map(line => `<div class="truncate" title="${esc(line?.name || line?.message || '')}">• ${esc(line?.name || line?.message || '当前项目')}</div>`).join('') || '<div class="text-slate-400">未发现</div>'}
+              ${(issue.lines || []).slice(0, 6).map(line => `<div class="truncate" title="${esc(line?.name || line?.message || '')}">• ${esc(line?.name || line?.message || '当前项目')}</div>`).join('') || '<div class="text-slate-400">未列出具体清单</div>'}
             </div>
           </div>
-        `).join('')}
+        `).join('') : '<div class="col-span-2 rounded border border-slate-200 bg-white p-8 text-center text-slate-400">暂未发现明显风险。</div>'}
       </div>
       <div class="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-        建议动作：先补齐缺单价和工程量，再处理未匹配定额和重复项；提交或导出前保存一个报审版报价版本。
+        ${(audit.warnings || []).map(esc).join('<br>') || '建议动作：先补齐缺单价和工程量，再处理未匹配定额和重复项；提交或导出前保存一个报审版报价版本。'}
       </div>
     </div>
   `, `
     <button id="auditMissing" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">定位缺单价</button>
     <button id="auditReview" class="px-3 py-1.5 text-sm border rounded text-emerald-700 border-emerald-300">沉淀风险判断</button>
     <button id="auditSaveVersion" class="px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300">保存报审版</button>
-    <button onclick="document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>
+    <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">关闭</button>
   `);
   document.getElementById('auditMissing').onclick = () => {
     boqState.riskStatus = 'missingPrice';
@@ -1082,6 +1452,29 @@ async function showQuoteAudit(projectId) {
     closeModal();
     saveVersion(projectId);
   };
+}
+
+function fieldLabel(field) {
+  return ({ feature: '项目特征', unit: '单位', unitPrice: '综合单价', quotaId: '关联定额', priceNote: '价格来源说明' })[field] || field;
+}
+
+function displayValue(value) {
+  if (value == null || value === '') return '未填写';
+  if (typeof value === 'number') return String(value);
+  return String(value);
+}
+
+function confidenceLabel(value) {
+  return ({ high: '高', medium: '中', low: '低' })[value] || '中';
+}
+
+function confidenceBadgeClass(value) {
+  return value === 'high' ? 'badge-green' : value === 'low' ? 'badge-yellow' : 'badge-gray';
+}
+
+function calculatePreviewAmount(line, suggestedPrice) {
+  if (!line) return 0;
+  return calculateAmount(line.qty, suggestedPrice, line.factor || 1);
 }
 
 function exportDiffReport(diff) {

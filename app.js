@@ -1,33 +1,39 @@
 // 应用入口：路由 + 启动
 import * as dashboard from './assets/views/dashboard.js?v=4.9';
-import * as quota     from './assets/views/quota.js?v=3.9';
-import * as projects  from './assets/views/projects.js?v=4.2';
-import * as boq       from './assets/views/boq.js?v=4.2';
-import * as indicators from './assets/views/indicators.js?v=5.4';
-import * as experience from './assets/views/experience.js?v=4.4';
-import * as settings  from './assets/views/settings.js?v=3.9';
-import * as ai        from './assets/views/ai.js?v=3.9';
+import * as importer  from './assets/views/importer.js?v=1.3';
+import * as quota     from './assets/views/quota.js?v=4.4';
+import * as projects  from './assets/views/projects.js?v=4.6';
+import * as boq       from './assets/views/boq.js?v=4.5';
+import * as indicators from './assets/views/indicators.js?v=5.7';
+import * as experience from './assets/views/experience.js?v=4.6';
+import * as settings  from './assets/views/settings.js?v=4.1';
+import * as ai        from './assets/views/ai.js?v=4.0';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
+import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
+import { smartSearch } from './assets/services/aiAssistService.js?v=1.0';
+import { openModal, closeModal, esc } from './assets/utils/dom.js';
 
 const VIEWS = [
   { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard', group: '工作台', desc: '经营概览' },
+  { id: 'importer',   label: '数据导入',   icon: 'upload_file', group: '工作台', desc: 'Excel 入库' },
   { id: 'quota',      label: '定额库',     icon: 'menu_book', group: '工作台', desc: '价格基础' },
   { id: 'projects',   label: '项目管理',   icon: 'folder_managed', group: '工作台', desc: '项目档案' },
   { id: 'boq',        label: '工程量清单', icon: 'list_alt', group: '工作台', desc: '报价编制' },
   { id: 'indicators', label: '指标分析',   icon: 'analytics', group: '工作台', desc: '样本对标' },
-  { id: 'ai',         label: 'AI 助手',    icon: 'smart_toy', group: '智能与配置', desc: '报价辅助' },
   { id: 'experience', label: '经验萃取',   icon: 'psychology_alt', group: '智能与配置', desc: '复盘沉淀' },
   { id: 'settings',   label: '设置',       icon: 'settings', group: '智能与配置', desc: '数据维护' },
 ];
 
 const state = {
-  currentView: 'dashboard',
+  currentView: 'importer',
   currentProjectId: null,
+  routeParams: {},
 };
 
 const renderers = {
-  dashboard, quota, projects, boq, indicators, experience, settings,
+  dashboard, importer, quota, projects, boq, indicators, experience, settings,
 };
+let lastSearchResults = [];
 
 function renderNav() {
   const groups = [...new Set(VIEWS.map(v => v.group))];
@@ -52,11 +58,12 @@ function renderNav() {
   document.querySelectorAll('[data-go]').forEach(el => el.onclick = () => go(el.dataset.go));
 }
 
-function go(view, params = {}) {
+async function go(view, params = {}) {
   state.currentView = view;
+  state.routeParams = params || {};
   if (view === 'boq' && params.projectId) state.currentProjectId = params.projectId;
   renderNav();
-  renderWorkspace();
+  return renderWorkspace();
 }
 
 async function renderWorkspace() {
@@ -72,7 +79,39 @@ async function renderWorkspace() {
   if (v === 'ai') return ai.open();
   ai.close();
   const r = renderers[v];
-  if (r && r.render) await r.render();
+  if (!r || !r.render) return;
+  try {
+    await r.render();
+  } catch (err) {
+    console.error(`[render:${v}]`, err);
+    renderErrorState(current, err);
+  }
+}
+
+function renderErrorState(current, err) {
+  const message = err?.message || String(err || '未知错误');
+  document.getElementById('workspace').innerHTML = `
+    <div class="min-h-full flex items-center justify-center p-6">
+      <section class="max-w-xl w-full rounded-lg border border-red-200 bg-white p-6 text-center">
+        <div class="mx-auto h-12 w-12 rounded-lg border border-red-200 bg-red-50 text-red-600 flex items-center justify-center">
+          <span class="material-symbols-outlined text-[26px]">error</span>
+        </div>
+        <h1 class="mt-4 text-lg font-semibold text-slate-900">${escapeHtml(current.label || '当前页面')} 加载失败</h1>
+        <p class="mt-2 text-sm leading-6 text-slate-500">页面渲染时遇到错误，已保留控制台日志，主内容不再停留在旧页面。</p>
+        <div class="mt-4 rounded border border-red-100 bg-red-50 px-3 py-2 text-left text-xs font-data text-red-700 break-words">${escapeHtml(message)}</div>
+        <div class="mt-5 flex justify-center gap-2">
+          <button onclick="window.__app.go(window.__app.state.currentView)" class="h-9 px-4 text-sm brand-bg text-white">重试当前页</button>
+          <button onclick="window.__app.go('importer')" class="h-9 px-4 text-sm border border-slate-300 bg-white text-slate-700">回到数据导入</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
 function exportAll() {
@@ -81,6 +120,60 @@ function exportAll() {
   // 简化：直接跳到设置页
   setTimeout(() => document.querySelector('#btnExport')?.click(), 100);
   go('settings');
+}
+
+async function runGlobalSearch(keyword, { openFirst = false } = {}) {
+  const kw = String(keyword || '').trim();
+  if (!kw) return;
+  const aiSearch = await smartSearch(kw);
+  lastSearchResults = aiSearch.suggestions?.length ? aiSearch.suggestions : await searchAll(kw);
+  if (openFirst && lastSearchResults[0]) {
+    return openSearchResult(0);
+  }
+  showSearchResults(kw, lastSearchResults);
+}
+
+async function openSearchResult(index) {
+  const item = lastSearchResults[Number(index)];
+  if (!item) return;
+  closeModal();
+  await go(item.targetView, item.params || {});
+}
+
+function showSearchResults(keyword, results) {
+  const groups = searchGroups(results);
+  openModal('全局搜索', `
+    <div class="space-y-4 text-sm">
+      <div class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <div class="text-xs text-slate-500">搜索关键词</div>
+        <div class="mt-1 font-semibold text-slate-900">${esc(keyword)}</div>
+      </div>
+      ${groups.length ? groups.map(group => `
+        <section class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+          <div class="border-b border-slate-100 bg-slate-50 px-3 py-2 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[18px] text-teal-700">${group.meta.icon}</span>
+            <span class="font-semibold text-slate-800">${group.meta.label}</span>
+            <span class="ml-auto text-xs text-slate-500">${group.items.length} 条</span>
+          </div>
+          <div class="divide-y divide-slate-100">
+            ${group.items.map(item => {
+              const index = results.indexOf(item);
+              return `<button data-search-result="${index}" class="w-full px-3 py-3 text-left hover:bg-teal-50/50 flex items-start gap-3">
+                <span class="mt-0.5 material-symbols-outlined text-[18px] text-slate-400">${item.icon}</span>
+                <span class="min-w-0 flex-1">
+                  <span class="block font-medium text-slate-900 truncate">${esc(item.title)}</span>
+                  <span class="mt-1 block text-xs text-slate-500 truncate">${esc(item.subtitle || '')}</span>
+                  ${item.excerpt ? `<span class="mt-1 block text-xs text-slate-400 truncate">${esc(item.excerpt)}</span>` : ''}
+                </span>
+                <span class="text-xs text-teal-700">${esc(item.actionLabel || '打开')}</span>
+              </button>`;
+            }).join('')}
+          </div>
+        </section>
+      `).join('') : `<div class="rounded-lg border border-slate-200 bg-white p-8 text-center text-slate-400">没有找到相关定额、项目、指标或经验。</div>`}
+    </div>
+  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border border-slate-300 bg-white text-slate-700 rounded">关闭</button>`);
+  document.querySelectorAll('[data-search-result]').forEach(btn => btn.onclick = () => openSearchResult(btn.dataset.searchResult));
 }
 
 // 全局对象：内嵌 onclick / 模块间共享
@@ -97,6 +190,8 @@ window.__app = {
     ai.send(t);
   },
   exportAll,
+  runGlobalSearch,
+  openSearchResult,
 };
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -109,16 +204,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Enter') window.__app.sendAI();
   });
 
+  let searchTimer = null;
+  document.getElementById('globalSearch').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    const kw = e.target.value.trim();
+    if (!kw || kw.length < 2) return;
+    searchTimer = setTimeout(() => runGlobalSearch(kw), 350);
+  });
   document.getElementById('globalSearch').addEventListener('keydown', async e => {
     if (e.key !== 'Enter') return;
     const kw = e.target.value.trim();
     if (!kw) return;
-    state.currentView = 'quota';
-    ai.close();
-    renderNav();
-    await quota.render();
-    // 设置搜索词
-    const inp = document.getElementById('qKw');
-    if (inp) { inp.value = kw; inp.dispatchEvent(new Event('input')); }
+    await runGlobalSearch(kw, { openFirst: true });
   });
 });
