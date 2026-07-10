@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js';
-import { detectRowKind, rowToBOQ, rowToQuotaItem } from '../assets/data/excel.js';
+import { detectRowKind, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix } from '../assets/data/excel.js';
+import { applyMappingTemplate, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js';
+import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -65,6 +67,117 @@ function testExcelRows() {
   assert.equal(nameColumnBoq.unit, '根');
 }
 
+function testImportMapping() {
+  const mapped = buildImportMapping([
+    '序号', '项目名称', '项目特征', '计量单位', '工程量（m3）', '综合单价（含税）', '合价（元）',
+  ], [{
+    序号: '1',
+    项目名称: '池壁混凝土',
+    项目特征: 'C30，抗渗等级 P8',
+    计量单位: 'm3',
+    '工程量（m3）': '12.5',
+    '综合单价（含税）': '680',
+    '合价（元）': '8500',
+  }]);
+  assert.equal(mapped.mapping.name, '项目名称');
+  assert.equal(mapped.mapping.qty, '工程量（m3）');
+  assert.equal(mapped.mapping.unitPrice, '综合单价（含税）');
+  assert.equal(mapped.mapping.amount, '合价（元）');
+  assert.equal(mapped.mapping.qty === '序号', false);
+  assert.equal(mapped.fields.qty.confidence, 'high');
+
+  const noPrice = buildImportMapping(['序号', '项目名称', '数量(暂估)', '单位'], [{
+    序号: '1',
+    项目名称: '临时排水',
+    '数量(暂估)': '3',
+    单位: '项',
+  }]);
+  assert.equal(noPrice.mapping.qty, '数量(暂估)');
+  assert.equal(noPrice.mapping.unitPrice, '');
+  assert.equal(noPrice.fields.unitPrice.status, 'missing');
+
+  const combined = buildImportMapping(['项目名称\n项目特征', '单位', '工程数量'], [{
+    '项目名称\n项目特征': '钢筋混凝土池壁\n厚度 300mm',
+    单位: 'm3',
+    工程数量: '5',
+  }]);
+  assert.equal(combined.mapping.name, '项目名称\n项目特征');
+  assert.equal(combined.mapping.feature, '项目名称\n项目特征');
+  assert.equal(combined.mapping.qty, '工程数量');
+}
+
+function testMappingTemplates() {
+  const storage = memoryStorage();
+  const base = createMappingTemplate({
+    name: '污水工程清单',
+    scope: 'global',
+    mapping: { name: '项目名称', unit: '单位', qty: '工程量', unitPrice: '综合单价' },
+    fixedValues: { process: '土建工程' },
+    amountRule: 'calculated',
+  });
+  saveMappingTemplate(base, { storage });
+  assert.equal(listMappingTemplates({ projectId: 'p-1' }, { storage }).length, 1);
+  assert.throws(() => saveMappingTemplate({ ...base, id: undefined }, { storage }), /同名模板/);
+
+  const projectTemplate = createMappingTemplate({
+    name: '污水工程清单', scope: 'project', projectId: 'p-1', mapping: { name: '名称' },
+  });
+  saveMappingTemplate(projectTemplate, { storage });
+  assert.equal(listMappingTemplates({ projectId: 'p-1' }, { storage }).length, 2);
+  assert.equal(listMappingTemplates({ projectId: 'p-2' }, { storage }).length, 1);
+
+  const match = matchMappingTemplate(base, ['序号', '项目名称', '单位', '工程量（m3）', '综合单价（含税）']);
+  assert.equal(match.status, 'recommended');
+  assert.equal(match.matchedFields.includes('qty'), true);
+  const partial = matchMappingTemplate(base, ['项目名称', '单位']);
+  assert.equal(partial.status, 'partial');
+  assert.equal(partial.missingSources.includes('工程量'), true);
+  const applied = applyMappingTemplate(base, ['项目名称', '单位', '工程量（m3）', '综合单价（含税）'], [{
+    项目名称: '池壁', 单位: 'm3', '工程量（m3）': '12', '综合单价（含税）': '680',
+  }]);
+  assert.equal(applied.mapping.qty, '工程量（m3）');
+  assert.equal(applied.fields.qty.status, 'template');
+  assert.equal(applied.fixedValues.process, '土建工程');
+  assert.equal(applied.amountRule, 'calculated');
+  deleteMappingTemplate(projectTemplate.id, { storage });
+  assert.equal(listMappingTemplates({ projectId: 'p-1' }, { storage }).length, 1);
+}
+
+function testImportPricingRules() {
+  assert.deepEqual(resolveImportPricing({ qty: 10, unitPrice: 25 }), {
+    qty: 10, unitPrice: 25, sourceAmount: 0, calculatedAmount: 250, amount: 250, derivedUnitPrice: false,
+  });
+  assert.equal(resolveImportPricing({ qty: 10, unitPrice: 25, amount: 260, amountRule: 'sourceAmount' }).amount, 260);
+  const derived = resolveImportPricing({ qty: 8, amount: 400, amountRule: 'deriveUnitPrice' });
+  assert.equal(derived.unitPrice, 50);
+  assert.equal(derived.amount, 400);
+  assert.equal(resolveImportPricing({ qty: 0, amount: 400, amountRule: 'deriveUnitPrice' }).unitPrice, 0);
+}
+
+function memoryStorage() {
+  const data = new Map();
+  return {
+    getItem: key => data.get(key) || null,
+    setItem: (key, value) => data.set(key, String(value)),
+    removeItem: key => data.delete(key),
+  };
+}
+
+function testSheetHeaderDetection() {
+  const rows = rowsFromSheetMatrix([
+    ['产品水池扩建工程量清单'],
+    ['项目名称', '', '工程量', '综合单价'],
+    ['', '项目特征', 'm3', '含税'],
+    ['池壁混凝土', 'C30，抗渗 P8', 12.5, 680],
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].项目名称, '池壁混凝土');
+  assert.equal(rows[0].项目特征, 'C30，抗渗 P8');
+  assert.equal(rows[0]['工程量 m3'], 12.5);
+  assert.equal(rows[0]['综合单价 含税'], 680);
+  assert.throws(() => rowsFromSheetMatrix([['产品水池扩建工程'], ['说明：请填写完整']]), /未能识别/);
+}
+
 class MemoryDirectoryHandle {
   constructor(name) {
     this.name = name;
@@ -120,6 +233,10 @@ function notFound() {
 
 testCosting();
 testExcelRows();
+testImportMapping();
+testMappingTemplates();
+testImportPricingRules();
+testSheetHeaderDetection();
 await testLocalFolderJsonStorage();
 await testVersions();
 await testArchiveEligibility();

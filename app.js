@@ -1,6 +1,6 @@
 // 应用入口：路由 + 启动
 import * as dashboard from './assets/views/dashboard.js?v=4.9';
-import * as importer  from './assets/views/importer.js?v=1.3';
+import * as importer  from './assets/views/importer.js?v=1.6';
 import * as quota     from './assets/views/quota.js?v=4.4';
 import * as projects  from './assets/views/projects.js?v=4.6';
 import * as boq       from './assets/views/boq.js?v=4.5';
@@ -10,7 +10,7 @@ import * as settings  from './assets/views/settings.js?v=4.3';
 import * as ai        from './assets/views/ai.js?v=4.0';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
-import { smartSearch } from './assets/services/aiAssistService.js?v=1.0';
+import { smartSearch } from './assets/services/aiAssistService.js?v=1.1';
 import { getStorageStatus } from './assets/data/storage.js?v=1.0';
 import { openModal, closeModal, esc } from './assets/utils/dom.js';
 

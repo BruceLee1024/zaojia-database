@@ -6,7 +6,7 @@ import { fmt, fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.j
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { openReview } from './experience.js?v=4.4';
 import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=1.0';
-import { suggestProjectInfo } from '../services/aiAssistService.js?v=1.0';
+import { suggestProjectInfo } from '../services/aiAssistService.js?v=1.1';
 
 const TYPES = ['水厂', '泵站', '管网', '变电站', '水池', '车间', '其他'];
 const SCALES = ['小型', '中型', '大型', '特大型'];

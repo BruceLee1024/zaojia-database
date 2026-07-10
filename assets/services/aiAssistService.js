@@ -7,18 +7,7 @@ import { versionService } from './versionService.js?v=3.9';
 import { searchAll } from './globalSearchService.js?v=1.0';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
-
-const FIELD_ALIASES = {
-  code: ['编码', '项目编码', '清单编码', '序号'],
-  name: ['名称', '项目名称', '清单名称', '工程名称', '项目名称\n项目特征'],
-  feature: ['项目特征', '特征', '描述', '清单描述', '项目名称\n项目特征'],
-  unit: ['单位', '计量单位'],
-  qty: ['工程量', '工程数量', '数量'],
-  unitPrice: ['综合单价', '单价', '综合单价(元)', '综合单价（元）'],
-  amount: ['合价', '金额', '综合合价'],
-  process: ['专业', '分部', '工艺', '分部分项'],
-  costCategory: ['成本分类', '分类', '类别'],
-};
+import { buildImportMapping } from './importMappingService.js';
 
 export async function suggestBoqLine(line = {}, context = {}) {
   const quotas = context.quotas || await quotaRepo.all();
@@ -76,16 +65,21 @@ export async function suggestMissingPrices(lines = [], context = {}) {
 }
 
 export async function suggestImportMapping(headers = [], sampleRows = []) {
-  const suggestions = Object.entries(FIELD_ALIASES).map(([targetField, aliases]) => {
-    const sourceHeader = bestHeader(headers, aliases, sampleRows, targetField);
-    return sourceHeader ? {
-      targetField,
-      sourceHeader,
-      confidence: aliases.includes(sourceHeader) ? 'high' : 'medium',
-      reason: `表头「${sourceHeader}」与系统字段匹配`,
-    } : null;
-  }).filter(Boolean);
-  return wrap({ source: 'local', confidence: 'high', summary: `识别到 ${suggestions.length} 个字段映射。`, suggestions, warnings: [] });
+  const result = buildImportMapping(headers, sampleRows);
+  const suggestions = Object.values(result.fields)
+    .filter(field => field.candidateSource)
+    .map(field => ({ ...field, targetField: field.key, sourceHeader: field.candidateSource }));
+  const confirmed = suggestions.filter(field => field.status === 'confirmed').length;
+  const pending = suggestions.filter(field => field.status === 'needs-review').length;
+  return wrap({
+    source: 'local',
+    confidence: pending ? 'medium' : 'high',
+    summary: `已确认 ${confirmed} 个字段映射${pending ? `，${pending} 个字段需要确认` : ''}。`,
+    suggestions,
+    warnings: pending ? ['低置信候选不会自动应用，请在字段映射区确认。'] : [],
+    mapping: result.mapping,
+    fields: result.fields,
+  });
 }
 
 export function suggestImportRepairs(rows = [], quality = {}) {
@@ -328,26 +322,6 @@ function inferFeature(name = '', project = {}) {
   if (/回填/.test(text)) return '回填材料：按设计；压实系数：按设计；施工方式：分层回填夯实。';
   if (/管道|管线/.test(text)) return `管材及规格：按设计；连接方式：按设计；项目类型：${project?.type || '污水处理工程'}。`;
   return '';
-}
-
-function bestHeader(headers, aliases, sampleRows, targetField) {
-  const normalized = headers.map(header => ({ raw: header, norm: normalize(header) }));
-  for (const alias of aliases) {
-    const hit = normalized.find(h => h.raw === alias || h.norm === normalize(alias));
-    if (hit) return hit.raw;
-  }
-  for (const alias of aliases) {
-    const hit = normalized.find(h => h.norm.includes(normalize(alias)) || normalize(alias).includes(h.norm));
-    if (hit) return hit.raw;
-  }
-  if (targetField === 'qty' || targetField === 'unitPrice' || targetField === 'amount') {
-    return headers.find(header => sampleRows.slice(0, 10).some(row => Number(String(row[header] || '').replace(/,/g, '')) > 0)) || '';
-  }
-  return '';
-}
-
-function normalize(value) {
-  return String(value || '').toLowerCase().replace(/\s|　|\(|\)|（|）|元|\/|\\/g, '');
 }
 
 function quotaIntent(item) {

@@ -4,6 +4,7 @@
 //   B] 工程量清单：序号/项目编码/项目名称/项目特征/计量单位/工程数量/综合单价/合价
 import { categoryGuess } from '../utils/stats.js';
 import { calculateAmount } from '../utils/costing.js?v=3.9';
+import { normalizeImportHeader } from '../services/importMappingService.js';
 
 const HEADER_QUOTA  = ['清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'];
 const HEADER_BOQ    = ['序号', '项目编码', '项目名称', '项目特征', '计量单位', '工程数量', '综合单价', '合价'];
@@ -33,8 +34,83 @@ function splitNameFeature(row) {
 export async function parseExcel(file) {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws, { defval: '' });
+  for (const sheetName of wb.SheetNames) {
+    const matrix = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' });
+    try {
+      const rows = rowsFromSheetMatrix(matrix);
+      if (rows.length) return rows;
+    } catch {
+      // 继续寻找第一个具有可识别清单表头的工作表。
+    }
+  }
+  throw new Error('未能识别清单表头，请确认文件包含项目名称、单位、工程量等字段。');
+}
+
+export function rowsFromSheetMatrix(matrix = []) {
+  const rows = matrix.map(row => Array.isArray(row) ? row : []);
+  const headerIndex = findHeaderRow(rows);
+  if (headerIndex < 0) throw new Error('未能识别清单表头');
+  const firstHeader = rows[headerIndex];
+  const secondHeader = rows[headerIndex + 1] || [];
+  const hasSecondHeader = headerSignalCount(secondHeader) > 0 && secondHeader.some(isHeaderContinuation);
+  const headers = firstHeader.map((cell, index) => mergeHeaderCell(cell, hasSecondHeader ? secondHeader[index] : ''));
+  const uniqueHeaders = dedupeHeaders(headers);
+  const dataStart = headerIndex + (hasSecondHeader ? 2 : 1);
+
+  return rows.slice(dataStart)
+    .filter(row => row.some(cell => String(cell ?? '').trim() !== ''))
+    .map(row => uniqueHeaders.reduce((record, header, index) => {
+      if (header) record[header] = row[index] ?? '';
+      return record;
+    }, {}));
+}
+
+function findHeaderRow(rows) {
+  const candidateRows = rows.slice(0, 8);
+  let bestIndex = -1;
+  let bestScore = 0;
+  candidateRows.forEach((row, index) => {
+    const score = headerSignalCount(row) * 100 + row.filter(cell => String(cell ?? '').trim() !== '').length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+  return bestScore >= 200 ? bestIndex : -1;
+}
+
+function headerSignalCount(row) {
+  return row.filter(cell => isHeaderLike(cell)).length;
+}
+
+function isHeaderLike(value) {
+  const header = normalizeImportHeader(value);
+  return ['项目名称', '清单名称', '项目特征', '计量单位', '单位', '工程量', '工程数量', '综合单价', '合价', '金额', '项目编码', '序号']
+    .some(signal => header === normalizeImportHeader(signal) || header.includes(normalizeImportHeader(signal)));
+}
+
+function isHeaderContinuation(value) {
+  const raw = String(value ?? '').trim();
+  const normalized = normalizeImportHeader(value);
+  return isHeaderLike(value) || /^(m2|m3|m²|m³|元|含税|不含税|数量|单价|合价)$/i.test(raw) || /^(m2|m3|m²|m³|数量|单价|合价)$/.test(normalized);
+}
+
+function mergeHeaderCell(first, second) {
+  const left = String(first ?? '').trim();
+  const right = String(second ?? '').trim();
+  if (!right || !isHeaderContinuation(right)) return left;
+  if (!left) return right;
+  return normalizeImportHeader(left) === normalizeImportHeader(right) ? left : `${left} ${right}`;
+}
+
+function dedupeHeaders(headers) {
+  const seen = new Map();
+  return headers.map((header, index) => {
+    const value = String(header || '').trim() || `未命名列${index + 1}`;
+    const count = (seen.get(value) || 0) + 1;
+    seen.set(value, count);
+    return count === 1 ? value : `${value}_${count}`;
+  });
 }
 
 /** 判断一行属于哪种格式 */

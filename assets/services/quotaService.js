@@ -1,6 +1,6 @@
 // 定额库服务
 import { quotaRepo } from '../data/repository.js?v=3.9';
-import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=3.9';
+import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=4.0';
 import { uid } from '../utils/dom.js';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 

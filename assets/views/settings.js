@@ -1,6 +1,6 @@
 // 视图：设置
 import { getAIConfig, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=3.9';
-import { testAIConnection } from '../services/aiAssistService.js?v=1.0';
+import { testAIConnection } from '../services/aiAssistService.js?v=1.1';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
 import { experienceService } from '../services/experienceService.js?v=3.9';
 import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from '../data/repository.js?v=3.9';

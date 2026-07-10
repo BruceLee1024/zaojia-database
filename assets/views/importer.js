@@ -3,22 +3,17 @@ import { projectService } from '../services/projectService.js?v=3.9';
 import { boqService } from '../services/boqService.js?v=3.9';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
 import { quotaService } from '../services/quotaService.js?v=3.9';
-import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=1.0';
+import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=1.1';
 import { quotaRepo } from '../data/repository.js?v=3.9';
-import { parseExcel, exportQuotaTemplate } from '../data/excel.js?v=3.9';
+import { parseExcel, exportQuotaTemplate } from '../data/excel.js?v=4.0';
+import { getStorageStatus } from '../data/storage.js?v=1.0';
+import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=1.2';
+import { createMappingTemplate, deleteMappingTemplate, duplicateMappingTemplate, getMappingTemplate, listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=1.0';
 import { esc, fmtMoney, openModal, closeModal, toast } from '../utils/dom.js';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
+import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
 
-const FIELD_DEFS = [
-  { key: 'name', label: '清单名称', required: true, aliases: ['项目名称', '清单名称', '名称', '项目名称\n项目特征', '清单名称\n项目特征'] },
-  { key: 'feature', label: '项目特征', aliases: ['项目特征', '特征描述'] },
-  { key: 'unit', label: '单位', required: true, aliases: ['计量单位', '单位'] },
-  { key: 'qty', label: '工程量', required: true, aliases: ['工程数量', '工程量', '数量'] },
-  { key: 'unitPrice', label: '综合单价', aliases: ['综合单价', '综合单价(元)', '单价'] },
-  { key: 'process', label: '工艺段', aliases: ['工艺段', '区域', '单体', '部位'] },
-  { key: 'costCategory', label: '成本分类', aliases: ['费用分类', '成本分类', '专业', '分类'] },
-];
+const PREVIEW_PAGE_SIZES = [20, 50, 100];
 
 const SAMPLE_ROWS = [
   { 序号: 1, 项目名称: '土方开挖（基坑）', 项目特征: '挖土深度 ≤3m，含支撑', 计量单位: 'm³', 工程数量: '125.600', 综合单价: '86.35', 工艺段: '生化池', 费用分类: '土建工程' },
@@ -35,25 +30,41 @@ const SAMPLE_ROWS = [
 const state = {
   mode: 'hub',
   projects: [],
+  storageStatus: { mode: 'browser', directoryName: '' },
   projectId: '',
   fileName: '',
   fileSize: 0,
   rawRows: [],
   headers: [],
   mapping: {},
+  mappingMeta: {},
+  mappingSources: {},
+  fixedValues: {},
+  amountRule: 'calculated',
+  templates: [],
+  templateRecommendation: null,
+  activeTemplateId: '',
+  draftAvailable: false,
   activeIssueTab: 'errors',
   previewOnlyIssues: false,
   keyword: '',
+  previewPage: 1,
+  previewPageSize: 50,
   selectedRows: new Set(),
   importMode: 'append',
 };
 
 export async function render() {
   const params = window.__app?.state?.routeParams || {};
-  state.projects = await projectService.list();
+  [state.projects, state.storageStatus] = await Promise.all([
+    projectService.list(),
+    getStorageStatus(),
+  ]);
   if (!state.projectId && state.projects.length) {
     state.projectId = params.projectId || window.__app?.state?.currentProjectId || state.projects[0].id;
   }
+  refreshTemplates();
+  state.draftAvailable = Boolean(readDraft());
   if (params.mode === 'boq') state.mode = 'boq';
   if (params.mode === 'hub') state.mode = 'hub';
   exposeImporterActions();
@@ -106,28 +117,71 @@ function exposeImporterActions() {
     setProject: id => {
       state.projectId = id;
       window.__app.state.currentProjectId = id;
+      refreshTemplates();
       paint();
     },
     setMapping: (key, value) => {
       state.mapping[key] = value;
+      state.mappingSources[key] = { type: value ? 'column' : 'none', value };
+      if (!value) delete state.fixedValues[key];
+      state.mappingMeta[key] = {
+        ...(state.mappingMeta[key] || {}),
+        source: value,
+        candidateSource: value,
+        confidence: value ? 'manual' : 'none',
+        status: value ? 'confirmed' : 'missing',
+        reason: value ? '已由你手动确认来源列' : '未选择来源列',
+      };
       state.selectedRows.clear();
+      state.previewPage = 1;
+      paint();
+    },
+    setMappingMode: (key, type) => {
+      if (type === 'fixed' && !canUseFixedValue(key)) return;
+      state.mappingSources[key] = { type, value: type === 'column' ? (state.mapping[key] || '') : '' };
+      if (type !== 'column') state.mapping[key] = '';
+      if (type !== 'fixed') delete state.fixedValues[key];
+      state.mappingMeta[key] = {
+        ...(state.mappingMeta[key] || {}),
+        status: type === 'fixed' ? 'fixed' : 'missing',
+        reason: type === 'fixed' ? '将使用固定填充值' : '未选择来源列',
+      };
+      paint();
+    },
+    setFixedValue: (key, value) => {
+      state.mappingSources[key] = { type: 'fixed', value };
+      state.fixedValues[key] = value;
+      state.mapping[key] = '';
+      state.mappingMeta[key] = { ...(state.mappingMeta[key] || {}), status: 'fixed', reason: value ? '将使用固定填充值' : '请输入固定值' };
+      state.previewPage = 1;
+      paint();
+    },
+    setAmountRule: value => {
+      state.amountRule = ['calculated', 'sourceAmount', 'deriveUnitPrice'].includes(value) ? value : 'calculated';
       paint();
     },
     autoMap: () => {
-      state.mapping = inferMapping(state.headers);
-      toast('已按列名重新自动映射', 'success');
+      applyMappingResult(buildImportMapping(state.headers, state.rawRows));
+      state.activeTemplateId = '';
+      state.previewPage = 1;
+      toast(mappingToastMessage('已自动确认字段'), 'success');
       paint();
     },
     aiMap: async () => {
       const result = await suggestImportMapping(state.headers, state.rawRows.slice(0, 10));
-      (result.suggestions || []).forEach(item => {
-        state.mapping[item.targetField] = item.sourceHeader;
-      });
+      applyMappingResult(result);
+      state.previewPage = 1;
       toast(result.summary || 'AI 已识别字段映射', 'success');
       paint();
     },
     clearMapping: () => {
       state.mapping = {};
+      state.mappingMeta = {};
+      state.mappingSources = {};
+      state.fixedValues = {};
+      state.amountRule = 'calculated';
+      state.activeTemplateId = '';
+      state.previewPage = 1;
       paint();
     },
     setIssueTab: tab => {
@@ -136,10 +190,36 @@ function exposeImporterActions() {
     },
     setPreviewIssues: checked => {
       state.previewOnlyIssues = checked;
+      state.previewPage = 1;
       paint();
     },
     setKeyword: value => {
       state.keyword = value;
+      state.previewPage = 1;
+      paint();
+    },
+    setPreviewPage: page => {
+      state.previewPage = Math.max(1, Number(page) || 1);
+      paint();
+    },
+    setPreviewPageSize: size => {
+      state.previewPageSize = PREVIEW_PAGE_SIZES.includes(Number(size)) ? Number(size) : 50;
+      state.previewPage = 1;
+      paint();
+    },
+    useCandidate: key => {
+      const candidate = state.mappingMeta[key]?.candidateSource;
+      if (!candidate) return;
+      state.mapping[key] = candidate;
+      state.mappingSources[key] = { type: 'column', value: candidate };
+      state.mappingMeta[key] = {
+        ...state.mappingMeta[key],
+        source: candidate,
+        confidence: 'manual',
+        status: 'confirmed',
+        reason: '已由你确认候选来源列',
+      };
+      state.previewPage = 1;
       paint();
     },
     setMode: mode => {
@@ -153,6 +233,15 @@ function exposeImporterActions() {
       paint();
     },
     saveDraft,
+    restoreDraft,
+    showTemplateMenu,
+    showTemplateManager,
+    showSaveTemplate,
+    saveTemplateForm,
+    updateActiveTemplate,
+    applyTemplate,
+    deleteTemplate,
+    duplicateTemplate,
     confirmImport,
     repairMissingPrice: () => {
       state.rawRows = state.rawRows.map(row => {
@@ -175,6 +264,11 @@ function exposeImporterActions() {
 
 function renderHub() {
   const projectCount = state.projects.length;
+  const usingFolder = state.storageStatus.mode === 'folder';
+  const storageLabel = usingFolder ? '本地文件夹' : '浏览器本地库';
+  const storageDetail = usingFolder
+    ? `当前数据同步到“${state.storageStatus.directoryName || '已选文件夹'}”，并保留浏览器镜像。`
+    : '当前数据保存在此浏览器的 IndexedDB 中。';
   document.getElementById('workspace').innerHTML = `
     <div class="min-h-full max-w-[1680px] mx-auto flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-5">
@@ -184,13 +278,13 @@ function renderHub() {
               <span class="material-symbols-outlined text-[16px]">hub</span>
               数据入口
             </div>
-            <h1 class="mt-3 text-2xl font-semibold tracking-normal text-slate-950">先选择要导入的数据类型</h1>
-            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">定额库、项目清单、报价版本和备份文件的入库路径不同。这里先帮你选对入口，再进入对应的字段映射、质量检查或数据管理流程。</p>
+            <h1 class="mt-3 text-2xl font-semibold tracking-normal text-slate-950">导入什么，从这里开始</h1>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">选择定额、工程量清单、历史版本或备份数据。系统会先识别字段并检查数据质量，确认后再写入对应的本地数据区。</p>
           </div>
           <div class="flex-1"></div>
           <div class="grid grid-cols-3 gap-2 text-sm">
             ${hubMetric('当前项目', projectCount, '个')}
-            ${hubMetric('本地存储', 'IndexedDB', '')}
+            ${hubMetric('当前存储', storageLabel, '')}
             ${hubMetric('导入方式', 'Excel / JSON', '')}
           </div>
         </div>
@@ -254,11 +348,12 @@ function renderHub() {
         <aside class="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
           <div class="flex items-center gap-2 font-semibold text-amber-900">
             <span class="material-symbols-outlined text-[19px]">info</span>
-            本地版提醒
+            本地数据说明
           </div>
           <div class="mt-3 space-y-2 text-xs leading-5 text-amber-800">
-            <p>所有业务数据保存在当前浏览器 IndexedDB。换电脑、清缓存或更换浏览器前，请先到设置导出 JSON 备份。</p>
-            <p>Excel 导入会先预检，确认入库后才会写入项目清单或定额库。</p>
+            <p>数据只保存在当前设备，不会上传到服务器。${esc(storageDetail)}</p>
+            <p>${usingFolder ? '如需迁移或长期留存，请定期导出 JSON 备份。' : '需要把数据保存在自己指定的目录，可到「设置 - 存储设置」连接本地文件夹。'}</p>
+            <p>更换电脑、清理浏览器数据或重装系统前，请先导出 JSON 备份。</p>
           </div>
         </aside>
       </section>
@@ -308,7 +403,7 @@ function paint() {
   const hasUploaded = Boolean(state.fileName);
 
   document.getElementById('workspace').innerHTML = `
-    <div class="h-full min-h-[720px] flex flex-col">
+    <div class="h-[calc(100dvh-112px)] min-h-[620px] flex flex-col">
       <div class="mb-3 flex items-center gap-3">
         <button onclick="window.__importer.showHub()" class="h-10 w-10 border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 flex items-center justify-center" title="返回导入中心" aria-label="返回导入中心">
           <span class="material-symbols-outlined text-[20px]">arrow_back</span>
@@ -333,7 +428,7 @@ function paint() {
       </div>
 
       <div class="grid grid-cols-[minmax(0,1fr)_350px] gap-4 flex-1 min-h-0">
-        <section class="min-w-0 flex flex-col gap-3">
+        <section class="min-w-0 min-h-0 flex flex-col gap-3">
           ${uploadZone(hasUploaded)}
           ${fileSummary(hasUploaded, mappedRows.length)}
           ${mappingGrid()}
@@ -401,32 +496,53 @@ function summaryCell(value, label) {
 }
 
 function mappingGrid() {
+  const recommendation = state.templateRecommendation;
   return `
     <section class="shrink-0 rounded-lg border border-slate-200 bg-white overflow-hidden">
       <div class="px-4 py-3 border-b border-slate-200 flex items-center gap-3">
         <div>
           <div class="font-semibold text-slate-900">字段映射</div>
-          <div class="mt-1 text-xs text-slate-500">系统已按常见表头自动匹配，可手动调整来源列。</div>
+          <div class="mt-1 text-xs text-slate-500">系统已按常见表头自动匹配；可保存为模板、使用固定值或手动调整来源列。</div>
         </div>
         <div class="flex-1"></div>
+        <button onclick="window.__importer.showTemplateMenu()" class="px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 border border-slate-300 bg-white inline-flex items-center gap-1"><span class="material-symbols-outlined text-[15px]">bookmark</span>模板</button>
+        <button onclick="window.__importer.showSaveTemplate()" class="px-2.5 py-1.5 text-xs text-teal-700 hover:bg-teal-50 border border-teal-200 bg-white">另存模板</button>
+        ${state.activeTemplateId ? '<button onclick="window.__importer.updateActiveTemplate()" class="px-2.5 py-1.5 text-xs text-teal-700 hover:bg-teal-50 border border-teal-200 bg-white">更新当前模板</button>' : ''}
         <button onclick="window.__importer.aiMap()" class="px-2.5 py-1.5 text-xs text-teal-700 hover:bg-teal-50 border border-teal-200 bg-teal-50 inline-flex items-center gap-1">
           <span class="material-symbols-outlined text-[15px]">auto_awesome</span>AI 识别字段
         </button>
         <button onclick="window.__importer.autoMap()" class="px-2.5 py-1.5 text-xs text-teal-700 hover:bg-teal-50 border border-teal-200 bg-white">自动映射</button>
         <button onclick="window.__importer.clearMapping()" class="px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 border border-slate-200 bg-white">清空映射</button>
+        ${state.draftAvailable ? '<button onclick="window.__importer.restoreDraft()" class="px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 border border-slate-200 bg-white">恢复草稿</button>' : ''}
+      </div>
+      ${recommendation ? templateRecommendationCard(recommendation) : ''}
+      <div class="px-4 py-2 border-b border-slate-100 bg-slate-50 flex items-center gap-3 text-xs text-slate-600">
+        <span class="font-medium text-slate-700">金额规则</span>
+        <select onchange="window.__importer.setAmountRule(this.value)" class="h-7 rounded border border-slate-300 bg-white px-2 text-xs">
+          <option value="calculated" ${state.amountRule === 'calculated' ? 'selected' : ''}>数量 × 综合单价</option>
+          <option value="sourceAmount" ${state.amountRule === 'sourceAmount' ? 'selected' : ''}>优先使用 Excel 合价</option>
+          <option value="deriveUnitPrice" ${state.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option>
+        </select>
+        <span class="text-slate-400">当前规则会同步用于预览与确认入库。</span>
       </div>
       <div class="max-h-[220px] overflow-auto scroll-thin">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-xs text-slate-500">
+        <table class="w-full min-w-[760px] table-fixed text-sm">
+          <colgroup>
+            <col class="w-[30%]" />
+            <col class="w-[22%]" />
+            <col class="w-[34%]" />
+            <col class="w-[14%]" />
+          </colgroup>
+          <thead class="sticky top-0 z-10 bg-slate-50 text-xs text-slate-500">
             <tr class="text-left">
-              <th class="py-2 px-3 w-[28%]">Excel 列名（源字段）</th>
-              <th class="px-3 w-[25%]">系统字段（目标字段）</th>
-              <th class="px-3">识别示例</th>
-              <th class="px-3 w-28">匹配状态</th>
+              <th class="px-3 py-2 whitespace-nowrap">Excel 列名（来源）</th>
+              <th class="px-3 whitespace-nowrap">系统字段</th>
+              <th class="px-3 whitespace-nowrap">识别示例</th>
+              <th class="px-3 whitespace-nowrap">状态</th>
             </tr>
           </thead>
           <tbody>
-            ${FIELD_DEFS.map(def => mappingRow(def)).join('')}
+            ${IMPORT_FIELD_DEFS.map(def => mappingRow(def)).join('')}
           </tbody>
         </table>
       </div>
@@ -436,33 +552,70 @@ function mappingGrid() {
 
 function mappingRow(def) {
   const source = state.mapping[def.key] || '';
-  const sample = source ? firstNonEmpty(state.rawRows, source) : '';
-  const ok = source && (!def.required || sample !== '');
+  const mappingSource = state.mappingSources[def.key] || { type: source ? 'column' : 'none', value: source };
+  const isFixed = mappingSource.type === 'fixed';
+  const sample = isFixed ? (state.fixedValues[def.key] || '') : source ? firstNonEmpty(state.rawRows, source) : '';
+  const meta = state.mappingMeta[def.key] || { status: source ? 'confirmed' : 'missing', reason: source ? '已确认来源列' : '未找到可识别的来源列' };
+  const status = mappingStatus(meta);
   return `
     <tr class="border-t border-slate-100">
       <td class="py-2 px-3">
-        <select class="h-8 w-full rounded border border-slate-300 bg-white px-2 text-sm" onchange="window.__importer.setMapping('${def.key}', this.value)">
-          <option value="">不映射</option>
-          ${state.headers.map(h => `<option value="${esc(h)}" ${source === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
-        </select>
+        <div class="flex gap-1.5">
+          <select class="h-8 w-24 rounded border border-slate-300 bg-white px-1.5 text-xs" onchange="window.__importer.setMappingMode('${def.key}', this.value)">
+            <option value="column" ${mappingSource.type === 'column' ? 'selected' : ''}>Excel 列</option>
+            ${canUseFixedValue(def.key) ? `<option value="fixed" ${mappingSource.type === 'fixed' ? 'selected' : ''}>固定值</option>` : ''}
+            <option value="none" ${mappingSource.type === 'none' ? 'selected' : ''}>不映射</option>
+          </select>
+          ${isFixed ? `<input value="${esc(state.fixedValues[def.key] || '')}" oninput="window.__importer.setFixedValue('${def.key}', this.value)" placeholder="输入固定值" class="h-8 min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 text-sm" />` : mappingSource.type === 'none' ? '<div class="h-8 flex-1 rounded border border-dashed border-slate-200 px-2 flex items-center text-xs text-slate-400">不参与导入</div>' : `<select class="h-8 min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 text-sm" onchange="window.__importer.setMapping('${def.key}', this.value)"><option value="">请选择列</option>${state.headers.map(h => `<option value="${esc(h)}" ${source === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select>`}
+        </div>
       </td>
       <td class="px-3 font-medium text-slate-800">
         ${esc(def.label)} ${def.required ? '<span class="text-red-500">*</span>' : ''}
       </td>
-      <td class="px-3 text-slate-600 truncate">${esc(sample || '-')}</td>
-      <td class="px-3">${ok ? '<span class="badge badge-green">已映射</span>' : '<span class="badge badge-yellow">待确认</span>'}</td>
+      <td class="px-3 text-slate-600"><div class="truncate" title="${esc(sample || '-')}">${esc(sample || '-')}</div></td>
+      <td class="px-3">
+        <div class="whitespace-nowrap">${status.badge}</div>
+        <div class="mt-1 truncate text-[11px] text-slate-500" title="${esc(meta.reason || '')}">${esc(meta.reason || '')}</div>
+        ${!source && meta.candidateSource ? `<button onclick="window.__importer.useCandidate('${def.key}')" class="mt-1 text-[11px] font-medium text-teal-700 hover:underline">使用候选列</button>` : ''}
+      </td>
     </tr>
   `;
 }
 
+function mappingStatus(meta) {
+  if (meta.status === 'template') return { badge: '<span class="badge badge-blue">模板应用</span>' };
+  if (meta.status === 'fixed') return { badge: '<span class="badge badge-blue">固定值</span>' };
+  if (meta.status === 'template-missing') return { badge: '<span class="badge badge-red">模板列缺失</span>' };
+  if (meta.status === 'confirmed') return { badge: '<span class="badge badge-green">已确认</span>' };
+  if (meta.status === 'needs-review') return { badge: '<span class="badge badge-yellow">待确认</span>' };
+  return { badge: '<span class="badge badge-gray">未找到</span>' };
+}
+
+function templateRecommendationCard(recommendation) {
+  const template = getMappingTemplate(recommendation.templateId);
+  if (!template) return '';
+  const detail = recommendation.missingSources.length ? `缺少：${recommendation.missingSources.join('、')}` : '所有模板列均可用';
+  return `<div class="mx-4 mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 flex items-center gap-3 text-xs">
+    <span class="material-symbols-outlined text-teal-700 text-[18px]">tips_and_updates</span>
+    <div class="min-w-0 flex-1"><span class="font-semibold text-teal-900">推荐模板：${esc(template.name)}</span><span class="ml-2 text-teal-800">匹配 ${recommendation.score}% · ${recommendation.matchedFields.length} 个字段</span><div class="mt-0.5 truncate text-teal-800/80">${esc(detail)}</div></div>
+    <button onclick="window.__importer.applyTemplate('${template.id}')" class="px-2.5 py-1.5 border border-teal-300 bg-white text-teal-800 hover:bg-teal-100">应用模板</button>
+  </div>`;
+}
+
 function previewTable(rows, quality) {
   const total = getMappedRows().length;
+  const pageCount = Math.max(1, Math.ceil(rows.length / state.previewPageSize));
+  const page = Math.min(state.previewPage, pageCount);
+  const pageStart = (page - 1) * state.previewPageSize;
+  const pageRows = rows.slice(pageStart, pageStart + state.previewPageSize);
+  const firstRow = rows.length ? pageStart + 1 : 0;
+  const lastRow = pageStart + pageRows.length;
   return `
     <section class="rounded-lg border border-slate-200 bg-white overflow-hidden flex-1 min-h-[260px] flex flex-col">
       <div class="px-4 py-3 border-b border-slate-200 flex items-center gap-3 shrink-0">
         <div>
-          <div class="font-semibold text-slate-900">数据预览 <span class="text-xs font-normal text-slate-500">（前 200 行）</span></div>
-          <div class="mt-1 text-xs text-slate-500">共 ${total.toLocaleString('zh-CN')} 行，当前显示 ${rows.length} 行，已选中 ${state.selectedRows.size} 行。</div>
+          <div class="font-semibold text-slate-900">数据预览</div>
+          <div class="mt-1 text-xs text-slate-500">共 ${total.toLocaleString('zh-CN')} 行，当前筛选 ${rows.length.toLocaleString('zh-CN')} 行，已选中 ${state.selectedRows.size} 行。</div>
         </div>
         <div class="flex-1"></div>
         <label class="flex items-center gap-2 text-xs text-slate-600">
@@ -485,24 +638,33 @@ function previewTable(rows, quality) {
               <th class="px-3 w-16">单位</th>
               <th class="px-3 w-24 text-right">工程量</th>
               <th class="px-3 w-28 text-right">综合单价</th>
+              <th class="px-3 w-28 text-right">合价</th>
               <th class="px-3 w-24">工艺段</th>
               <th class="px-3 w-28">成本分类</th>
             </tr>
           </thead>
           <tbody>
-            ${rows.length ? rows.slice(0, 200).map(row => previewRow(row, quality)).join('') : `<tr><td colspan="8" class="py-10 text-center text-slate-400">没有符合条件的预览行。</td></tr>`}
+            ${pageRows.length ? pageRows.map(row => previewRow(row, quality)).join('') : `<tr><td colspan="9" class="py-10 text-center text-slate-400">没有符合条件的预览行。</td></tr>`}
           </tbody>
         </table>
       </div>
       <div class="px-4 py-3 border-t border-slate-200 bg-white flex items-center gap-2 text-xs text-slate-500 shrink-0">
-        <span>共 ${total.toLocaleString('zh-CN')} 行</span>
-        <span>·</span>
+        <span>显示 ${firstRow}-${lastRow} / ${rows.length.toLocaleString('zh-CN')} 行</span>
+        <span class="text-slate-300">|</span>
         <span class="${quality.errorCount ? 'text-red-600' : 'text-teal-700'}">${quality.errorCount ? `需修正 ${quality.errorCount} 个问题` : '检查通过'}</span>
         <div class="flex-1"></div>
-        <span class="rounded border border-slate-200 px-2 py-1">20 条/页</span>
-        <span class="rounded border border-teal-200 bg-teal-50 px-2 py-1 text-teal-700">1</span>
-        <span class="rounded border border-slate-200 px-2 py-1">2</span>
-        <span class="rounded border border-slate-200 px-2 py-1">3</span>
+        <label class="flex items-center gap-1.5">
+          <span>每页</span>
+          <select onchange="window.__importer.setPreviewPageSize(this.value)" class="h-7 rounded border border-slate-300 bg-white px-1.5 text-xs">
+            ${PREVIEW_PAGE_SIZES.map(size => `<option value="${size}" ${state.previewPageSize === size ? 'selected' : ''}>${size}</option>`).join('')}
+          </select>
+          <span>条</span>
+        </label>
+        <div class="flex items-center gap-1">
+          <button onclick="window.__importer.setPreviewPage(${page - 1})" ${page === 1 ? 'disabled' : ''} title="上一页" aria-label="上一页" class="h-7 w-7 border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 flex items-center justify-center"><span class="material-symbols-outlined text-[16px]">chevron_left</span></button>
+          <span class="min-w-16 text-center tabular-nums">${page} / ${pageCount}</span>
+          <button onclick="window.__importer.setPreviewPage(${page + 1})" ${page === pageCount ? 'disabled' : ''} title="下一页" aria-label="下一页" class="h-7 w-7 border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 flex items-center justify-center"><span class="material-symbols-outlined text-[16px]">chevron_right</span></button>
+        </div>
       </div>
     </section>
   `;
@@ -511,6 +673,7 @@ function previewTable(rows, quality) {
 function previewRow(row, quality) {
   const hasIssue = quality.issueRows.has(row.index);
   const rowBg = hasIssue ? 'bg-amber-50/40' : 'hover:bg-slate-50';
+  const priceMissing = quality.priceMapped && hasMissingPrice(row.unitPrice);
   return `
     <tr class="border-b border-slate-100 ${rowBg}">
       <td class="py-2 px-3 tabular-nums text-slate-500">${row.index + 1}</td>
@@ -518,9 +681,10 @@ function previewRow(row, quality) {
       <td class="px-3 text-slate-600 truncate" title="${esc(row.feature)}">${esc(row.feature || '-')}</td>
       <td class="px-3 ${!row.unit ? 'bg-red-50 text-red-700' : ''}">${esc(row.unit || '缺失')}</td>
       <td class="px-3 text-right tabular-nums ${row.qty <= 0 ? 'bg-amber-50 text-amber-700' : ''}">${formatNumber(row.qty)}</td>
-      <td class="px-3 text-right tabular-nums ${hasMissingPrice(row.unitPrice) ? 'bg-amber-50 text-amber-700' : ''}">
-        ${hasMissingPrice(row.unitPrice) ? '-' : fmtMoney(row.unitPrice)}
+      <td class="px-3 text-right tabular-nums ${priceMissing ? 'bg-amber-50 text-amber-700' : !quality.priceMapped ? 'text-slate-400' : ''}">
+        ${!quality.priceMapped ? '未映射' : priceMissing ? '-' : fmtMoney(row.unitPrice)}
       </td>
+      <td class="px-3 text-right tabular-nums ${state.amountRule === 'sourceAmount' ? 'text-teal-700 font-medium' : 'text-slate-600'}">${fmtMoney(row.amount)}</td>
       <td class="px-3 text-slate-600 truncate">${esc(row.process || '-')}</td>
       <td class="px-3 text-slate-600 truncate">${esc(row.costCategory || categoryGuess(row.name))}</td>
     </tr>
@@ -529,8 +693,11 @@ function previewRow(row, quality) {
 
 function qualityPanel(quality, project) {
   const repairs = suggestImportRepairs(getMappedRows(), quality, { project }).suggestions || [];
+  const errorTabLabel = quality.errorCount
+    ? `错误 (${quality.errorCount})`
+    : quality.priceMapped ? '错误 (0)' : '待确认 (1)';
   const tabs = [
-    ['errors', `错误 (${quality.errorCount})`],
+    ['errors', errorTabLabel],
     ['warnings', `警告 (${quality.warningCount})`],
     ['suggestions', `建议 (${quality.suggestionCount})`],
   ];
@@ -600,13 +767,40 @@ function metricBox(label, value, cls) {
 function issueCards(quality) {
   const issues = state.activeIssueTab === 'errors' ? [
     {
-      icon: 'error',
+      icon: 'functions',
+      tone: quality.amountRuleInvalid ? 'red' : 'green',
+      title: quality.amountRuleInvalid ? '金额规则缺少合价来源列' : '金额规则可用',
+      desc: quality.amountRuleInvalid ? '当前规则依赖 Excel 合价列，请先映射“合价”字段，或改回数量乘单价。' : `当前使用：${amountRuleLabel(state.amountRule)}`,
+      rows: [],
+      action: '',
+      handler: '',
+    },
+    {
+      icon: 'rule',
       tone: 'red',
-      title: `缺单价（${quality.missingPrice.length}）`,
-      desc: '存在综合单价为空或非数字的行，入库后将按 0 计价。',
+      title: `必填字段未映射（${quality.requiredUnmapped.length}）`,
+      desc: '名称、单位和工程量必须绑定 Excel 列后才能确认入库。',
+      rows: [],
+      action: '',
+      handler: '',
+    },
+    {
+      icon: 'link_off',
+      tone: 'red',
+      title: `模板列缺失（${quality.templateMissing.length}）`,
+      desc: quality.templateMissing.length ? quality.templateMissing.map(item => item.label || item.key).join('、') : '当前模板引用的列都存在。',
+      rows: [],
+      action: '',
+      handler: '',
+    },
+    {
+      icon: quality.priceMapped ? 'error' : 'info',
+      tone: quality.priceMapped ? 'red' : 'amber',
+      title: priceIssueTitle(quality),
+      desc: priceIssueDescription(quality),
       rows: quality.missingPrice,
-      action: '批量设为待询价',
-      handler: 'repairMissingPrice',
+      action: quality.priceMapped ? '批量设为待询价' : '',
+      handler: quality.priceMapped ? 'repairMissingPrice' : '',
     },
     {
       icon: 'error',
@@ -636,6 +830,15 @@ function issueCards(quality) {
       action: '仅保留预警',
       handler: '',
     },
+    {
+      icon: 'warning',
+      tone: 'amber',
+      title: `合价不一致（${quality.amountMismatch.length}）`,
+      desc: 'Excel 合价与工程量乘综合单价存在大于 0.01 的差异，系统不会自动改写原数据。',
+      rows: quality.amountMismatch,
+      action: '',
+      handler: '',
+    },
   ] : [
     {
       icon: 'tips_and_updates',
@@ -658,6 +861,17 @@ function issueCards(quality) {
   ];
 
   return issues.map(issueCard).join('');
+}
+
+function priceIssueTitle(quality) {
+  if (quality.priceMapped) return `缺单价（${quality.missingPrice.length}）`;
+  return quality.priceField.status === 'needs-review' ? '单价列待确认' : '未识别单价列';
+}
+
+function priceIssueDescription(quality) {
+  if (quality.priceMapped) return '存在综合单价为空或非数字的行，入库后将按 0 计价。';
+  if (quality.priceField.status === 'needs-review') return `检测到候选列“${quality.priceField.candidateSource}”，因置信度不足未自动使用，请在字段映射区确认。`;
+  return '源文件中未找到可识别的综合单价列。若文件本身没有报价，可继续入库并在后续补价。';
 }
 
 function issueCard(issue) {
@@ -716,9 +930,11 @@ async function handleFile(file) {
     state.fileSize = file.size || 0;
     state.rawRows = rows;
     state.headers = Object.keys(rows[0] || {});
-    state.mapping = inferMapping(state.headers);
+    applyMappingResult(buildImportMapping(state.headers, state.rawRows));
+    refreshTemplateRecommendation();
     state.selectedRows.clear();
-    toast(`已解析 ${rows.length} 行`, 'success');
+    state.previewPage = 1;
+    toast(`已解析 ${rows.length} 行，${mappingToastMessage('自动确认')}`, 'success');
     paint();
   } catch (err) {
     console.error(err);
@@ -832,35 +1048,52 @@ function loadSample() {
   state.fileSize = 0;
   state.rawRows = SAMPLE_ROWS;
   state.headers = Object.keys(SAMPLE_ROWS[0]);
-  state.mapping = inferMapping(state.headers);
+  applyMappingResult(buildImportMapping(state.headers, state.rawRows));
+  refreshTemplateRecommendation();
+  state.previewPage = 1;
 }
 
-function inferMapping(headers) {
-  const next = {};
-  FIELD_DEFS.forEach(def => {
-    next[def.key] = def.aliases.find(alias => headers.includes(alias)) || '';
+function applyMappingResult(result) {
+  state.mapping = result.mapping || {};
+  state.mappingMeta = result.fields || {};
+  state.mappingSources = Object.fromEntries(Object.entries(state.mapping).map(([key, value]) => [key, { type: value ? 'column' : 'none', value: value || '' }]));
+  state.fixedValues = { ...(result.fixedValues || {}) };
+  Object.keys(state.fixedValues).forEach(key => {
+    state.mappingSources[key] = { type: 'fixed', value: state.fixedValues[key] };
+    state.mappingMeta[key] = { ...(state.mappingMeta[key] || {}), status: 'fixed', reason: '将使用固定填充值' };
   });
-  return next;
+  state.amountRule = result.amountRule || 'calculated';
+}
+
+function mappingToastMessage(prefix) {
+  const fields = Object.values(state.mappingMeta);
+  const confirmed = fields.filter(field => field.status === 'confirmed').length;
+  const pending = fields.filter(field => field.status === 'needs-review').length;
+  return `${prefix} ${confirmed} 项${pending ? `，${pending} 项待确认` : ''}`;
 }
 
 function getMappedRows() {
   return state.rawRows.map((row, index) => {
-    const rawName = valueOf(row, state.mapping.name);
-    const rawFeature = valueOf(row, state.mapping.feature);
+    const rawName = mappedValue(row, 'name');
+    const rawFeature = mappedValue(row, 'feature');
     const split = splitNameFeature(rawName, rawFeature);
-    const qty = parseNumber(valueOf(row, state.mapping.qty));
-    const unitPrice = parseNumber(valueOf(row, state.mapping.unitPrice));
+    const qty = parseNumber(mappedValue(row, 'qty'));
+    const sourceUnitPrice = parseNumber(mappedValue(row, 'unitPrice'));
+    const sourceAmount = parseNumber(mappedValue(row, 'amount'));
+    const pricing = resolveImportPricing({ qty, unitPrice: sourceUnitPrice, amount: sourceAmount, amountRule: state.amountRule });
     return {
       index,
       source: row,
       name: split.name,
       feature: split.feature,
-      unit: valueOf(row, state.mapping.unit),
-      qty,
-      unitPrice,
-      amount: calculateAmount(qty, unitPrice, 1),
-      process: valueOf(row, state.mapping.process),
-      costCategory: valueOf(row, state.mapping.costCategory),
+      unit: mappedValue(row, 'unit'),
+      qty: pricing.qty,
+      unitPrice: pricing.unitPrice,
+      sourceAmount: pricing.sourceAmount,
+      calculatedAmount: pricing.calculatedAmount,
+      amount: pricing.amount,
+      process: mappedValue(row, 'process'),
+      costCategory: mappedValue(row, 'costCategory'),
     };
   });
 }
@@ -868,9 +1101,20 @@ function getMappedRows() {
 function analyzeRows(rows) {
   const missingName = rows.filter(row => !row.name);
   const missingUnit = rows.filter(row => row.name && !row.unit);
-  const missingPrice = rows.filter(row => row.name && hasMissingPrice(row.unitPrice));
+  const priceField = state.mappingMeta.unitPrice || {};
+  const amountField = state.mappingMeta.amount || {};
+  const priceMapped = Boolean(state.mapping.unitPrice);
+  const amountMapped = Boolean(state.mapping.amount);
+  const amountRuleInvalid = (state.amountRule === 'sourceAmount' || state.amountRule === 'deriveUnitPrice') && !amountMapped;
+  const missingPrice = priceMapped ? rows.filter(row => row.name && hasMissingPrice(row.unitPrice)) : [];
   const zeroQty = rows.filter(row => row.name && !(row.qty > 0));
   const unknownCategory = rows.filter(row => row.name && !row.costCategory && categoryGuess(row.name) === '其他');
+  const requiredUnmapped = IMPORT_FIELD_DEFS.filter(def => def.required && !hasMappedValue(def.key));
+  const templateMissing = Object.values(state.mappingMeta).filter(field => field.status === 'template-missing');
+  const amountMismatch = rows.filter(row => row.name && row.sourceAmount > 0 && row.qty > 0 && row.unitPrice > 0 && Math.abs(row.sourceAmount - row.calculatedAmount) > 0.01);
+  const derivablePrice = state.amountRule === 'deriveUnitPrice'
+    ? rows.filter(row => row.name && row.sourceAmount > 0 && row.qty > 0 && !parseNumber(mappedValue(row.source, 'unitPrice')))
+    : [];
   const seen = new Map();
   const duplicates = [];
   rows.forEach(row => {
@@ -880,8 +1124,8 @@ function analyzeRows(rows) {
     else seen.set(key, row.index);
   });
   const issueRows = new Set([...missingName, ...missingUnit, ...missingPrice, ...zeroQty, ...unknownCategory, ...duplicates].map(r => r.index));
-  const errorCount = missingName.length + missingUnit.length + missingPrice.length;
-  const warningCount = zeroQty.length + unknownCategory.length;
+  const errorCount = missingName.length + missingUnit.length + missingPrice.length + requiredUnmapped.length + templateMissing.length + (amountRuleInvalid ? 1 : 0);
+  const warningCount = zeroQty.length + unknownCategory.length + amountMismatch.length;
   const suggestionCount = duplicates.length;
   const importable = rows.filter(row => row.name && row.unit && row.qty > 0).length;
   const score = rows.length ? Math.max(35, Math.round(100 - ((errorCount * 2 + warningCount + suggestionCount * 0.5) / rows.length) * 100)) : 0;
@@ -892,6 +1136,15 @@ function analyzeRows(rows) {
     missingName,
     missingUnit,
     missingPrice,
+    priceField,
+    priceMapped,
+    amountField,
+    amountMapped,
+    amountRuleInvalid,
+    requiredUnmapped,
+    templateMissing,
+    amountMismatch,
+    derivablePrice,
     zeroQty,
     unknownCategory,
     duplicates,
@@ -918,8 +1171,21 @@ async function confirmImport() {
     toast('请先选择项目', 'error');
     return;
   }
+  const quality = analyzeRows(getMappedRows());
+  if (quality.requiredUnmapped.length) {
+    toast(`请先完成必填字段映射：${quality.requiredUnmapped.map(field => field.label).join('、')}`, 'error');
+    return;
+  }
+  if (quality.templateMissing.length) {
+    toast('模板存在缺失来源列，请重新选择对应 Excel 列后再入库', 'error');
+    return;
+  }
+  if (quality.amountRuleInvalid) {
+    toast('当前金额规则需要先映射合价列', 'error');
+    return;
+  }
   const rows = getMappedRows()
-    .filter(row => row.name)
+    .filter(row => row.name && row.unit && row.qty > 0)
     .map(row => ({
       projectId: state.projectId,
       code: '',
@@ -962,10 +1228,205 @@ function saveDraft() {
     rawRows: state.rawRows,
     headers: state.headers,
     mapping: state.mapping,
+    mappingMeta: state.mappingMeta,
+    mappingSources: state.mappingSources,
+    fixedValues: state.fixedValues,
+    amountRule: state.amountRule,
+    activeTemplateId: state.activeTemplateId,
     savedAt: new Date().toISOString(),
   };
   localStorage.setItem('importer_draft', JSON.stringify(payload));
+  state.draftAvailable = true;
   toast('导入草稿已保存到本机', 'success');
+}
+
+function restoreDraft() {
+  const draft = readDraft();
+  if (!draft?.rawRows?.length) {
+    toast('没有可恢复的导入草稿');
+    return;
+  }
+  state.projectId = draft.projectId || state.projectId;
+  state.fileName = draft.fileName || '';
+  state.fileSize = draft.fileSize || 0;
+  state.rawRows = draft.rawRows;
+  state.headers = draft.headers?.length ? draft.headers : Object.keys(draft.rawRows[0] || {});
+  state.mapping = draft.mapping || {};
+  state.mappingMeta = draft.mappingMeta || {};
+  state.mappingSources = draft.mappingSources || Object.fromEntries(Object.entries(state.mapping).map(([key, value]) => [key, { type: value ? 'column' : 'none', value: value || '' }]));
+  state.fixedValues = draft.fixedValues || {};
+  state.amountRule = draft.amountRule || 'calculated';
+  state.activeTemplateId = draft.activeTemplateId || '';
+  state.previewPage = 1;
+  refreshTemplates();
+  refreshTemplateRecommendation();
+  toast('已恢复本机导入草稿', 'success');
+  paint();
+}
+
+function refreshTemplates() {
+  state.templates = listMappingTemplates({ projectId: state.projectId });
+}
+
+function refreshTemplateRecommendation() {
+  if (!state.headers.length) {
+    state.templateRecommendation = null;
+    return;
+  }
+  const matches = state.templates
+    .map(template => ({ ...matchMappingTemplate(template, state.headers), templateId: template.id }))
+    .filter(match => match.status === 'recommended')
+    .sort((a, b) => b.score - a.score);
+  state.templateRecommendation = matches[0] || null;
+}
+
+function showTemplateMenu() {
+  refreshTemplates();
+  const templates = state.templates;
+  openModal('字段映射模板', `
+    <div class="space-y-3 text-sm">
+      <div class="rounded border border-teal-200 bg-teal-50 px-3 py-2 text-teal-900">模板仅保存在当前浏览器本地；应用前会核对当前 Excel 表头，不会静默覆盖映射。</div>
+      ${templates.length ? `<div class="space-y-2">${templates.map(template => {
+        const match = state.headers.length ? matchMappingTemplate(template, state.headers) : null;
+        return `<div class="rounded border border-slate-200 bg-white px-3 py-3 flex items-center gap-3"><div class="min-w-0 flex-1"><div class="font-medium text-slate-900">${esc(template.name)} <span class="ml-1 text-xs font-normal text-slate-500">${template.scope === 'project' ? '项目专属' : '全局'}</span></div><div class="mt-1 text-xs text-slate-500">${match ? `当前文件匹配 ${match.score}%` : '选择 Excel 后可计算匹配率'} · ${amountRuleLabel(template.amountRule)}</div></div><button onclick="window.__importer.applyTemplate('${template.id}')" class="px-3 py-1.5 border border-teal-300 text-teal-700 hover:bg-teal-50">应用</button></div>`;
+      }).join('')}</div>` : '<div class="py-5 text-center text-slate-500">还没有映射模板。完成一次映射后，可将其保存为全局或项目专属模板。</div>'}
+    </div>
+  `, `<button onclick="window.__importer.showTemplateManager()" class="px-3 py-1.5 text-sm border border-slate-300 bg-white">管理模板</button><button onclick="window.__importer.showSaveTemplate()" class="px-3 py-1.5 text-sm brand-bg text-white">另存当前映射</button>`);
+}
+
+function showSaveTemplate(templateId = '') {
+  const existing = templateId ? getMappingTemplate(templateId) : null;
+  const template = existing || buildCurrentTemplate();
+  openModal(existing ? '编辑字段映射模板' : '另存字段映射模板', `
+    <div class="space-y-4 text-sm">
+      <label class="block"><span class="block mb-1 text-slate-600">模板名称</span><input id="mappingTemplateName" value="${esc(template.name || '')}" placeholder="例如：设计院工程量清单" class="h-9 w-full rounded border border-slate-300 px-3" /></label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="rounded border border-slate-200 p-3"><input type="radio" name="mappingTemplateScope" value="global" ${template.scope !== 'project' ? 'checked' : ''} /> 全局模板<div class="mt-1 text-xs text-slate-500">所有项目均可使用</div></label>
+        <label class="rounded border border-slate-200 p-3"><input type="radio" name="mappingTemplateScope" value="project" ${template.scope === 'project' ? 'checked' : ''} /> 项目专属<div class="mt-1 text-xs text-slate-500">仅当前项目可见</div></label>
+      </div>
+      <label class="block"><span class="block mb-1 text-slate-600">金额规则</span><select id="mappingTemplateAmountRule" class="h-9 w-full rounded border border-slate-300 px-3"><option value="calculated" ${template.amountRule === 'calculated' ? 'selected' : ''}>数量 × 综合单价</option><option value="sourceAmount" ${template.amountRule === 'sourceAmount' ? 'selected' : ''}>优先使用 Excel 合价</option><option value="deriveUnitPrice" ${template.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option></select></label>
+      <div class="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">将保存 ${Object.values(template.mapping || {}).filter(Boolean).length} 个来源列，以及 ${Object.values(template.fixedValues || {}).filter(Boolean).length} 个固定值。模板不保存 Excel 明细数据。</div>
+    </div>
+  `, `<button onclick="window.__modalClose()" class="px-3 py-1.5 text-sm border border-slate-300 bg-white">取消</button><button onclick="window.__importer.saveTemplateForm('${template.id || ''}')" class="px-3 py-1.5 text-sm brand-bg text-white">保存模板</button>`);
+}
+
+function saveTemplateForm(templateId = '') {
+  const name = document.getElementById('mappingTemplateName')?.value?.trim();
+  const scope = document.querySelector('input[name="mappingTemplateScope"]:checked')?.value || 'global';
+  const amountRule = document.getElementById('mappingTemplateAmountRule')?.value || 'calculated';
+  try {
+    const existing = templateId ? getMappingTemplate(templateId) : null;
+    const current = existing || buildCurrentTemplate();
+    const saved = saveMappingTemplate({
+      ...(existing || {}), ...current, id: templateId || undefined, name, scope,
+      projectId: scope === 'project' ? state.projectId : '', amountRule,
+    });
+    state.activeTemplateId = saved.id;
+    refreshTemplates();
+    refreshTemplateRecommendation();
+    closeModal();
+    toast('字段映射模板已保存到本机', 'success');
+    paint();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function showTemplateManager() {
+  refreshTemplates();
+  const groups = [
+    ['全局模板', state.templates.filter(template => template.scope === 'global')],
+    ['当前项目模板', state.templates.filter(template => template.scope === 'project')],
+  ];
+  openModal('管理字段映射模板', `<div class="space-y-5 text-sm">${groups.map(([title, templates]) => `<section><div class="mb-2 font-semibold text-slate-800">${title}</div>${templates.length ? `<div class="space-y-2">${templates.map(template => `<div class="rounded border border-slate-200 bg-white px-3 py-2 flex items-center gap-2"><div class="min-w-0 flex-1"><div class="font-medium">${esc(template.name)}</div><div class="mt-1 text-xs text-slate-500">${amountRuleLabel(template.amountRule)} · 最近使用 ${template.lastUsedAt ? new Date(template.lastUsedAt).toLocaleDateString('zh-CN') : '未使用'}</div></div><button onclick="window.__importer.showSaveTemplate('${template.id}')" class="text-xs text-slate-700 hover:underline">编辑</button><button onclick="window.__importer.duplicateTemplate('${template.id}')" class="text-xs text-slate-700 hover:underline">复制</button><button onclick="window.__importer.deleteTemplate('${template.id}')" class="text-xs text-red-600 hover:underline">删除</button></div>`).join('')}</div>` : '<div class="rounded border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-400">暂无模板</div>'}</section>`).join('')}</div>`, `<button onclick="window.__importer.showSaveTemplate()" class="px-3 py-1.5 text-sm brand-bg text-white">新建模板</button>`);
+}
+
+function applyTemplate(id) {
+  const template = getMappingTemplate(id);
+  if (!template) {
+    toast('模板不存在或已删除', 'error');
+    return;
+  }
+  if (!state.headers.length) {
+    toast('请先选择 Excel 文件，再应用模板', 'error');
+    return;
+  }
+  applyMappingResult(applyMappingTemplate(template, state.headers, state.rawRows));
+  state.activeTemplateId = id;
+  markMappingTemplateUsed(id);
+  refreshTemplates();
+  state.templateRecommendation = null;
+  state.previewPage = 1;
+  closeModal();
+  toast(`已应用模板“${template.name}”，请确认待确认字段`, 'success');
+  paint();
+}
+
+function updateActiveTemplate() {
+  const template = getMappingTemplate(state.activeTemplateId);
+  if (!template) {
+    state.activeTemplateId = '';
+    toast('当前模板已不存在，请另存为新模板', 'error');
+    paint();
+    return;
+  }
+  try {
+    saveMappingTemplate({ ...template, ...buildCurrentTemplate(), id: template.id, name: template.name, scope: template.scope, projectId: template.projectId });
+    refreshTemplates();
+    refreshTemplateRecommendation();
+    toast(`已更新模板“${template.name}”`, 'success');
+    paint();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function deleteTemplate(id) {
+  const template = getMappingTemplate(id);
+  if (!template || !confirm(`删除模板“${template.name}”？已入库的数据不会受影响。`)) return;
+  deleteMappingTemplate(id);
+  if (state.activeTemplateId === id) state.activeTemplateId = '';
+  refreshTemplates();
+  refreshTemplateRecommendation();
+  showTemplateManager();
+  toast('模板已删除', 'success');
+}
+
+function duplicateTemplate(id) {
+  const copy = duplicateMappingTemplate(id);
+  showSaveTemplateWithTemplate(copy);
+}
+
+function showSaveTemplateWithTemplate(template) {
+  openModal('复制字段映射模板', `<div class="space-y-4 text-sm"><label class="block"><span class="block mb-1 text-slate-600">模板名称</span><input id="mappingTemplateName" value="${esc(template.name)}" class="h-9 w-full rounded border border-slate-300 px-3" /></label><label class="block"><span class="block mb-1 text-slate-600">金额规则</span><select id="mappingTemplateAmountRule" class="h-9 w-full rounded border border-slate-300 px-3"><option value="calculated" ${template.amountRule === 'calculated' ? 'selected' : ''}>数量 × 综合单价</option><option value="sourceAmount" ${template.amountRule === 'sourceAmount' ? 'selected' : ''}>优先使用 Excel 合价</option><option value="deriveUnitPrice" ${template.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option></select></label><input type="hidden" id="mappingTemplateCopy" value="${esc(JSON.stringify(template))}" /></div>`, `<button onclick="window.__modalClose()" class="px-3 py-1.5 text-sm border border-slate-300 bg-white">取消</button><button onclick="window.__importer.saveTemplateFormFromCopy()" class="px-3 py-1.5 text-sm brand-bg text-white">保存副本</button>`);
+  window.__importer.saveTemplateFormFromCopy = () => {
+    try {
+      const payload = JSON.parse(document.getElementById('mappingTemplateCopy')?.value || '{}');
+      const scope = payload.scope === 'project' ? 'project' : 'global';
+      saveMappingTemplate({ ...payload, id: undefined, name: document.getElementById('mappingTemplateName')?.value?.trim(), scope, projectId: scope === 'project' ? state.projectId : '', amountRule: document.getElementById('mappingTemplateAmountRule')?.value });
+      refreshTemplates();
+      closeModal();
+      toast('模板副本已保存', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  };
+}
+
+function buildCurrentTemplate() {
+  const mapping = {};
+  Object.entries(state.mappingSources).forEach(([key, source]) => {
+    if (source.type === 'column' && state.mapping[key]) mapping[key] = state.mapping[key];
+  });
+  return createMappingTemplate({
+    scope: 'global',
+    mapping,
+    fixedValues: state.fixedValues,
+    amountRule: state.amountRule,
+    headerFingerprint: createHeaderFingerprint(state.headers),
+  });
+}
+
+function amountRuleLabel(rule) {
+  return rule === 'sourceAmount' ? '优先使用 Excel 合价' : rule === 'deriveUnitPrice' ? '合价 ÷ 数量补单价' : '数量 × 综合单价';
 }
 
 function repairUnitFromPrevious() {
@@ -1020,6 +1481,32 @@ function valueOf(row, key) {
   if (!key) return '';
   const value = row[key];
   return value === undefined || value === null ? '' : String(value).trim();
+}
+
+function mappedValue(row, key) {
+  const source = state.mappingSources[key];
+  if (source?.type === 'fixed') return String(state.fixedValues[key] ?? source.value ?? '').trim();
+  if (source?.type === 'none') return '';
+  return valueOf(row, state.mapping[key] || source?.value);
+}
+
+function hasMappedValue(key) {
+  const source = state.mappingSources[key];
+  if (source?.type === 'fixed') return Boolean(state.fixedValues[key] || source.value);
+  return Boolean(state.mapping[key] || source?.value);
+}
+
+function canUseFixedValue(key) {
+  return key === 'process' || key === 'costCategory';
+}
+
+function readDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem('importer_draft') || 'null');
+    return draft && typeof draft === 'object' ? draft : null;
+  } catch {
+    return null;
+  }
 }
 
 function firstNonEmpty(rows, key) {

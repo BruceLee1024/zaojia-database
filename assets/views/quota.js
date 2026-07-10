@@ -2,7 +2,7 @@
 import { quotaService } from '../services/quotaService.js?v=3.9';
 import { boqService } from '../services/boqService.js?v=3.9';
 import { fmtMoney, esc, $, openModal, closeModal, toast } from '../utils/dom.js';
-import { exportQuotaTemplate } from '../data/excel.js?v=3.9';
+import { exportQuotaTemplate } from '../data/excel.js?v=4.0';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 
 const BREAKDOWN_KEYS = ['人工', '材料', '机械', '管理费', '利润', '风险'];
