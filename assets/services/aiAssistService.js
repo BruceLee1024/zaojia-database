@@ -117,7 +117,7 @@ export function suggestProjectInfo(projectName = '') {
   const text = String(projectName || '');
   const daily = extractDailyCapacity(text);
   const process = (text.match(/AAO|A2O|MBR|SBR|氧化沟|CAST|CASS/i)?.[0] || '').toUpperCase();
-  const type = /泵站/.test(text) ? '泵站' : /管网|管道/.test(text) ? '管网' : /水厂|污水|处理厂/.test(text) ? '水厂' : '水厂';
+  const type = /住宅|住宅楼|商品房/.test(text) ? '住宅建筑' : /房建|房屋建筑|建筑工程/.test(text) ? '房屋建筑' : /公共建筑|学校|医院|办公楼|商业综合体/.test(text) ? '公共建筑' : /工业厂房|厂房|工业园/.test(text) ? '工业厂房' : /工业废水|工业污水/.test(text) ? '工业废水' : /园区/.test(text) ? '园区建设' : /道路|公路|路基|路面/.test(text) ? '市政道路' : /桥梁|隧道/.test(text) ? '桥梁隧道' : /管廊/.test(text) ? '综合管廊' : /水利|河道|闸站|灌溉/.test(text) ? '水利工程' : /电力|输电|配电/.test(text) ? '电力工程' : /再生水|中水/.test(text) ? '再生水厂' : /污泥/.test(text) ? '污泥处理' : /调蓄/.test(text) ? '调蓄池' : /泵站/.test(text) ? '泵站' : /管网|管道/.test(text) ? '管网' : /水厂|污水|处理厂/.test(text) ? '污水处理厂' : '水厂';
   const structure = /钢结构/.test(text) ? '钢结构' : /砖混/.test(text) ? '砖混' : /改扩建|二期|水池|污水/.test(text) ? '钢筋砼' : '';
   return wrap({
     source: 'local',
@@ -211,7 +211,7 @@ export function parseEstimatePrompt(text = '') {
   const areaMatch = String(text).match(/(\d+(?:\.\d+)?)\s*(?:公顷|ha)/i);
   const areaSqm = areaMatch ? Number(areaMatch[1]) * 10000 : Number(String(text).match(/(\d+(?:\.\d+)?)\s*(?:㎡|平米|平方米)/)?.[1] || '');
   const process = (String(text).match(/AAO|A2O|MBR|SBR|氧化沟|CAST|CASS/i)?.[0] || '').toUpperCase();
-  const type = /泵站/.test(text) ? '泵站' : /管网/.test(text) ? '管网' : /污水|水厂|处理厂/.test(text) ? '水厂' : '';
+  const type = /住宅|住宅楼|商品房/.test(text) ? '住宅建筑' : /房建|房屋建筑|建筑工程/.test(text) ? '房屋建筑' : /公共建筑|学校|医院|办公楼|商业综合体/.test(text) ? '公共建筑' : /工业厂房|厂房|工业园/.test(text) ? '工业厂房' : /工业废水|工业污水/.test(text) ? '工业废水' : /道路|公路|路基|路面/.test(text) ? '市政道路' : /桥梁|隧道/.test(text) ? '桥梁隧道' : /管廊/.test(text) ? '综合管廊' : /水利|河道|闸站|灌溉/.test(text) ? '水利工程' : /电力|输电|配电/.test(text) ? '电力工程' : /再生水|中水/.test(text) ? '再生水厂' : /污泥/.test(text) ? '污泥处理' : /泵站/.test(text) ? '泵站' : /管网/.test(text) ? '管网' : /污水|水厂|处理厂/.test(text) ? '污水处理厂' : '';
   return wrap({
     source: 'local',
     confidence: daily || areaSqm || process ? 'high' : 'low',

@@ -46,6 +46,78 @@ export async function parseExcel(file) {
   throw new Error('未能识别清单表头，请确认文件包含项目名称、单位、工程量等字段。');
 }
 
+/**
+ * 为 AI 导入向导读取整个工作簿摘要。它不要求标准清单表头，供用户先选工作表，
+ * 真正的字段合法性仍由确认页控制。
+ */
+export async function readWorkbookSummary(file) {
+  const buf = await file.arrayBuffer();
+  const workbook = XLSX.read(buf, { type: 'array' });
+  const sheets = workbook.SheetNames.map(name => ({
+    name,
+    matrix: XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' }),
+  }));
+  return summarizeSheetMatrices(sheets);
+}
+
+export function summarizeSheetMatrices(sheets = []) {
+  return sheets.map(sheet => summarizeSheetMatrix(sheet.name, sheet.matrix)).filter(sheet => sheet.rowCount > 0);
+}
+
+function summarizeSheetMatrix(name, matrix = []) {
+  const rows = matrix.map(row => Array.isArray(row) ? row : []);
+  const nonEmpty = rows.filter(row => row.some(cell => String(cell ?? '').trim() !== ''));
+  const detectedHeader = findHeaderRow(rows);
+  const fallbackHeader = detectedHeader < 0 ? findFallbackHeaderRow(rows) : -1;
+  const headerIndex = detectedHeader >= 0 ? detectedHeader : fallbackHeader;
+  if (headerIndex < 0) {
+    return { name, rowCount: nonEmpty.length, headerIndex: -1, headers: [], rows: [], previewRows: [] };
+  }
+  const firstHeader = rows[headerIndex];
+  const secondHeader = rows[headerIndex + 1] || [];
+  const hasSecondHeader = detectedHeader >= 0 && headerSignalCount(secondHeader) > 0 && secondHeader.some(isHeaderContinuation);
+  const headers = dedupeHeaders(firstHeader.map((cell, index) => mergeHeaderCell(cell, hasSecondHeader ? secondHeader[index] : '')));
+  const dataStart = headerIndex + (hasSecondHeader ? 2 : 1);
+  const records = rows.slice(dataStart)
+    .filter(row => row.some(cell => String(cell ?? '').trim() !== ''))
+    .map(row => headers.reduce((record, header, index) => {
+      if (header) record[header] = row[index] ?? '';
+      return record;
+    }, {}));
+  return {
+    name,
+    rowCount: nonEmpty.length,
+    headerIndex,
+    headers,
+    rows: records,
+    previewRows: records.slice(0, 5),
+    combinedNameFeature: detectCombinedNameFeatureMeta(headers, records),
+  };
+}
+
+export function detectCombinedNameFeatureMeta(headers = [], rows = []) {
+  const source = headers.find(header => normalizeImportHeader(header) === '项目名称项目特征');
+  if (!source) return null;
+  const samples = rows
+    .map(row => splitCombinedNameFeature(row?.[source]))
+    .filter(item => item.raw)
+    .slice(0, 50);
+  const validSampleCount = samples.filter(item => item.name && item.feature).length;
+  return {
+    source,
+    strategy: 'first_line_name_rest_feature',
+    status: samples.length && validSampleCount === samples.length ? 'ready' : 'invalid',
+    sampleCount: samples.length,
+    validSampleCount,
+    preview: samples.slice(0, 3).map(({ name, feature }) => ({ name, feature })),
+  };
+}
+
+function splitCombinedNameFeature(value) {
+  const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n').map(line => line.trim()).filter(Boolean);
+  return { raw: String(value ?? '').trim(), name: lines[0] || '', feature: lines.slice(1).join('\n') };
+}
+
 export function rowsFromSheetMatrix(matrix = []) {
   const rows = matrix.map(row => Array.isArray(row) ? row : []);
   const headerIndex = findHeaderRow(rows);
@@ -77,6 +149,15 @@ function findHeaderRow(rows) {
     }
   });
   return bestScore >= 200 ? bestIndex : -1;
+}
+
+function findFallbackHeaderRow(rows) {
+  const max = Math.min(rows.length, 12);
+  for (let index = 0; index < max; index += 1) {
+    const filled = rows[index].filter(cell => String(cell ?? '').trim() !== '');
+    if (filled.length >= 2 && filled.some(cell => /名称|内容|单位|数量|工程|编码|编号|描述|项目/i.test(String(cell)))) return index;
+  }
+  return -1;
 }
 
 function headerSignalCount(row) {
@@ -156,6 +237,25 @@ export function rowToBOQ(row, projectId) {
   };
 }
 
+/** 把 Excel 行转为独立清单库条目（不写入存储） */
+export function rowToBoqLibraryItem(row) {
+  const { name, feature } = splitNameFeature(row);
+  return {
+    major: firstValue(row, ['专业', '适用专业']),
+    code: firstValue(row, ['清单编码', '项目编码', '编码']),
+    name,
+    feature,
+    unit: firstValue(row, ['单位', '计量单位']),
+    defaultQty: parseFloat(firstValue(row, ['默认工程量', '工程数量', '工程量', '数量'])) || 0,
+    scope: firstValue(row, ['适用范围']),
+    structureGroup: firstValue(row, ['结构分组', '费用分类']),
+    quotaRefs: firstValue(row, ['关联定额编码', '关联定额', '定额编码']),
+    source: firstValue(row, ['来源']),
+    version: firstValue(row, ['版本']),
+    note: firstValue(row, ['备注']),
+  };
+}
+
 /** 导出 Excel 报价单 */
 export function exportBOQExcel(project, boq) {
   const total = boq.reduce((s, b) => s + (b.amount || 0), 0);
@@ -189,4 +289,17 @@ export function exportQuotaTemplate() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '定额库模板');
   XLSX.writeFile(wb, '定额库模板.xlsx');
+}
+
+/** 导出独立清单库 Excel 模板 */
+export function exportBoqLibraryTemplate() {
+  const data = [
+    ['专业', '清单编码', '清单名称', '项目特征', '单位', '默认工程量', '适用范围', '结构分组', '关联定额编码', '来源', '版本', '备注'],
+    ['水处理工程', '030101001001', '土方开挖', '土壤类别：三类土；挖土深度：≤3m', 'm³', 100, '市政污水处理工程', 'civil', '机械挖一般土方', '企业自建', 'v1.0', '适用于一般场地开挖'],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [14, 18, 24, 50, 10, 14, 26, 14, 24, 16, 10, 30].map(wch => ({ wch }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '清单库模板');
+  XLSX.writeFile(wb, '清单库模板.xlsx');
 }

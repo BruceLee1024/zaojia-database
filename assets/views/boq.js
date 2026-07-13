@@ -1,6 +1,7 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=3.9';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo } from '../data/repository.js?v=1.0';
 import { boqService, groupForLine } from '../services/boqService.js?v=3.9';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=1.0';
 import { projectService } from '../services/projectService.js?v=3.9';
 import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=3.9';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
@@ -82,6 +83,7 @@ export async function render() {
   if ((!routeParams.projectId || routeParams.projectId === proj.id) && routeParams.keyword) {
     boqState.keyword = routeParams.keyword;
   }
+  if ((!routeParams.projectId || routeParams.projectId === proj.id) && routeParams.activeId) boqState.activeId = routeParams.activeId;
   boqState.expandedProjectIds.add(proj.id);
 
   const allProjectBoq = await boqRepo.all();
@@ -100,6 +102,7 @@ export async function render() {
   const activeLine = boq.find(b => b.id === boqState.activeId) || filteredBoq[0] || null;
   if (!boqState.activeId && activeLine) boqState.activeId = activeLine.id;
   const activeRecommendations = activeLine ? await boqService.recommendQuota(activeLine, 4) : [];
+  const librarySource = activeLine?.boqLibraryItemId ? await boqLibraryRepo.findById(activeLine.boqLibraryItemId) : null;
   const totalCost = boq.reduce((s, b) => s + (b.amount || 0), 0);
   const missingPriceCount = boq.filter(b => hasMissingPrice(b.unitPrice)).length;
   const selectedCount = boq.filter(b => boqState.selectedIds.has(b.id)).length;
@@ -158,7 +161,7 @@ export async function render() {
           </section>
 
           <section id="boqDetail" class="card shrink-0 overflow-hidden" style="height:${boqState.detailCollapsed ? 52 : clampBoqDetailHeight(boqDetailHeight)}px">
-            ${detailPanel(activeLine, activeRecommendations)}
+            ${detailPanel(activeLine, activeRecommendations, librarySource)}
           </section>
         </div>
       </div>
@@ -212,7 +215,8 @@ export async function render() {
     });
   });
   document.getElementById('btnAdd').onclick = pickQuota;
-  document.getElementById('btnImportBOQ').onclick = () => importBOQExcel(proj.id, boq.length);
+  document.getElementById('btnAddLibrary').onclick = pickBoqLibrary;
+  document.getElementById('btnImportBOQ').onclick = () => window.__app.go('ai-import', { targetType: 'project_boq', projectId: proj.id });
   document.getElementById('btnAdj').onclick = batchAdjust;
   document.getElementById('btnBatchSelected').onclick = () => batchAdjust(true);
   document.getElementById('btnAiMissing')?.addEventListener('click', () => showAiMissingPrices(proj.id));
@@ -234,15 +238,15 @@ export async function render() {
     render();
   });
   document.getElementById('btnNextArchive')?.addEventListener('click', async () => {
-    if (!confirm('归档会把当前项目清单写入数据引擎样本池，并用于后续指标统计。确定归档？')) return;
+    if (!confirm('收录后会把当前项目作为案例，用于后续造价参考。确定收录？')) return;
     try {
       const updated = await projectService.archive(proj.id);
-      toast('项目已归档，指标样本已同步', 'success');
+      toast('案例已收录，造价参考已同步', 'success');
       if (updated?.status === 'archived') openReview({ projectId: updated.id, sourceType: 'project_archive' });
       render();
     } catch (err) {
       if (err?.code === 'ARCHIVE_BLOCKED') {
-        toast(`暂不能归档：${archiveBlockerText(err.eligibility)}`, 'error');
+        toast(`暂不能收录：${archiveBlockerText(err.eligibility)}`, 'error');
         return;
       }
       throw err;
@@ -441,9 +445,9 @@ function boqNextAction(project, { lines, versions, missing, zeroQty, imported, e
   if (project.status !== 'archived' && eligibility?.allowed) return {
     icon: 'inventory_2',
     tone: 'slate',
-    title: '下一步：归档进入指标库',
-    desc: '价格完整且已有版本，可归档沉淀为正式指标样本。',
-    button: '归档项目',
+    title: '下一步：收录为参考案例',
+    desc: '价格完整且已有版本，可收录为后续造价参考。',
+    button: '收录案例',
     id: 'btnNextArchive',
   };
   if (project.status !== 'archived') {
@@ -451,8 +455,8 @@ function boqNextAction(project, { lines, versions, missing, zeroQty, imported, e
     return {
       icon: 'lock',
       tone: 'amber',
-      title: `暂不能归档：${text}`,
-      desc: '正式指标样本需要价格完整、工程量可信，并至少保留一个报价版本。',
+      title: `暂不能收录：${text}`,
+      desc: '可用案例需要价格完整、工程量可信，并至少保留一个报价版本。',
       button: eligibility?.primaryAction?.label || '处理阻断项',
       id: 'btnNextBlocked',
     };
@@ -461,8 +465,8 @@ function boqNextAction(project, { lines, versions, missing, zeroQty, imported, e
     icon: 'analytics',
     tone: 'teal',
     title: '下一步：查看指标对标',
-    desc: '项目已归档，可进入指标分析查看造价区间和样本口径。',
-    button: '查看指标',
+    desc: '项目已收录，可进入造价参考查看区间和案例口径。',
+    button: '查看参考',
     id: 'btnNextIndicators',
   };
 }
@@ -471,8 +475,8 @@ function boqWorkflowStrip(status) {
   const steps = [
     ['工作稿', status.lineCount ? '完成' : '待建立', status.lineCount ? 'teal' : 'slate'],
     ['保存版本', status.versionCount ? `${status.versionCount} 个` : '待保存', status.versionCount ? 'teal' : 'amber'],
-    ['归档项目', status.project.status === 'archived' ? '已归档' : (status.eligibility.allowed ? '可归档' : '受阻'), status.project.status === 'archived' || status.eligibility.allowed ? 'teal' : 'amber'],
-    ['指标对标', status.project.status === 'archived' ? '可引用' : '归档后可用', status.project.status === 'archived' ? 'teal' : 'slate'],
+    ['收录案例', status.project.status === 'archived' ? '已收录' : (status.eligibility.allowed ? '可收录' : '受阻'), status.project.status === 'archived' || status.eligibility.allowed ? 'teal' : 'amber'],
+    ['造价参考', status.project.status === 'archived' ? '可引用' : '收录后可用', status.project.status === 'archived' ? 'teal' : 'slate'],
     ['经验复盘', '可沉淀', 'slate'],
   ];
   return `<section class="rounded-lg border border-slate-200 bg-white px-4 py-2 shrink-0">
@@ -483,7 +487,7 @@ function boqWorkflowStrip(status) {
             : 'border-slate-200 bg-slate-50 text-slate-500';
         return `${index ? '<span class="text-slate-300">→</span>' : ''}<span class="inline-flex items-center gap-2 rounded border ${cls} px-2.5 py-1.5"><b class="font-medium">${label}</b><span>${state}</span></span>`;
       }).join('')}
-      <span class="ml-auto text-slate-500">版本是可回退快照，归档项目才进入正式指标；经验卡供 AI 复用，不参与指标计算。</span>
+      <span class="ml-auto text-slate-500">版本是可回退快照；收录案例后才会用于造价参考，复盘笔记供 AI 查阅。</span>
     </div>
   </section>`;
 }
@@ -493,7 +497,7 @@ function boqWorkbenchHeader(project, projects, status) {
     <div class="flex items-start gap-4">
       <div>
         <h1 class="text-xl font-semibold text-slate-950">报价编制工作台</h1>
-        <div class="mt-1 text-xs text-slate-500">集中处理清单、价格风险、报价版本和归档样本。</div>
+        <div class="mt-1 text-xs text-slate-500">集中处理清单、价格风险和报价版本，完成后可收录为参考案例。</div>
       </div>
       <label class="ml-auto h-10 min-w-[300px] rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 flex items-center gap-2">
         <span class="material-symbols-outlined text-[18px] text-teal-700">domain</span>
@@ -550,6 +554,7 @@ function boqToolbar(selectedCount) {
       </select>
       ${toolbarGroup('数据', [
         ['btnAdd', 'add', '添加清单', 'primary'],
+        ['btnAddLibrary', 'library_add', '从清单库', 'plain'],
         ['btnImportBOQ', 'upload_file', '导入 Excel', 'plain'],
       ])}
       ${toolbarGroup('调价', [
@@ -756,7 +761,7 @@ function boqMetric(label, value, suffix = '', cls = '') {
   </div>`;
 }
 
-function detailPanel(line, recommendations = []) {
+function detailPanel(line, recommendations = [], librarySource = null) {
   const collapsed = boqState.detailCollapsed;
   const header = `
     <div class="px-4 py-3 border-b border-slate-200 bg-white shrink-0">
@@ -807,6 +812,7 @@ function detailPanel(line, recommendations = []) {
             <label class="block text-xs font-medium text-slate-500">单位
               <input id="detailUnit" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(line.unit || '')}" />
             </label>
+            ${librarySource ? `<div class="rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800"><div class="font-medium">来自清单库</div><div class="mt-1">${esc(librarySource.code || '未编码')} · ${esc(librarySource.name || '')}</div></div>` : ''}
             <label class="block text-xs font-medium text-slate-500">结构分组
               <select id="detailStructureGroup" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">
                 ${structureGroups([line]).map(g => `<option value="${esc(g.id)}" ${classifyLineGroup(line) === g.id ? 'selected' : ''}>${esc(g.label)}</option>`).join('')}
@@ -1066,6 +1072,30 @@ async function pickQuota() {
   renderChoices();
 }
 
+async function pickBoqLibrary() {
+  const items = (await boqLibraryRepo.all()).filter(item => item.status !== 'inactive');
+  openModal('从清单库选择', `
+    <input id="pickLibraryKw" placeholder="搜索清单编码 / 名称 / 项目特征…" class="w-full border rounded px-3 py-2 mb-3" />
+    <div class="max-h-[60vh] overflow-auto scroll-thin border rounded"><table class="w-full text-sm"><thead class="bg-gray-50 sticky top-0"><tr class="text-left text-gray-500"><th class="py-2 px-2">编码</th><th class="px-2">清单名称</th><th class="px-2">项目特征</th><th class="px-2 w-14">单位</th><th class="px-2 w-20 text-center">关联定额</th><th class="px-2 w-12"></th></tr></thead><tbody id="pickLibraryBody"></tbody></table></div>
+  `, `<button onclick="window.__modalClose()" class="px-3 py-1.5 text-sm border rounded">取消</button>`);
+  const renderChoices = (keyword = '') => {
+    const kw = keyword.toLowerCase();
+    const visible = items.filter(item => !kw || `${item.code} ${item.name} ${item.feature}`.toLowerCase().includes(kw)).slice(0, 300);
+    document.getElementById('pickLibraryBody').innerHTML = visible.map(item => `<tr class="border-b hover:bg-gray-50"><td class="py-1.5 px-2 text-xs text-teal-700">${esc(item.code || '-')}</td><td class="px-2">${esc(item.name)}</td><td class="px-2 text-gray-500 truncate" title="${esc(item.feature || '')}">${esc((item.feature || '').slice(0, 40))}</td><td class="px-2">${esc(item.unit || '')}</td><td class="px-2 text-center">${(item.quotaItemIds || []).length || '-'}</td><td class="px-2 text-right"><button class="text-teal-700 hover:underline text-xs" data-pick-library="${item.id}">选</button></td></tr>`).join('') || `<tr><td colspan="6" class="py-6 text-center text-gray-400">无匹配</td></tr>`;
+    document.querySelectorAll('[data-pick-library]').forEach(button => button.onclick = async () => {
+      try {
+        const line = await boqLibraryService.applyToProject(button.dataset.pickLibrary, window.__app.state.currentProjectId);
+        closeModal();
+        boqState.activeId = line.id;
+        toast('已从清单库加入项目', 'success');
+        render();
+      } catch (err) { toast(err.message || '加入失败', 'error'); }
+    });
+  };
+  document.getElementById('pickLibraryKw').oninput = event => renderChoices(event.target.value);
+  renderChoices();
+}
+
 function importBOQExcel(projectId, currentLineCount = 0) {
   const input = document.createElement('input');
   input.type = 'file';
@@ -1148,10 +1178,10 @@ function showImportResult(result, engine) {
           <span class="badge badge-gray">匹配率 ${Math.round((engine.report.matchRate || 0) * 100)}%</span>
         </div>
         <div class="mt-2 space-y-1 text-xs text-slate-600">
-          ${engine.report.issues.length ? engine.report.issues.map(i => `<div>${esc(i.message)}</div>`).join('') : '<div>未发现明显风险，候选样本已写入数据引擎。</div>'}
+          ${engine.report.issues.length ? engine.report.issues.map(i => `<div>${esc(i.message)}</div>`).join('') : '<div>未发现明显风险，已生成待检查记录。</div>'}
         </div>
       </div>
-      <div class="text-xs text-slate-500">候选样本不会直接参与默认指标统计，可在「指标分析 / 样本池」中查看并提升为正式样本。</div>
+      <div class="text-xs text-slate-500">待检查记录不会直接参与默认参考，可在「造价参考」中查看并确认是否可用。</div>
     </div>
   `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">知道了</button>`);
 }

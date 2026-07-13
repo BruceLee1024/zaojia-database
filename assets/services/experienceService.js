@@ -693,7 +693,7 @@ function normalizeCard(card) {
     ...card,
     knowledgeType: card.knowledgeType || '经验卡',
     domainCategory: card.domainCategory || card.category || '投标报价复盘',
-    projectType: card.projectType || tags.find(t => ['水厂', '泵站', '管网', '变电站', '水池', '车间', '其他'].includes(t)) || '',
+    projectType: card.projectType || tags.find(t => ['水厂', '污水处理厂', '再生水厂', '工业废水', '泵站', '管网', '调蓄池', '水池', '污泥处理', '房屋建筑', '住宅建筑', '公共建筑', '工业厂房', '园区建设', '市政道路', '桥梁隧道', '综合管廊', '水利工程', '电力工程', '变电站', '设备安装', '厂区配套', '车间', '其他'].includes(t)) || '',
     processType: card.processType || tags.find(t => /AAO|A2O|MBR|SBR|预处理|供配电/i.test(t)) || '',
     costCategory: card.costCategory || inferCostCategory(card, {}),
     keywords: keywords.slice(0, 12),

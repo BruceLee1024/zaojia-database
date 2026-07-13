@@ -1,19 +1,19 @@
-// 视图：设置
+// 视图：数据与备份
 import { getAIConfig, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=3.9';
 import { testAIConnection } from '../services/aiAssistService.js?v=1.1';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
 import { experienceService } from '../services/experienceService.js?v=3.9';
-import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from '../data/repository.js?v=3.9';
+import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from '../data/repository.js?v=1.0';
 import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, switchToBrowserStorage, syncBrowserCacheToLocalFolder } from '../data/storage.js?v=1.0';
 import { ensureDemoData } from '../data/demo.js?v=3.9';
 import { esc, toast, fmt } from '../utils/dom.js';
 
 const SETTINGS_TABS = [
-  { id: 'storage', label: '存储设置', icon: 'folder_managed', desc: '本地数据' },
+  { id: 'storage', label: '数据保存', icon: 'folder_managed', desc: '本地数据' },
   { id: 'ai', label: 'AI 模型配置', icon: 'smart_toy', desc: '智能问答' },
-  { id: 'engine', label: '数据引擎', icon: 'monitoring', desc: '沉淀指标' },
-  { id: 'backup', label: '备份与恢复', icon: 'cloud_upload', desc: '迁移留档' },
-  { id: 'danger', label: '危险操作', icon: 'warning', desc: '谨慎维护' },
+  { id: 'engine', label: '数据整理', icon: 'monitoring', desc: '案例与参考' },
+  { id: 'backup', label: '备份与恢复', icon: 'cloud_upload', desc: '迁移资料' },
+  { id: 'danger', label: '清理操作', icon: 'warning', desc: '谨慎维护' },
 ];
 
 let activeSettingsTab = 'storage';
@@ -160,7 +160,7 @@ function renderStorageTab(ctx) {
 
       <aside class="col-span-12 xl:col-span-3 rounded-lg border border-slate-200 bg-white p-5 space-y-5">
         ${inspectorBlock('浏览器支持', 'Chrome / Edge（推荐）', storageStatus.supported ? '支持完整文件夹读写能力。' : '当前浏览器不支持本地文件夹授权。', storageStatus.supported ? 'check_circle' : 'error', storageStatus.supported ? 'text-teal-700' : 'text-red-600')}
-        ${inspectorBlock('权限说明', '授权仅在当前浏览器生效', '若更换浏览器或清除站点数据，需要重新授权并同步数据。', 'info', 'text-slate-500')}
+        ${inspectorBlock('授权说明', '授权仅在当前浏览器生效', '若更换浏览器或清除站点数据，需要重新授权并同步数据。', 'info', 'text-slate-500')}
         <section class="border-t border-slate-200 pt-5">
           <div class="flex items-start gap-2">
             <span class="material-symbols-outlined text-[19px] text-slate-500">history</span>
@@ -240,7 +240,7 @@ function renderAiTab({ cfg, providers }) {
           ${summaryRow('接口地址', cfg.base_url || '-')}
           ${summaryRow('密钥状态', cfg.api_key ? '已填写' : '未填写')}
         </div>
-        <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">AI 配置属于敏感信息，只保存在当前浏览器，不随业务数据备份到本地文件夹。</div>
+        <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">AI 配置只保存在当前浏览器，不会随业务资料备份到本地文件夹。</div>
       </aside>
     </div>
   `;
@@ -254,18 +254,18 @@ function renderEngineTab({ engine, experience }) {
           <span class="material-symbols-outlined text-[22px]">monitoring</span>
         </div>
         <div>
-          <h2 class="text-base font-semibold text-slate-900">数据引擎</h2>
-          <p class="mt-1 text-xs text-slate-500">管理自动沉淀、质量扫描和指标重建。候选样本默认不参与指标统计。</p>
+          <h2 class="text-base font-semibold text-slate-900">数据整理与指标</h2>
+          <p class="mt-1 text-xs text-slate-500">查看案例整理、质量检查和参考重建。待检查记录默认不参与造价参考。</p>
         </div>
         <div class="flex-1"></div>
         <button id="btnEngineRun" class="h-10 px-4 text-sm rounded-lg border border-teal-300 bg-white text-teal-700">运行流水线</button>
-        <button id="btnEngineBackfill" class="h-10 px-4 text-sm rounded-lg border border-slate-300 bg-white">回填归档项目</button>
+        <button id="btnEngineBackfill" class="h-10 px-4 text-sm rounded-lg border border-slate-300 bg-white">整理已收录案例</button>
         <button id="btnEngineScan" class="h-10 px-4 text-sm rounded-lg border border-slate-300 bg-white">数据质量扫描</button>
         <button id="btnEngineRebuild" class="h-10 px-4 text-sm brand-bg text-white rounded-lg">重建指标</button>
       </div>
       <div class="mt-5 grid grid-cols-6 gap-3">
-        ${engineMetric('正式事实', engine.facts.length, '条')}
-        ${engineMetric('候选样本', engine.candidates.length, '条')}
+        ${engineMetric('可用案例', engine.facts.length, '条')}
+        ${engineMetric('待检查记录', engine.candidates.length, '条')}
         ${engineMetric('质量报告', engine.reports.length, '份')}
         ${engineMetric('健康分', engine.qualityScore || 0, '分')}
         ${engineMetric('经验卡', experience.confirmedCards.length, '张')}
@@ -297,11 +297,11 @@ function renderBackupTab() {
         </div>
       </div>
       <div class="mt-5 grid grid-cols-3 gap-4">
-        ${backupAction('导入 JSON 备份', '导入会覆盖当前定额、项目、清单、版本、指标和 AI 配置。', 'upload_file', 'btnImport')}
+        ${backupAction('恢复 JSON 备份', '恢复会覆盖当前定额、项目、清单、版本、参考和 AI 配置。', 'upload_file', 'btnImport')}
         ${backupAction('导出 JSON 备份', '导出当前业务数据，适合迁移或交接前留档。', 'download', 'btnExport')}
         ${backupAction('加载演示数据', '已有业务数据不会被覆盖，用于快速体验系统流程。', 'database', 'btnDemo')}
       </div>
-      <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">备份文件包含商业敏感数据，请按企业资料妥善保存。AI Key 仅保存在浏览器 localStorage。</div>
+      <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">备份文件包含你的项目和报价资料，请妥善保存。AI Key 仅保存在当前浏览器。</div>
     </section>
   `;
 }
@@ -320,7 +320,7 @@ function renderDangerTab() {
       </div>
       <div class="mt-5 grid grid-cols-3 gap-4">
         ${dangerAction('重置演示数据', '清空当前业务数据后重新加载内置演示数据。', 'restart_alt', 'btnDemoReset')}
-        ${dangerAction('清理候选样本', '删除候选样本，不影响正式事实、项目和清单。', 'mop', 'btnEngineClearCandidates')}
+        ${dangerAction('清理待检查记录', '删除待检查记录，不影响可用案例、项目和清单。', 'mop', 'btnEngineClearCandidates')}
         ${dangerAction('清空全部数据', '清空定额、项目、清单、版本、经验卡和指标。', 'delete_forever', 'btnClear')}
       </div>
     </section>
@@ -349,13 +349,13 @@ function renderSettingsSummaryCards({ cfg, engine }) {
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="material-symbols-outlined text-[20px] text-teal-700">monitoring</span>
-            <div class="font-semibold text-slate-900">数据引擎</div>
+            <div class="font-semibold text-slate-900">数据整理记录</div>
           </div>
-          <button data-settings-tab="engine" class="h-8 px-3 text-xs rounded border border-slate-300 bg-white">引擎设置</button>
+          <button data-settings-tab="engine" class="h-8 px-3 text-xs rounded border border-slate-300 bg-white">查看整理记录</button>
         </div>
         <div class="mt-4 grid grid-cols-5 gap-3 text-sm">
           ${summaryMetric('运行状态', '运行中')}
-          ${summaryMetric('任务队列', engine.jobs.filter(j => j.status !== 'success').length)}
+          ${summaryMetric('待处理记录', engine.jobs.filter(j => j.status !== 'success').length)}
           ${summaryMetric('平均延迟', '0 s')}
           ${summaryMetric('索引完整性', '100%')}
           ${summaryMetric('本次启动', engine.jobs[0]?.updatedAt ? formatTime(engine.jobs[0].updatedAt).slice(0, 10) : '-')}
@@ -470,7 +470,7 @@ async function runEngine() {
 
 async function backfillEngine() {
   const result = await dataEngineService.backfillArchivedProjects();
-  toast(`已回填 ${result.count} 个归档项目`, 'success');
+  toast(`已整理 ${result.count} 个收录案例`, 'success');
   render();
 }
 
@@ -482,14 +482,14 @@ async function scanEngine() {
 
 async function rebuildEngine() {
   await dataEngineService.rebuildIndicators();
-  toast('指标已基于正式事实重建', 'success');
+  toast('造价参考已基于可用案例重建', 'success');
   render();
 }
 
 async function clearCandidates() {
-  if (!confirm('清理全部候选样本？正式事实、项目和清单不会被删除。')) return;
+  if (!confirm('清理全部待检查记录？可用案例、项目和清单不会被删除。')) return;
   await dataEngineService.clearCandidates();
-  toast('候选样本已清理', 'success');
+  toast('待检查记录已清理', 'success');
   render();
 }
 
@@ -560,6 +560,7 @@ function directoryTree(storageStatus) {
           <div class="flex items-center gap-2"><span class="material-symbols-outlined text-[17px] text-slate-500">folder</span>stores</div>
           <div class="ml-6 mt-2 space-y-2 border-l border-slate-200 pl-4">
             ${treeFile('quota_items.json', '定额库')}
+            ${treeFile('boq_library_items.json', '清单库')}
             ${treeFile('projects.json', '项目档案')}
             ${treeFile('project_boq.json', '工程量清单')}
             ${treeFile('boq_versions.json', '报价版本')}
@@ -603,7 +604,7 @@ function engineMetric(label, value, unit) {
 }
 
 function pipelineStages(summary = {}) {
-  return ['采集', '标准化', '质量检查', '沉淀入库', '指标重建'].map(stage => `
+  return ['采集', '标准化', '质量检查', '保存记录', '参考重建'].map(stage => `
     <div class="rounded-lg border border-slate-200 bg-white px-3 py-2">
       <div class="text-xs text-slate-500">${stage}</div>
       <div class="mt-1 text-base font-semibold tabular-nums text-slate-900">${fmt(summary[stage] || 0)}<span class="ml-1 text-xs font-normal text-slate-500">次</span></div>
@@ -614,7 +615,7 @@ function pipelineStages(summary = {}) {
 function jobsTable(engine) {
   return `
     <table class="w-full text-sm">
-      <thead class="bg-slate-50 text-left text-slate-500"><tr><th class="py-2 px-3">最近任务</th><th class="px-2">来源</th><th class="px-2">状态</th><th class="px-2 text-right">质量分</th><th class="px-3 text-right">时间</th></tr></thead>
+        <thead class="bg-slate-50 text-left text-slate-500"><tr><th class="py-2 px-3">最近记录</th><th class="px-2">来源</th><th class="px-2">状态</th><th class="px-2 text-right">质量分</th><th class="px-3 text-right">时间</th></tr></thead>
       <tbody>
         ${engine.jobs.length ? engine.jobs.map(job => `<tr class="border-t border-slate-100">
           <td class="py-2 px-3 font-medium">${esc(job.type)}</td>
@@ -622,7 +623,7 @@ function jobsTable(engine) {
           <td class="px-2"><span class="badge ${job.status === 'success' ? 'badge-green' : 'badge-gray'}">${esc(job.status || '-')}</span></td>
           <td class="px-2 text-right tabular-nums">${job.qualityScore == null ? '-' : fmt(job.qualityScore)}</td>
           <td class="px-3 text-right text-slate-500 tabular-nums">${esc(formatTime(job.updatedAt || job.createdAt))}</td>
-        </tr>`).join('') : `<tr><td colspan="5" class="py-8 text-center text-slate-400">暂无数据引擎任务。</td></tr>`}
+        </tr>`).join('') : `<tr><td colspan="5" class="py-8 text-center text-slate-400">暂无数据整理记录。</td></tr>`}
       </tbody>
     </table>
   `;
@@ -708,7 +709,7 @@ async function importAll() {
   input.accept = '.json';
   input.onchange = async e => {
     const file = e.target.files[0]; if (!file) return;
-    if (!confirm('导入 JSON 备份会覆盖当前定额、项目、清单、报价版本、经验卡、指标和 AI 配置。建议先导出当前备份。确定导入？')) return;
+    if (!confirm('恢复 JSON 备份会覆盖当前定额、项目、清单、报价版本、复盘笔记、造价参考和 AI 配置。建议先导出当前备份。确定恢复？')) return;
     let data;
     try {
       data = JSON.parse(await file.text());
@@ -717,6 +718,7 @@ async function importAll() {
       return;
     }
     if (data.quota_items) await quotaRepo.replaceAll(data.quota_items);
+    await boqLibraryRepo.replaceAll(data.boq_library_items || []);
     if (data.projects)    await projectRepo.replaceAll(data.projects);
     if (data.project_boq) await boqRepo.replaceAll(data.project_boq);
     await versionRepo.replaceAll(data.boq_versions || []);
@@ -737,6 +739,7 @@ async function importAll() {
 async function clearBusinessData() {
   await Promise.all([
     quotaRepo.replaceAll([]),
+    boqLibraryRepo.replaceAll([]),
     projectRepo.replaceAll([]),
     boqRepo.replaceAll([]),
     versionRepo.replaceAll([]),
@@ -765,6 +768,7 @@ async function exportAll() {
 async function collectBusinessData() {
   return {
     quota_items: await quotaRepo.all(),
+    boq_library_items: await boqLibraryRepo.all(),
     projects:    await projectRepo.all(),
     project_boq: await boqRepo.all(),
     boq_versions: await versionRepo.all(),

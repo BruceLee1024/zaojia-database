@@ -26,6 +26,8 @@ export async function render() {
     <div class="min-h-full flex flex-col gap-3 max-w-[1680px] mx-auto">
       ${dashboardTitle(stats)}
 
+      ${personalStartCard(stats)}
+
       ${executiveSummary(stats)}
 
       <section class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,.95fr)] gap-3">
@@ -140,8 +142,8 @@ function buildNextActions({ missingQuota, missingBoq, noVersionProjects, archive
   const backfillNeeded = engine.backfillNeeded || 0;
   if (backfillNeeded || projects.some(p => p.status !== 'archived')) {
     actions.push({
-      title: '归档样本',
-      desc: backfillNeeded ? `${backfillNeeded} 个归档项目待接入指标样本` : `${projects.filter(p => p.status !== 'archived').length} 个项目仍在报价中`,
+      title: '收录案例',
+      desc: backfillNeeded ? `${backfillNeeded} 个已收录项目待整理为参考案例` : `${projects.filter(p => p.status !== 'archived').length} 个项目仍在报价中`,
       view: 'projects',
       icon: 'inventory_2',
       tone: 'slate',
@@ -150,7 +152,7 @@ function buildNextActions({ missingQuota, missingBoq, noVersionProjects, archive
   if (experience.pendingSessions.length) {
     actions.push({
       title: '确认复盘经验',
-      desc: `${experience.pendingSessions.length} 个复盘草稿待确认入库`,
+      desc: `${experience.pendingSessions.length} 个复盘草稿待确认保存`,
       view: 'experience',
       icon: 'psychology_alt',
       tone: 'amber',
@@ -158,7 +160,7 @@ function buildNextActions({ missingQuota, missingBoq, noVersionProjects, archive
   } else if (archived.length && !experience.confirmedCards.length) {
     actions.push({
       title: '沉淀报价经验',
-      desc: '已有归档样本，建议沉淀第一张经验卡',
+      desc: '已有收录案例，建议保存第一条复盘笔记',
       view: 'projects',
       icon: 'psychology_alt',
       tone: 'slate',
@@ -182,13 +184,48 @@ function dashboardTitle(stats) {
   const pendingText = stats.nextActions.length ? `${stats.nextActions.length} 项待处理动作` : '暂无紧急动作';
   return `<section class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 py-1">
     <div class="flex flex-wrap items-center gap-4">
-      <h1 class="text-2xl font-semibold tracking-normal text-slate-950">负责人经营指挥台</h1>
+      <h1 class="text-2xl font-semibold tracking-normal text-slate-950">我的造价概览</h1>
       <div class="text-sm text-slate-500">${dateText}</div>
-      <div class="text-sm text-slate-500">数据每日 08:00 更新</div>
+      <div class="text-sm text-slate-500">资料默认保存在本机</div>
     </div>
     <div class="flex items-center gap-2 text-xs text-slate-500">
       <span class="inline-flex h-2 w-2 rounded-full bg-teal-500"></span>
       <span>${pendingText}</span>
+    </div>
+  </section>`;
+}
+
+function personalStartCard(stats) {
+  const hasData = stats.projects.length || stats.quota.length || stats.boq.length;
+  if (!hasData) return `<section class="card border-teal-200 bg-teal-50/60 p-5">
+    <div class="flex flex-col lg:flex-row lg:items-center gap-4">
+      <div class="min-w-0 flex-1">
+        <div class="text-base font-semibold text-slate-900">还没有资料，先从这里开始</div>
+        <div class="mt-1 text-sm leading-6 text-slate-600">导入一份历史清单或常用定额，也可以直接新建一个项目。你的资料默认只保存在当前浏览器。</div>
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-600">
+          <div class="rounded border border-teal-200 bg-white/70 px-2.5 py-2"><b class="text-teal-800">1.</b> 导入历史清单或常用定额</div>
+          <div class="rounded border border-teal-200 bg-white/70 px-2.5 py-2"><b class="text-teal-800">2.</b> 建立项目并完成报价</div>
+          <div class="rounded border border-teal-200 bg-white/70 px-2.5 py-2"><b class="text-teal-800">3.</b> 保存版本，收录案例</div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 shrink-0">
+        <button onclick="window.__app.go('importer')" class="h-9 px-3 text-sm brand-bg text-white rounded">导入资料</button>
+        <button onclick="window.__app.go('projects',{action:'new'})" class="h-9 px-3 text-sm border border-teal-300 bg-white text-teal-700 rounded">新建项目</button>
+      </div>
+    </div>
+  </section>`;
+  const latest = stats.projectRows[0];
+  return `<section class="card border-teal-100 bg-teal-50/40 p-4">
+    <div class="flex flex-col lg:flex-row lg:items-center gap-4">
+      <div class="min-w-0 flex-1">
+        <div class="text-sm font-semibold text-slate-900">继续最近工作</div>
+        <div class="mt-1 text-sm text-slate-600">${latest ? `最近更新：${esc(latest.name || '未命名项目')}，可以继续处理清单或报价版本。` : '导入资料后，这里会显示最近使用的项目。'}</div>
+      </div>
+      <div class="flex flex-wrap gap-2 shrink-0">
+        ${latest ? `<button onclick="window.__app.go('boq',{projectId:'${latest.id}'})" class="h-9 px-3 text-sm brand-bg text-white rounded">继续编辑清单</button>` : ''}
+        <button onclick="window.__app.go('importer')" class="h-9 px-3 text-sm border border-teal-300 bg-white text-teal-700 rounded">导入资料</button>
+        <button onclick="window.__app.go('projects',{action:'new'})" class="h-9 px-3 text-sm border border-slate-300 bg-white text-slate-700 rounded">新建项目</button>
+      </div>
     </div>
   </section>`;
 }
@@ -202,40 +239,40 @@ function executiveSummary(stats) {
   return `<section class="grid grid-cols-1 2xl:grid-cols-[minmax(520px,1fr)_minmax(0,1fr)] gap-3">
     <div class="card p-4 overflow-hidden min-h-[202px]">
       <div class="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
-        <div class="font-semibold text-slate-900">经营规模</div>
+        <div class="font-semibold text-slate-900">项目费用概览</div>
         <span class="text-xs text-slate-500">按项目总造价汇总</span>
       </div>
       <div class="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-5">
         <div class="min-w-0">
           <div class="text-xs text-slate-500">累计造价</div>
           <div class="mt-2 text-3xl font-semibold tabular-nums text-slate-950 truncate">${fmtMoney(stats.totalCost)}</div>
-          <div class="mt-2 text-xs text-slate-500">归档 ${fmtMoney(stats.archivedCost)}</div>
+          <div class="mt-2 text-xs text-slate-500">已收录案例 ${fmtMoney(stats.archivedCost)}</div>
         </div>
         <div class="min-w-0 sm:border-l sm:border-slate-200 sm:pl-4">
-          <div class="text-xs text-slate-500">归档造价</div>
+          <div class="text-xs text-slate-500">案例费用</div>
           <div class="mt-2 text-2xl font-semibold tabular-nums text-slate-900 truncate">${fmtMoney(stats.archivedCost)}</div>
-          <div class="mt-2 text-xs text-slate-500">${fmt(stats.archived.length)} 个归档项目</div>
+          <div class="mt-2 text-xs text-slate-500">${fmt(stats.archived.length)} 个已收录案例</div>
         </div>
         <div class="min-w-0 sm:border-l sm:border-slate-200 sm:pl-4">
           <div class="flex items-center justify-between text-xs text-slate-500">
-            <span>归档率</span>
+            <span>案例收录率</span>
             <span class="${archivedRatio >= 60 ? 'text-teal-700' : 'text-amber-700'} font-semibold">${archivedRatio}%</span>
           </div>
           <div class="mt-3 h-2 rounded-full bg-slate-100 overflow-hidden">
             <div class="h-2 rounded-full ${archivedRatio >= 60 ? 'bg-teal-600' : 'bg-amber-500'}" style="width:${Math.min(100, Math.max(0, archivedRatio))}%"></div>
           </div>
-          <div class="mt-2 text-xs ${archivedRatio >= 60 ? 'text-teal-700' : 'text-slate-500'}">较上月 ${stats.monthArchived.length ? '+' : ''}${fmt(stats.monthArchived.length)} 个归档</div>
+          <div class="mt-2 text-xs ${archivedRatio >= 60 ? 'text-teal-700' : 'text-slate-500'}">本月新增 ${fmt(stats.monthArchived.length)} 个案例</div>
         </div>
       </div>
     </div>
 
     <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-      ${summaryKpi('本月新增', `${fmt(stats.monthProjects.length)} 个`, `本月归档 ${fmt(stats.monthArchived.length)} 个`, 'create_new_folder', stats.monthProjects.length ? 'teal' : 'slate')}
-      ${summaryKpi('报价中', `${fmt(stats.doing.length)} 个`, `${fmt(stats.archived.length)} 个已归档`, 'assignment', stats.doing.length ? 'amber' : 'teal')}
+      ${summaryKpi('本月新增项目', `${fmt(stats.monthProjects.length)} 个`, `本月收录 ${fmt(stats.monthArchived.length)} 个案例`, 'create_new_folder', stats.monthProjects.length ? 'teal' : 'slate')}
+      ${summaryKpi('进行中的项目', `${fmt(stats.doing.length)} 个`, `${fmt(stats.archived.length)} 个已收录案例`, 'assignment', stats.doing.length ? 'amber' : 'teal')}
       ${summaryKpi('未保存版本', `${fmt(stats.noVersionProjects.length)} 个`, '有清单但无报价快照', 'history', versionTone)}
       ${summaryKpi('健康风险', `${fmt(stats.riskTotal)} 处`, `报价完整度 ${stats.priceCompleteness}%`, 'health_and_safety', healthTone)}
-      ${summaryKpi('数据健康分', `${fmt(dataScore)} 分`, `${fmt(stats.engine.facts.length)} 条正式事实`, 'monitor_heart', dataScore >= 80 ? 'teal' : 'amber')}
-      ${summaryKpi('待确认经验', `${fmt(exp.pendingSessions.length)} 个`, exp.pendingSessions.length ? '建议现在入库' : '无复盘积压', 'menu_book', exp.pendingSessions.length ? 'amber' : 'teal')}
+      ${summaryKpi('资料完整度', `${fmt(dataScore)} 分`, `${fmt(stats.engine.facts.length)} 个可用案例`, 'monitor_heart', dataScore >= 80 ? 'teal' : 'amber')}
+      ${summaryKpi('待确认复盘', `${fmt(exp.pendingSessions.length)} 个`, exp.pendingSessions.length ? '建议保存到复盘笔记' : '暂无待处理复盘', 'menu_book', exp.pendingSessions.length ? 'amber' : 'teal')}
     </div>
   </section>`;
 }
@@ -296,27 +333,27 @@ function experienceCommandCenter(stats) {
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2 min-w-0">
-              <div class="font-semibold text-slate-900">AI 经验萃取智能体</div>
+              <div class="font-semibold text-slate-900">AI 复盘助手</div>
               <span class="badge ${tone === 'amber' ? 'badge-yellow' : 'badge-green'}">${healthText}</span>
             </div>
-            <div class="mt-1 text-sm leading-6 text-slate-600">把报价审查、版本调整和项目归档里的判断，沉淀为可检索、可复核、可被 AI 引用的经验知识卡。</div>
+            <div class="mt-1 text-sm leading-6 text-slate-600">把报价审查、版本调整和案例收录里的判断，保存为可检索、可复核的个人复盘笔记。</div>
           </div>
           <div class="flex flex-wrap sm:justify-end gap-2 shrink-0">
             <button onclick="window.__app.go('experience')" class="inline-flex items-center gap-1.5 px-3 py-2 text-sm brand-bg text-white rounded">
               <span class="material-symbols-outlined text-[18px]">database_search</span>
-              知识库
+              复盘笔记
             </button>
             <button onclick="window.__app.go('experience')" class="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
               <span class="material-symbols-outlined text-[18px]">${pending ? 'fact_check' : 'add_task'}</span>
-              ${pending ? '确认入库' : '发起复盘'}
+              ${pending ? '确认保存' : '发起复盘'}
             </button>
           </div>
         </div>
 
         <div class="border-t xl:border-t-0 xl:border-l border-slate-200 bg-slate-50/70 p-3">
           <div class="grid grid-cols-2 gap-2">
-            ${experienceMetric('经验卡', confirmed, '张', '可检索复用', 'teal')}
-            ${experienceMetric('待确认', pending, '个', pending ? '建议现在入库' : '无积压', pending ? 'amber' : 'teal')}
+            ${experienceMetric('复盘笔记', confirmed, '张', '可查阅', 'teal')}
+            ${experienceMetric('待确认', pending, '个', pending ? '建议现在保存' : '无积压', pending ? 'amber' : 'teal')}
             ${experienceMetric('需复核', review, '张', review ? '需要维护' : '状态健康', review ? 'amber' : 'teal')}
             ${experienceMetric('过期', expired, '张', expired ? '需更新边界' : '有效', expired ? 'amber' : 'teal')}
           </div>
@@ -325,8 +362,8 @@ function experienceCommandCenter(stats) {
       <div class="border-t border-slate-200 bg-white px-3 py-2">
         <div class="flex flex-wrap gap-2">
               ${experiencePill('AI 追问', '按项目上下文生成', 'psychology_alt', 'teal')}
-              ${experiencePill('用户确认', '草稿确认后入库', pending ? 'pending_actions' : 'task_alt', pending ? 'amber' : 'teal')}
-              ${experiencePill('知识引用', '进入 AI 查询上下文', 'link', confirmed ? 'teal' : 'slate')}
+              ${experiencePill('用户确认', '草稿确认后保存', pending ? 'pending_actions' : 'task_alt', pending ? 'amber' : 'teal')}
+              ${experiencePill('笔记引用', '进入 AI 查询上下文', 'link', confirmed ? 'teal' : 'slate')}
         </div>
       </div>
     </section>
@@ -356,20 +393,20 @@ function trendPanel(stats) {
   return `<section class="card p-0 overflow-hidden min-h-[410px] flex flex-col">
     <div class="px-4 py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div class="min-w-0">
-        <div class="font-semibold text-slate-900">经营与报价趋势</div>
-        <div class="mt-1 text-xs text-slate-500">按归档月份查看造价、项目数和单项目均价。</div>
+        <div class="font-semibold text-slate-900">造价与项目趋势</div>
+        <div class="mt-1 text-xs text-slate-500">按案例收录月份查看造价、项目数和单项目均价。</div>
       </div>
       <div class="flex items-center gap-2">
         <span class="badge badge-gray">${stats.archivedTrend.windowText}</span>
       </div>
     </div>
     <div class="px-4 pt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-xs text-slate-500">
-      ${chartLegendItem('归档造价（万元）', 'bg-teal-600')}
+      ${chartLegendItem('案例造价（万元）', 'bg-teal-600')}
       ${chartLegendItem('项目数（个）', 'bg-sky-600')}
       ${chartLegendItem('平均造价（万元）', 'bg-amber-500')}
     </div>
     <div class="px-5 pb-5 pt-3 flex-1 min-h-[310px]">
-      ${stats.archivedTrend.hasAnyInWindow ? '<canvas id="costChart" class="w-full h-full"></canvas>' : emptyBlock('近 6 个月无归档项目，新增归档后自动展示')}
+      ${stats.archivedTrend.hasAnyInWindow ? '<canvas id="costChart" class="w-full h-full"></canvas>' : emptyBlock('近 6 个月无收录案例，新增案例后自动展示')}
     </div>
   </section>`;
 }
@@ -386,8 +423,8 @@ function actionQueue(stats) {
   return `<section class="card p-0 overflow-hidden min-h-[390px] flex flex-col">
     <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
       <div>
-        <div class="font-semibold text-slate-900">今日动作队列</div>
-        <div class="mt-1 text-xs text-slate-500">风险、版本、经验和样本的优先处理顺序。</div>
+      <div class="font-semibold text-slate-900">下一步处理</div>
+        <div class="mt-1 text-xs text-slate-500">按优先级处理价格、版本和个人复盘。</div>
       </div>
       <span class="badge ${rows.some(r => r.count > 0) ? 'badge-yellow' : 'badge-green'}">${rows.reduce((s, r) => s + r.count, 0)} 项</span>
     </div>
@@ -422,7 +459,7 @@ function actionQueueRows(stats) {
     },
     {
       title: '确认复盘经验',
-      desc: stats.experience.pendingSessions.length ? '复盘草稿等待确认后入库' : '暂无待确认复盘',
+      desc: stats.experience.pendingSessions.length ? '复盘草稿等待确认后保存' : '暂无待确认复盘',
       count: stats.experience.pendingSessions.length,
       badge: stats.experience.pendingSessions.length ? '中优先' : '完成',
       view: 'experience',
@@ -430,8 +467,8 @@ function actionQueueRows(stats) {
       tone: stats.experience.pendingSessions.length ? 'amber' : 'teal',
     },
     {
-      title: '归档样本',
-      desc: backfillCount ? `${backfillCount} 个归档项目待接入指标样本` : `${stats.doing.length} 个项目仍在报价中`,
+      title: '收录案例',
+      desc: backfillCount ? `${backfillCount} 个已收录项目待整理为参考案例` : `${stats.doing.length} 个项目仍在报价中`,
       count: archiveCount,
       badge: archiveCount ? '低优先' : '完成',
       view: 'projects',
@@ -516,10 +553,10 @@ function projectTablePanel(stats) {
   return `<section class="card p-0 overflow-hidden min-h-[270px]">
     <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
       <div>
-        <div class="font-semibold text-slate-900">项目经营明细</div>
+        <div class="font-semibold text-slate-900">我的项目明细</div>
         <div class="mt-1 text-xs text-slate-500">最近项目、状态和总造价。</div>
       </div>
-      <button onclick="window.__app.go('projects')" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">项目管理</button>
+      <button onclick="window.__app.go('projects')" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">我的项目</button>
     </div>
     <div class="overflow-auto scroll-thin">
       <table class="w-full text-sm">
@@ -553,11 +590,11 @@ function healthRadarPanel(stats) {
   const expTotal = stats.experience.confirmedCards.length + stats.experience.pendingSessions.length + stats.experience.expiredCards.length;
   const expScore = expTotal ? Math.round(stats.experience.confirmedCards.length / expTotal * 100) : 0;
   return `<section class="card p-0 overflow-hidden min-h-[270px]">
-    ${panelHeader('经营健康雷达', '三类需要持续确认的经营健康度。')}
+    ${panelHeader('资料完整度', '三类需要持续确认的个人资料状态。')}
     <div class="p-4 space-y-5">
       ${healthProgressRow('报价完整度', stats.priceCompleteness, `${fmt(stats.priceCompleteness)}%`, `${fmt(stats.missingPriceCount)} 处缺价`, 'teal')}
-      ${healthProgressRow('数据资产', dataScore, `${fmt(dataScore)}%`, `${fmt(stats.engine.facts.length)} 条正式事实`, dataScore >= 80 ? 'teal' : 'sky')}
-      ${healthProgressRow('经验资产', expScore, `${fmt(expScore)}%`, `${fmt(stats.experience.confirmedCards.length)} / ${fmt(Math.max(1, expTotal))} 张已确认`, expScore >= 60 ? 'teal' : 'amber')}
+      ${healthProgressRow('可用案例', dataScore, `${fmt(dataScore)}%`, `${fmt(stats.engine.facts.length)} 个可用案例`, dataScore >= 80 ? 'teal' : 'sky')}
+      ${healthProgressRow('复盘笔记', expScore, `${fmt(expScore)}%`, `${fmt(stats.experience.confirmedCards.length)} / ${fmt(Math.max(1, expTotal))} 张已确认`, expScore >= 60 ? 'teal' : 'amber')}
     </div>
   </section>`;
 }
@@ -585,18 +622,18 @@ function experienceAssetCard(stats) {
           <span class="material-symbols-outlined text-[26px]">format_list_bulleted</span>
         </div>
         <div class="min-w-0 flex-1">
-          <div class="font-semibold text-slate-900">经验知识库</div>
-          <div class="mt-1 text-xs text-slate-500">报价判断沉淀后，可检索复用。</div>
+        <div class="font-semibold text-slate-900">复盘笔记</div>
+          <div class="mt-1 text-xs text-slate-500">把这次报价的判断留给未来的自己。</div>
           <div class="mt-4 grid grid-cols-3 gap-3">
             ${assetMetric('经验卡', exp.confirmedCards.length, '张', '可检索复用', 'teal')}
-            ${assetMetric('待确认', exp.pendingSessions.length, '个', '建议现在入库', exp.pendingSessions.length ? 'amber' : 'teal')}
+            ${assetMetric('待确认', exp.pendingSessions.length, '个', '建议现在保存', exp.pendingSessions.length ? 'amber' : 'teal')}
             ${assetMetric('过期', exp.expiredCards.length, '张', '有效期内', exp.expiredCards.length ? 'amber' : 'slate')}
           </div>
         </div>
       </div>
       <div class="flex flex-col sm:flex-row lg:flex-col gap-2 lg:w-[150px]">
         <button onclick="window.__app.go('experience')" class="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm brand-bg text-white rounded">
-          打开知识库
+          打开复盘笔记
         </button>
         <button onclick="window.__app.openAI && window.__app.openAI()" class="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm rounded border border-slate-300 bg-white text-teal-700 hover:bg-slate-50">
           前往 AI 检索
@@ -670,14 +707,14 @@ function compositionSummary(stats) {
     ${miniLine('项目总量', `${stats.projects.length} 个`, stats.projects.length ? 'teal' : 'slate')}
     ${miniLine('类型结构', sampleNote, topRatio >= 70 ? 'amber' : 'slate')}
     ${miniLine('平均造价', stats.projects.length ? fmtMoney(stats.totalCost / stats.projects.length) : '-', 'slate')}
-    ${miniLine('归档占比', stats.projects.length ? `${Math.round(stats.archived.length / stats.projects.length * 100)}%` : '-', stats.archived.length ? 'teal' : 'amber')}
+    ${miniLine('案例收录率', stats.projects.length ? `${Math.round(stats.archived.length / stats.projects.length * 100)}%` : '-', stats.archived.length ? 'teal' : 'amber')}
   `;
 }
 
 function statusDistribution(stats) {
   const items = [
     { label: '报价中', value: stats.doing.length, tone: 'amber' },
-    { label: '已归档', value: stats.archived.length, tone: 'teal' },
+    { label: '已收录案例', value: stats.archived.length, tone: 'teal' },
     { label: '未保存版本', value: stats.noVersionProjects.length, tone: stats.noVersionProjects.length ? 'amber' : 'slate' },
   ];
   const max = Math.max(1, ...items.map(i => i.value));
@@ -737,7 +774,7 @@ function actionCard(action) {
 }
 
 function emptyActionState() {
-  return `<div class="lg:col-span-2 rounded border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-400">当前暂无紧急动作，可以继续归档样本或沉淀报价经验。</div>`;
+  return `<div class="lg:col-span-2 rounded border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-400">当前没有待处理事项，可以继续完善项目或记录复盘笔记。</div>`;
 }
 
 function healthGroup(title, rows) {
@@ -820,7 +857,7 @@ function drawCharts(stats) {
           datasets: [
             {
               type: 'bar',
-              label: '归档造价',
+              label: '案例造价',
               data: costData,
               backgroundColor: 'rgba(15, 118, 110, .86)',
               hoverBackgroundColor: '#0f766e',
@@ -1059,16 +1096,16 @@ function calcGrowthRate(current, previous) {
 
 function trendSidePanel(trend) {
   if (!trend.hasAnyInWindow) {
-    return `<div class="border-t lg:border-t-0 lg:border-l border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-400 flex items-center justify-center">等待归档数据形成趋势</div>`;
+    return `<div class="border-t lg:border-t-0 lg:border-l border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-400 flex items-center justify-center">等待收录案例形成趋势</div>`;
   }
   const latest = trend.latestPoint || {};
   const peak = trend.peakPoint || latest;
   return `<div class="border-t lg:border-t-0 lg:border-l border-slate-200 bg-slate-50/70 p-3">
     <div class="text-xs font-semibold text-slate-700">趋势解读</div>
     <div class="mt-3 divide-y divide-slate-200">
-      ${trendInsightRow('最新归档月', latest.label || '-', `${compactMoney(latest.cost || 0)} · ${fmt(latest.count || 0)} 个`, 'teal')}
+      ${trendInsightRow('最新收录月', latest.label || '-', `${compactMoney(latest.cost || 0)} · ${fmt(latest.count || 0)} 个`, 'teal')}
       ${trendInsightRow('峰值月份', peak.label || '-', `${compactMoney(peak.cost || 0)} · ${fmt(peak.count || 0)} 个`, 'slate')}
-      ${trendInsightRow('造价环比', trend.costGrowthText, trend.costGrowth === null ? '上月无归档' : '较上一月', trend.costGrowth > 0 ? 'amber' : 'teal')}
+      ${trendInsightRow('造价环比', trend.costGrowthText, trend.costGrowth === null ? '上月无案例' : '较上一月', trend.costGrowth > 0 ? 'amber' : 'teal')}
       ${trendInsightRow('样本密度', `${trend.activeMonths}/6 月`, trend.activeMonths <= 1 ? '样本偏少' : '可观察趋势', trend.activeMonths <= 1 ? 'amber' : 'teal')}
     </div>
   </div>`;
@@ -1129,7 +1166,7 @@ function barTone(tone) {
 }
 
 function statusBadge(s) {
-  return s === 'archived' ? '<span class="badge badge-green">已归档</span>'
+  return s === 'archived' ? '<span class="badge badge-green">已收录案例</span>'
        : s === 'doing'    ? '<span class="badge badge-yellow">进行中</span>'
        : '<span class="badge badge-gray">未开始</span>';
 }

@@ -4,6 +4,7 @@ import { storageGet, storageSet } from './storage.js?v=1.0';
 
 export const STORES = {
   quota_items: 'quota_items',
+  boq_library_items: 'boq_library_items',
   projects:    'projects',
   project_boq: 'project_boq',
   boq_versions: 'boq_versions',
@@ -58,6 +59,18 @@ export const quotaRepo = {
   update: (id, patch) => dbUpdate(STORES.quota_items, id, patch),
   remove: id => dbRemove(STORES.quota_items, id),
   replaceAll: arr => dbSetAll(STORES.quota_items, arr),
+};
+
+export const boqLibraryRepo = {
+  all: () => dbGetAll(STORES.boq_library_items),
+  findById: id => dbFind(STORES.boq_library_items, id),
+  upsert: obj => {
+    if (!obj.id) obj.id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10);
+    return dbAdd(STORES.boq_library_items, obj);
+  },
+  update: (id, patch) => dbUpdate(STORES.boq_library_items, id, patch),
+  remove: id => dbRemove(STORES.boq_library_items, id),
+  replaceAll: arr => dbSetAll(STORES.boq_library_items, arr),
 };
 
 export const projectRepo = {

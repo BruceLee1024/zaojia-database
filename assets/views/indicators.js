@@ -1,4 +1,4 @@
-// 视图：指标分析
+// 视图：造价参考
 import { indicatorService } from '../services/indicatorService.js?v=3.9';
 import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
 import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=1.1';
@@ -56,13 +56,13 @@ export async function render() {
 function trustExplainer() {
   return `<section class="rounded-lg border border-slate-200 bg-white px-4 py-3">
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 text-sm">
-      ${trustTile('保存版本', '不可变报价快照，可用于回退、对比和版本样本；默认不等同于正式项目归档。', 'history')}
-      ${trustTile('归档项目', '价格完整、工程量可信且已有版本后，才沉淀为正式指标样本。', 'inventory_2')}
-      ${trustTile('经验卡', '来自报价审查、版本保存或项目归档复盘，供 AI 检索复用，不参与指标计算。', 'psychology_alt')}
+      ${trustTile('保存版本', '不可变报价快照，可用于回退和对比；保存版本不等同于案例收录。', 'history')}
+      ${trustTile('收录案例', '价格完整、工程量可信且已有版本后，才会用于造价参考。', 'inventory_2')}
+      ${trustTile('复盘笔记', '来自报价审查、版本保存或案例复盘，供 AI 查阅，不参与指标计算。', 'psychology_alt')}
     </div>
     <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
       <span>样本不足时建议：</span>
-      <button onclick="window.__app.go('projects')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-teal-700">去项目管理归档</button>
+      <button onclick="window.__app.go('projects')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-teal-700">去我的项目收录案例</button>
       <button onclick="window.__app.go('boq')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-teal-700">去清单保存版本</button>
       <button onclick="window.__app.go('settings')" class="rounded border border-slate-300 bg-white px-2.5 py-1 text-teal-700">去设置重建指标</button>
     </div>
@@ -111,14 +111,14 @@ function expose() {
     selectProject: async value => { state.benchmarkProjectId = value; await render(); },
     updateEstimate: async (field, value) => { state.estimate[field] = value; await render(); },
     sampleFilter: async (field, value) => { state.sample[field] = value; await render(); },
-    promote: async id => { await dataEngineService.promoteCandidates([id]); toast('候选样本已提升为正式事实', 'success'); await render(); },
+    promote: async id => { await dataEngineService.promoteCandidates([id]); toast('已确认记录可用于造价参考', 'success'); await render(); },
     lineage: id => showLineage(id),
     repair: async (id, action) => repairSample(id, action),
     promoteVisible: async () => {
       const ids = filteredSamples().filter(s => s.status === 'candidate').map(s => s.id);
-      if (!ids.length) return toast('当前筛选下没有候选样本', 'error');
+      if (!ids.length) return toast('当前筛选下没有待检查记录', 'error');
       await dataEngineService.promoteCandidates(ids);
-      toast(`已提升 ${ids.length} 条候选样本`, 'success');
+      toast(`已确认 ${ids.length} 条记录可用于参考`, 'success');
       await render();
     },
   };
@@ -172,7 +172,7 @@ function decisionFilters() {
         <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-400">search</span>
       </label>
       <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
-        ${scopeSegment('formal', '正式样本')}
+        ${scopeSegment('formal', '可用案例')}
         ${scopeSegment('candidates', '含候选')}
         ${scopeSegment('outliers', '剔除异常')}
       </div>
@@ -619,7 +619,7 @@ function showIndicatorMouth() {
   openModal('指标口径与适用边界', `
     <div class="space-y-3 text-sm leading-6 text-slate-700">
       ${lineageTile('指标定义', it ? `${metricDisplayName(it.metric)} / ${unitForMetric(it.metric)}` : '-')}
-      ${lineageTile('计算口径', '按当前筛选项目的归档样本计算 P25 / 中位 / P75，默认排除未归档项目。')}
+      ${lineageTile('计算口径', '按当前筛选项目的已收录案例计算 P25 / 中位 / P75，默认排除未收录项目。')}
       ${lineageTile('适用边界', bucketParts(it?.typeKey).join(' / ') || '当前筛选口径')}
       ${lineageTile('风险提示', Number(it?.n || 0) < 3 ? '样本数量不足，仅可作为早期估算或复核提示。' : '可用于同类项目快速校核，正式报价前仍需结合清单复核。')}
     </div>
@@ -653,7 +653,7 @@ function filters() {
       <label class="inline-flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
         统计口径
         <select onchange="window.__indicators.setScope(this.value)" class="h-7 rounded border border-slate-300 bg-white px-2 text-xs">
-          <option value="formal" ${state.scope === 'formal' ? 'selected' : ''}>仅正式归档样本</option>
+          <option value="formal" ${state.scope === 'formal' ? 'selected' : ''}>仅已收录案例</option>
           <option value="candidates" ${state.scope === 'candidates' ? 'selected' : ''}>正式 + 候选</option>
           <option value="versions" ${state.scope === 'versions' ? 'selected' : ''}>正式 + 报价版本</option>
         </select>
@@ -753,7 +753,7 @@ function indicatorQualityNotice(rows) {
       <span class="material-symbols-outlined mt-0.5 text-[16px]">priority_high</span>
       <div class="min-w-0">
         当前口径下 ${fmt(scarce)} 组指标样本少于 3 个，${fmt(onlyReference)} 组仅作参考${outliers ? `，另有 ${fmt(outliers)} 个异常值` : ''}。
-        报价决策前建议放宽筛选或补充归档样本。
+        报价决策前建议放宽筛选或补充可用案例。
       </div>
     </div>
   </div>`;
@@ -853,7 +853,7 @@ function emptyIndicatorList() {
       <span class="material-symbols-outlined text-[20px]">analytics</span>
     </div>
     <div class="mt-3 font-medium text-slate-700">当前筛选下没有指标</div>
-    <div class="mt-1 text-sm text-slate-500">可以先归档项目、提升候选样本，或放宽顶部筛选条件。</div>
+    <div class="mt-1 text-sm text-slate-500">可以先收录项目、确认待检查记录，或放宽顶部筛选条件。</div>
   </div>`;
 }
 
@@ -893,7 +893,7 @@ function overview() {
       </div>
       <div class="card p-4">
         <div class="font-semibold">年度趋势</div>
-        <div class="mt-1 text-xs text-slate-500">按归档/报价年份统计中位总造价。</div>
+        <div class="mt-1 text-xs text-slate-500">按案例收录/报价年份统计中位总造价。</div>
         <canvas id="trendChart" height="180" class="mt-3"></canvas>
       </div>
     </div>
@@ -902,7 +902,7 @@ function overview() {
 
 function projectSelect() {
   return `<select onchange="window.__indicators.selectProject(this.value)" class="h-9 rounded border border-slate-300 bg-white px-2 text-sm">
-    ${cache.projects.map(p => `<option value="${p.id}" ${state.benchmarkProjectId === p.id ? 'selected' : ''}>${esc(p.name)}${p.status === 'archived' ? '（已归档）' : ''}</option>`).join('')}
+    ${cache.projects.map(p => `<option value="${p.id}" ${state.benchmarkProjectId === p.id ? 'selected' : ''}>${esc(p.name)}${p.status === 'archived' ? '（已收录）' : ''}</option>`).join('')}
   </select>`;
 }
 
@@ -1058,7 +1058,7 @@ function showAiIndicatorExplain() {
     <div class="space-y-3 text-sm">
       <div class="rounded border border-teal-200 bg-teal-50 p-3 text-teal-900 whitespace-pre-line">${esc(result.summary)}</div>
       ${(result.warnings || []).length ? `<div class="rounded border border-amber-200 bg-amber-50 p-3 text-amber-800">${result.warnings.map(esc).join('<br>')}</div>` : ''}
-      <div class="text-xs text-slate-500">指标解读基于当前筛选和样本池，样本不足时不能作为强结论。</div>
+      <div class="text-xs text-slate-500">参考解读基于当前筛选和案例记录，案例不足时只能作为趋势提示。</div>
     </div>
   `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">知道了</button>`);
 }
@@ -1084,8 +1084,8 @@ function samplesView() {
   const low = [...cache.facts, ...cache.candidates].filter(s => s.quality?.level === '低可信').length;
   return `<div class="space-y-4">
     <div class="grid grid-cols-4 gap-3">
-      ${sampleMetric('正式事实', official, '条')}
-      ${sampleMetric('候选样本', candidate, '条')}
+      ${sampleMetric('可用案例', official, '条')}
+      ${sampleMetric('待检查记录', candidate, '条')}
       ${sampleMetric('低可信', low, '条')}
       ${sampleMetric('质量报告', cache.reports.length, '份')}
     </div>
@@ -1108,13 +1108,13 @@ function samplesView() {
           </select>
         </label>
         <div class="flex-1"></div>
-        <button onclick="window.__indicators.promoteVisible()" class="h-9 px-3 text-sm rounded border border-teal-600 text-teal-700 bg-white hover:bg-teal-50">提升当前候选</button>
+        <button onclick="window.__indicators.promoteVisible()" class="h-9 px-3 text-sm rounded border border-teal-600 text-teal-700 bg-white hover:bg-teal-50">确认当前记录可用</button>
       </div>
     </div>
     <div class="card p-0 overflow-hidden">
       <div class="px-4 py-3 border-b border-slate-200">
         <div class="font-semibold">数据来源明细</div>
-        <div class="mt-1 text-xs text-slate-500">正式事实参与默认指标统计；候选样本需提升后才进入指标。</div>
+        <div class="mt-1 text-xs text-slate-500">可用案例参与默认参考；待检查记录确认后才会进入参考。</div>
       </div>
       <div class="max-h-[540px] overflow-auto scroll-thin">
         <table class="w-full text-sm">
@@ -1161,8 +1161,8 @@ function sampleRow(s) {
     <td class="px-2"><span class="badge ${s.quality?.level === '低可信' ? 'badge-red' : s.quality?.level === '需复核' ? 'badge-yellow' : 'badge-gray'}">${esc(s.quality?.level || '-')}</span></td>
     <td class="px-2 text-right text-slate-500 tabular-nums">${esc(formatTime(s.createdAt))}</td>
     <td class="px-3 text-right whitespace-nowrap">
-      <button onclick="window.__indicators.lineage('${s.id}')" class="text-xs text-slate-600 hover:underline">血缘</button>
-      ${s.status === 'candidate' ? `<button onclick="window.__indicators.promote('${s.id}')" class="ml-2 text-xs text-teal-700 hover:underline">提升</button>` : ''}
+      <button onclick="window.__indicators.lineage('${s.id}')" class="text-xs text-slate-600 hover:underline">来源</button>
+      ${s.status === 'candidate' ? `<button onclick="window.__indicators.promote('${s.id}')" class="ml-2 text-xs text-teal-700 hover:underline">确认可用</button>` : ''}
       ${s.quality?.issues?.includes('missing_price') ? `<button onclick="window.__indicators.repair('${s.id}','price')" class="ml-2 text-xs text-amber-700 hover:underline">补单价</button>` : ''}
       ${s.quality?.issues?.includes('unmatched_quota') ? `<button onclick="window.__indicators.repair('${s.id}','quota')" class="ml-2 text-xs text-blue-700 hover:underline">匹配定额</button>` : ''}
     </td>
@@ -1179,14 +1179,14 @@ function showLineage(id) {
   const project = cache.projects.find(p => p.id === sample.projectId);
   const job = cache.jobs.find(j => j.id === sample.jobId);
   const report = cache.reports.find(r => r.jobId === sample.jobId || r.sourceId === sample.sourceId);
-  openModal('数据血缘详情', `
+  openModal('来源与计算依据', `
     <div class="space-y-4 text-sm">
       <div class="grid grid-cols-2 gap-2">
         ${lineageTile('项目', project?.name || '-')}
         ${lineageTile('事实类型', sample.factType)}
         ${lineageTile('来源', `${sample.sourceType} / ${sample.sourceId || '-'}`)}
         ${lineageTile('质量', sample.quality?.level || '-')}
-        ${lineageTile('血缘 ID', sample.lineageId || '-')}
+        ${lineageTile('来源记录 ID', sample.lineageId || '-')}
         ${lineageTile('数据集', sample.datasetKey || '-')}
       </div>
       <div class="rounded border border-slate-200 bg-slate-50 p-3">

@@ -2,27 +2,29 @@
 import * as dashboard from './assets/views/dashboard.js?v=4.9';
 import * as importer  from './assets/views/importer.js?v=1.6';
 import * as quota     from './assets/views/quota.js?v=4.4';
-import * as projects  from './assets/views/projects.js?v=4.6';
+import * as projects  from './assets/views/projects.js?v=4.8';
 import * as boq       from './assets/views/boq.js?v=4.5';
 import * as indicators from './assets/views/indicators.js?v=5.7';
-import * as experience from './assets/views/experience.js?v=4.6';
+import * as experience from './assets/views/experience.js?v=4.8';
 import * as settings  from './assets/views/settings.js?v=4.3';
 import * as ai        from './assets/views/ai.js?v=4.0';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
-import { smartSearch } from './assets/services/aiAssistService.js?v=1.1';
+import { smartSearch } from './assets/services/aiAssistService.js?v=1.2';
 import { getStorageStatus } from './assets/data/storage.js?v=1.0';
 import { openModal, closeModal, esc } from './assets/utils/dom.js';
 
 const VIEWS = [
-  { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard', group: '工作台', desc: '经营概览' },
-  { id: 'importer',   label: '数据导入',   icon: 'upload_file', group: '工作台', desc: 'Excel 入库' },
-  { id: 'quota',      label: '定额库',     icon: 'menu_book', group: '工作台', desc: '价格基础' },
-  { id: 'projects',   label: '项目管理',   icon: 'folder_managed', group: '工作台', desc: '项目档案' },
+  { id: 'dashboard',  label: '我的概览',   icon: 'dashboard', group: '我的工作台', desc: '继续最近工作' },
+  { id: 'importer',   label: '导入资料',   icon: 'upload_file', group: '我的工作台', desc: '清单、定额与备份' },
+  { id: 'ai-import',  label: 'AI 导入',    icon: 'auto_awesome', group: '我的工作台', desc: '自由格式清单识别', hidden: true },
+  { id: 'quota',      label: '我的定额库', icon: 'menu_book', group: '我的工作台', desc: '常用价格参考' },
+  { id: 'boq-library', label: '我的清单库', icon: 'format_list_bulleted', group: '我的工作台', desc: '通用清单复用' },
+  { id: 'projects',   label: '我的项目',   icon: 'folder_managed', group: '我的工作台', desc: '项目资料与案例' },
   { id: 'boq',        label: '工程量清单', icon: 'list_alt', group: '工作台', desc: '报价编制' },
-  { id: 'indicators', label: '指标分析',   icon: 'analytics', group: '工作台', desc: '样本对标' },
-  { id: 'experience', label: '经验萃取',   icon: 'psychology_alt', group: '智能与配置', desc: '复盘沉淀' },
-  { id: 'settings',   label: '设置',       icon: 'settings', group: '智能与配置', desc: '数据维护' },
+  { id: 'indicators', label: '造价参考',   icon: 'analytics', group: '工作台', desc: '案例与指标' },
+  { id: 'experience', label: '复盘笔记',   icon: 'psychology_alt', group: '个人积累', desc: '记录可复用经验' },
+  { id: 'settings',   label: '数据与备份', icon: 'settings', group: '个人积累', desc: '本地存储与维护' },
 ];
 
 const state = {
@@ -33,6 +35,18 @@ const state = {
 
 const renderers = {
   dashboard, importer, quota, projects, boq, indicators, experience, settings,
+  'boq-library': {
+    render: async () => {
+      const module = await import('./assets/views/boqLibrary.js?v=1.6');
+      return module.render();
+    },
+  },
+  'ai-import': {
+    render: async () => {
+      const module = await import('./assets/views/aiImportWizard.js?v=1.5');
+      return module.render();
+    },
+  },
 };
 let lastSearchResults = [];
 
@@ -41,7 +55,7 @@ function renderNav() {
   document.getElementById('nav').innerHTML = groups.map(group => `
     <div class="nav-section-title">${group}</div>
     <div class="space-y-1.5">
-      ${VIEWS.filter(v => v.group === group).map(v => {
+      ${VIEWS.filter(v => v.group === group && !v.hidden).map(v => {
         const active = state.currentView === v.id;
         return `
           <div class="nav-item px-3 py-2.5 cursor-pointer flex items-center gap-3 text-sm font-medium ${active ? 'active' : ''}" data-go="${v.id}">
@@ -126,8 +140,8 @@ async function renderStorageBadge() {
     ? `本地文件夹${status.connected ? '' : ' · 待授权'}`
     : 'IndexedDB';
   const fullLabel = status.mode === 'folder'
-    ? `本地数据 · ${label}`
-    : '本地数据 · IndexedDB';
+    ? `数据保存在本机 · ${label}`
+    : '数据保存在本机 · 浏览器存储';
   const sidebar = document.getElementById('sidebarStorageLabel');
   const footer = document.getElementById('footerStorageLabel');
   const header = document.getElementById('headerStorageLabel');
@@ -209,11 +223,18 @@ window.__app = {
 };
 
 window.addEventListener('DOMContentLoaded', async () => {
-  await ensureDemoData();
-  ai.close();
+  // 先挂载导航和启动状态，避免初始化本地示例数据时页面出现空壳。
   renderNav();
+  document.getElementById('workspace').innerHTML = '<div class="min-h-full flex items-center justify-center p-8 text-sm text-slate-500">正在读取本机资料…</div>';
+  try {
+    await ensureDemoData();
+  } catch (err) {
+    // 演示数据只负责初始化示例内容，失败时不能阻断已有本地数据和主界面启动。
+    console.error('[demo] 初始化示例数据失败，继续加载已有本地数据', err);
+  }
+  ai.close();
   renderStorageBadge();
-  renderWorkspace();
+  await renderWorkspace();
 
   document.getElementById('aiInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') window.__app.sendAI();
