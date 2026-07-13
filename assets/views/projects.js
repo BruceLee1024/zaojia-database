@@ -1,14 +1,19 @@
-// 视图：项目管理
+// 视图：我的项目
 import { projectService } from '../services/projectService.js?v=3.9';
 import { indicatorService } from '../services/indicatorService.js?v=3.9';
 import { boqRepo, versionRepo } from '../data/repository.js?v=3.9';
 import { fmt, fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { openReview } from './experience.js?v=4.4';
+import { openReview } from './experience.js?v=4.5';
 import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=1.0';
-import { suggestProjectInfo } from '../services/aiAssistService.js?v=1.1';
+import { suggestProjectInfo } from '../services/aiAssistService.js?v=1.2';
 
-const TYPES = ['水厂', '泵站', '管网', '变电站', '水池', '车间', '其他'];
+const TYPES = [
+  '水厂', '污水处理厂', '再生水厂', '工业废水', '泵站', '管网', '调蓄池', '水池', '污泥处理',
+  '房屋建筑', '住宅建筑', '公共建筑', '工业厂房', '园区建设',
+  '市政道路', '桥梁隧道', '综合管廊', '水利工程', '电力工程', '变电站',
+  '设备安装', '厂区配套', '车间', '其他'
+];
 const SCALES = ['小型', '中型', '大型', '特大型'];
 const projectState = { status: '', type: '', risk: '', version: '', keyword: '', selectedId: '' };
 
@@ -17,6 +22,7 @@ export async function render() {
   if (params.keyword != null) projectState.keyword = params.keyword;
   if (params.selectedId) projectState.selectedId = params.selectedId;
   const [projects, allBoq, versions] = await Promise.all([projectService.list(), boqRepo.all(), versionRepo.all()]);
+  const projectTypes = [...new Set([...TYPES, ...projects.map(project => project.type).filter(type => type && !TYPES.includes(type))])];
   const summaries = projects.map(p => buildProjectStatus(p, allBoq, versions));
   const visibleProjects = summaries.filter(s => {
     const kw = projectState.keyword.trim().toLowerCase();
@@ -35,8 +41,8 @@ export async function render() {
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="flex items-start gap-4">
           <div>
-            <h1 class="text-xl font-semibold text-slate-950">项目工作台</h1>
-            <div class="mt-1 text-xs text-slate-500">从项目状态判断下一步：补价、保存版本、归档入指标库或查看对标。</div>
+            <h1 class="text-xl font-semibold text-slate-950">我的项目</h1>
+            <div class="mt-1 text-xs text-slate-500">从项目状态判断下一步：补价、保存版本、收录案例或查看造价参考。</div>
           </div>
           <div class="flex-1"></div>
           <button id="btnNew" class="h-10 px-4 text-sm brand-bg text-white flex items-center gap-1.5">
@@ -48,18 +54,18 @@ export async function render() {
           ${summaryTile('报价中', portfolio.doingProjects, '个')}
           ${summaryTile('缺单价项目', portfolio.missingProjects, '个', portfolio.missingProjects ? 'text-amber-700' : '')}
           ${summaryTile('未保存版本', portfolio.noVersionProjects, '个', portfolio.noVersionProjects ? 'text-amber-700' : '')}
-          ${summaryTile('可归档项目', portfolio.readyToArchive, '个')}
+          ${summaryTile('可收录案例', portfolio.readyToArchive, '个')}
         </div>
         <div class="mt-4 flex items-center gap-2 text-sm">
           <input id="pf_keyword_filter" value="${esc(projectState.keyword)}" class="h-9 w-64 rounded border border-slate-300 bg-white px-3" placeholder="搜索项目名称 / 工艺 / 结构..." />
           <select id="pf_status_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
             <option value="">全部状态</option>
             <option value="doing" ${projectState.status === 'doing' ? 'selected' : ''}>进行中</option>
-            <option value="archived" ${projectState.status === 'archived' ? 'selected' : ''}>已归档</option>
+            <option value="archived" ${projectState.status === 'archived' ? 'selected' : ''}>已收录案例</option>
           </select>
           <select id="pf_type_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
             <option value="">全部类型</option>
-            ${TYPES.map(t => `<option value="${t}" ${projectState.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+            ${projectTypes.map(t => `<option value="${esc(t)}" ${projectState.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
           </select>
           <select id="pf_risk_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
             <option value="">全部风险</option>
@@ -86,7 +92,7 @@ export async function render() {
       ` : ''}
 
       <section class="grid grid-cols-3 gap-3">
-        ${visibleProjects.length ? visibleProjects.map(projectCard).join('') : `<div class="col-span-3 rounded-lg border border-slate-200 bg-white p-10 text-center text-slate-400">${projects.length ? '没有符合筛选条件的项目。' : '还没有项目，点右上角「新建项目」开始建立项目档案。'}</div>`}
+        ${visibleProjects.length ? visibleProjects.map(projectCard).join('') : `<div class="col-span-3 rounded-lg border border-slate-200 bg-white p-10 text-center text-slate-400">${projects.length ? '没有符合筛选条件的项目。' : '还没有项目，点右上角「新建项目」开始建立项目资料。'}</div>`}
       </section>
     </div>
   `;
@@ -106,15 +112,15 @@ export async function render() {
   });
   document.querySelectorAll('[data-archive]').forEach(b => b.onclick = async () => {
     const p = await projectService.get(b.dataset.archive);
-    if (p?.status !== 'archived' && !confirm('归档会把当前项目清单写入数据引擎样本池，并用于后续指标统计。确定归档？')) return;
+    if (p?.status !== 'archived' && !confirm('收录后会把当前项目作为案例，用于后续造价参考。确定收录？')) return;
     try {
       const updated = await projectService.archive(b.dataset.archive);
-      toast('已更新，数据引擎已同步');
+      toast('案例状态已更新，造价参考已同步');
       render();
       if (updated?.status === 'archived') openReview({ projectId: updated.id, sourceType: 'project_archive' });
     } catch (err) {
       if (err?.code === 'ARCHIVE_BLOCKED') {
-        toast(`暂不能归档：${archiveBlockerText(err.eligibility)}`, 'error');
+        toast(`暂不能收录：${archiveBlockerText(err.eligibility)}`, 'error');
         return;
       }
       throw err;
@@ -197,7 +203,7 @@ function projectNextAction(project, { lines, versions, missing }) {
   const zeroQty = lines.filter(line => !(Number(line.qty) > 0)).length;
   if (zeroQty) return {
     title: `下一步：复核 ${zeroQty} 条 0 工程量`,
-    desc: '0 工程量会降低正式样本可信度。',
+    desc: '0 工程量会降低案例的可参考程度。',
     button: '复核工程量',
     tone: 'amber',
     riskStatus: 'zeroQty',
@@ -209,15 +215,15 @@ function projectNextAction(project, { lines, versions, missing }) {
     tone: 'teal',
   };
   if (project.status !== 'archived') return {
-    title: '下一步：归档进入指标库',
-    desc: '价格完整且已有版本，可沉淀为正式指标样本。',
-    button: '准备归档',
+    title: '下一步：收录为参考案例',
+    desc: '价格完整且已有版本，可收录为后续造价参考。',
+    button: '准备收录',
     tone: 'slate',
   };
   return {
-    title: '下一步：查看指标对标',
-    desc: '用历史样本解释造价合理性。',
-    button: '查看指标',
+    title: '下一步：查看造价参考',
+    desc: '用历史案例解释当前造价是否合理。',
+    button: '查看参考',
     tone: 'teal',
     indicators: true,
   };
@@ -307,7 +313,7 @@ function projectCard(summary) {
       <button data-edit="${p.id}" class="px-2.5 py-1.5 text-xs rounded border border-slate-300 hover:bg-slate-50">编辑</button>
       ${archiveBlocked
         ? `<button data-blocked="${p.id}" ${blocker?.params?.priceStatus ? `data-price-status="${blocker.params.priceStatus}"` : ''} ${blocker?.params?.riskStatus ? `data-risk-status="${blocker.params.riskStatus}"` : ''} class="px-2.5 py-1.5 text-xs rounded border border-amber-300 text-amber-700 hover:bg-amber-50" title="${esc(archiveBlockerText(eligibility))}">查看阻断</button>`
-        : `<button data-archive="${p.id}" class="px-2.5 py-1.5 text-xs rounded border border-slate-300 hover:bg-slate-50">${p.status === 'archived' ? '取消归档' : '归档'}</button>`}
+        : `<button data-archive="${p.id}" class="px-2.5 py-1.5 text-xs rounded border border-slate-300 hover:bg-slate-50">${p.status === 'archived' ? '取消收录' : '收录案例'}</button>`}
       <div class="flex-1"></div>
       <button data-del="${p.id}" class="px-2.5 py-1.5 text-xs rounded border text-red-600 border-red-300 hover:bg-red-50">删除</button>
     </div>
@@ -322,12 +328,14 @@ function miniMetric(label, value) {
 }
 
 function statusBadge(s) {
-  return s === 'archived' ? '<span class="badge badge-green">已归档</span>'
+  return s === 'archived' ? '<span class="badge badge-green">已收录案例</span>'
        : s === 'doing'    ? '<span class="badge badge-yellow">进行中</span>'
        : '<span class="badge badge-gray">未开始</span>';
 }
 
 function editForm(p) {
+  const isCustomType = Boolean(p.type && !TYPES.includes(p.type));
+  const selectedType = isCustomType ? '__custom__' : (p.type || '水厂');
   openModal((p.name ? '编辑' : '新建') + ' 项目', `
     <div class="space-y-4 text-sm text-slate-700">
       <section class="bg-white border border-slate-200 rounded-xl p-4">
@@ -346,10 +354,11 @@ function editForm(p) {
             <input id="pf_name" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-800" value="${esc(p.name)}" placeholder="例如：产品水池 / 预处理车间" />
           </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">项目类型
-            <select id="pf_type" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${TYPES.map(t => `<option ${p.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+            <select id="pf_type" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${TYPES.map(t => `<option value="${esc(t)}" ${selectedType === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="__custom__" ${selectedType === '__custom__' ? 'selected' : ''}>自定义</option></select>
+            <input id="pf_type_custom" class="mt-2 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm ${isCustomType ? '' : 'hidden'}" value="${esc(isCustomType ? p.type : '')}" placeholder="请输入项目类型，例如：再生水厂 / 污泥处置中心" aria-label="自定义项目类型" />
           </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">状态
-            <select id="pf_status" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm"><option value="doing" ${p.status === 'doing' ? 'selected' : ''}>进行中</option><option value="archived" ${p.status === 'archived' ? 'selected' : ''}>已归档</option></select>
+            <select id="pf_status" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm"><option value="doing" ${p.status === 'doing' ? 'selected' : ''}>进行中</option><option value="archived" ${p.status === 'archived' ? 'selected' : ''}>已收录案例</option></select>
           </label>
         </div>
       </section>
@@ -394,6 +403,15 @@ function editForm(p) {
     <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border border-slate-300 bg-white text-slate-700 rounded hover:bg-slate-50">取消</button>
     <button id="pf_save" class="px-3 py-1.5 text-sm brand-bg text-white rounded">保存项目</button>
   `);
+  const typeSelect = document.getElementById('pf_type');
+  const customTypeInput = document.getElementById('pf_type_custom');
+  const syncCustomType = () => {
+    const custom = typeSelect.value === '__custom__';
+    customTypeInput.classList.toggle('hidden', !custom);
+    customTypeInput.required = custom;
+    if (custom) customTypeInput.focus();
+  };
+  typeSelect.addEventListener('change', syncCustomType);
   document.getElementById('pf_ai').onclick = () => {
     const name = document.getElementById('pf_name').value.trim();
     if (!name) {
@@ -412,7 +430,7 @@ function editForm(p) {
     const obj = {
       id: p.id || null,
       name: document.getElementById('pf_name').value.trim(),
-      type: document.getElementById('pf_type').value,
+      type: typeSelect.value === '__custom__' ? customTypeInput.value.trim() : typeSelect.value,
       scale: document.getElementById('pf_scale').value,
       dailyCapacity: document.getElementById('pf_daily').value,
       area: document.getElementById('pf_area').value,
@@ -424,6 +442,11 @@ function editForm(p) {
       toast('请填写项目名称', 'error');
       return;
     }
+    if (!obj.type) {
+      toast('请填写自定义项目类型', 'error');
+      customTypeInput.focus();
+      return;
+    }
     try {
       await projectService.save(obj);
       if (obj.status === 'archived') await indicatorService.recompute();
@@ -432,7 +455,7 @@ function editForm(p) {
       render();
     } catch (err) {
       if (err?.code === 'ARCHIVE_BLOCKED') {
-        toast(`暂不能归档：${archiveBlockerText(err.eligibility)}`, 'error');
+        toast(`暂不能收录：${archiveBlockerText(err.eligibility)}`, 'error');
         return;
       }
       throw err;

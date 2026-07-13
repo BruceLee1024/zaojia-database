@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>工程造价数据库 · 企业定额与指标平台</title>
+<title>个人造价工作台 · 本地工程造价资料库</title>
 
 <!-- 依赖：本地 vendor / SheetJS(Excel 解析导出) / Chart.js(图表) / idb-keyval(IndexedDB) -->
 <link href="../assets/vendor/material-symbols/material-symbols.css" rel="stylesheet" />
@@ -131,6 +131,15 @@
     body.ai-open .app-shell { padding-right: 0; }
     .ai-drawer { width: min(360px, calc(100vw - 24px)); }
   }
+  @media (max-width: 640px) {
+    .review-workspace [data-review-save-next],
+    .review-workspace [data-review-save-draft],
+    .review-workspace [data-review-next],
+    .review-workspace [data-review-prev] { min-height: 40px; }
+    .review-workspace > div:last-child { align-items: stretch; }
+    .review-workspace > div:last-child > div { width: 100%; }
+    .review-workspace > div:last-child button { flex: 1 1 auto; }
+  }
 </style>
 </head>
 <body class="overflow-hidden">
@@ -142,8 +151,8 @@
       <div class="flex items-center gap-3">
         <div class="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-2xl text-teal-100">S</div>
         <div>
-          <div class="font-semibold leading-tight">工程造价数据库</div>
-          <div class="text-[11px] text-slate-400">企业定额 · 指标 · 报价</div>
+          <div class="font-semibold leading-tight">个人造价工作台</div>
+          <div class="text-[11px] text-slate-400">定额 · 报价 · 案例参考</div>
         </div>
       </div>
       <div class="mt-4 grid grid-cols-2 gap-2 text-[11px]">
@@ -182,15 +191,15 @@
             <div class="flex items-center gap-2">
               <div class="text-sm font-semibold text-slate-900 truncate" id="crumb">仪表盘</div>
               <span class="hidden md:block h-1 w-1 rounded-full bg-slate-300"></span>
-              <div class="hidden md:block text-xs text-slate-500 truncate" id="crumbGroup">工作台</div>
+              <div class="hidden md:block text-xs text-slate-500 truncate" id="crumbGroup">我的工作台</div>
             </div>
-            <div class="mt-0.5 text-xs text-slate-500 truncate" id="crumbDesc">经营概览</div>
+            <div class="mt-0.5 text-xs text-slate-500 truncate" id="crumbDesc">继续最近工作</div>
           </div>
         </div>
         <div class="flex-1"></div>
         <div class="hidden xl:flex items-center gap-2 text-xs text-slate-500 shrink-0">
           <span class="inline-flex h-2 w-2 rounded-full bg-teal-500"></span>
-          <span id="headerStorageLabel">本地数据 · IndexedDB</span>
+          <span id="headerStorageLabel">数据保存在本机</span>
         </div>
         <div class="relative hidden md:block w-[min(420px,32vw)] min-w-[260px]">
           <input id="globalSearch" type="text" placeholder="搜索定额 / 项目 / 指标 / 经验…"
@@ -200,7 +209,7 @@
         </div>
         <button id="aiOpenButton" onclick="window.__app.openAI()" aria-controls="aiDrawer" aria-expanded="false" class="h-9 px-3 text-sm brand-bg text-white flex items-center gap-1.5 shrink-0">
           <span class="material-symbols-outlined text-[17px]" aria-hidden="true">auto_awesome</span>
-          <span>AI 助手</span>
+        <span>问 AI</span>
         </button>
         <button onclick="window.__app.exportAll()" class="h-9 w-9 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-700 shrink-0 border border-slate-200 bg-white" title="导出备份" aria-label="导出备份">
           <span class="material-symbols-outlined text-[19px]" aria-hidden="true">download</span>
@@ -232,9 +241,9 @@
     <div class="min-w-0">
       <div class="font-semibold flex items-center gap-2">
         <span class="material-symbols-outlined text-[18px] text-teal-700">smart_toy</span>
-        <span id="aiDrawerTitle">AI 造价助手</span>
+        <span id="aiDrawerTitle">个人造价助手</span>
       </div>
-      <div class="mt-0.5 text-[11px] text-slate-500">本地数据优先 · 不自动改清单</div>
+      <div class="mt-0.5 text-[11px] text-slate-500">只读参考 · 不自动修改你的清单</div>
     </div>
     <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1" aria-label="关闭 AI 助手">
       <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
@@ -247,11 +256,11 @@
         class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-teal-600" />
       <button onclick="window.__app.sendAI()" class="px-4 py-2 text-sm brand-bg text-white">发送</button>
     </div>
-    <div class="text-[11px] text-gray-400">提示：在「设置」中配置国内大模型 API Key。数据仅在本机与所配置 AI 间传输。</div>
+    <div class="text-[11px] text-gray-400">提示：在「数据与备份」中配置 AI。只有主动提问时，相关内容才会发送给你配置的 AI。</div>
   </div>
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="../app.js?v=5.14"></script>
+<script type="module" src="../app.js?v=5.29"></script>
 </body>
 </html>

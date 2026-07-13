@@ -74,11 +74,11 @@ export async function render() {
         <div class="flex items-center gap-4">
           <div>
             <div class="flex items-center gap-2">
-              <h1 class="text-xl font-semibold text-slate-950">定额库</h1>
+              <h1 class="text-xl font-semibold text-slate-950">我的定额库</h1>
               <span class="text-slate-300">/</span>
-              <span class="text-sm font-medium text-slate-500">价格基础 · 企业定额管理</span>
+              <span class="text-sm font-medium text-slate-500">价格参考 · 常用定额整理</span>
             </div>
-            <div class="mt-1 text-xs text-slate-500">维护企业定额价格、项目特征、计算规则和人材机组成。</div>
+            <div class="mt-1 text-xs text-slate-500">维护自己的常用价格、项目特征、计算规则和人材机组成。</div>
           </div>
           <div class="flex-1"></div>
           <button id="btnImport" class="h-10 px-4 text-sm brand-bg text-white flex items-center gap-1.5">
@@ -290,7 +290,7 @@ function inspector(it) {
 
         ${detailBlock('项目特征', it.feature || '未填写项目特征。')}
         ${detailBlock('工作内容', it.work || '未填写工作内容。')}
-        ${detailBlock('计算规则', it.rule || '按设计图示或企业定额规则计算。')}
+        ${detailBlock('计算规则', it.rule || '按设计图示或当前定额口径计算。')}
 
         <section>
           <div class="mb-3 flex items-center justify-between">
@@ -611,7 +611,7 @@ function suggestedWork(intent) {
 
 function suggestedRule(unit) {
   if (unit === 'm³') return '按设计图示尺寸以体积计算。';
-  if (unit === 'm²') return '按设计图示尺寸以面积计算，扣除规则按企业定额口径执行。';
+  if (unit === 'm²') return '按设计图示尺寸以面积计算，扣除规则按当前定额口径执行。';
   if (unit === 'm') return '按设计图示中心线长度计算。';
   if (unit === 't') return '按设计图示钢筋理论重量计算。';
   if (unit === '台' || unit === '套') return `按设计图示设备数量以${unit}计算。`;
@@ -626,7 +626,7 @@ function suggestedTags(intent, it) {
     waterproof: ['防水', '防腐', '水池'],
     pipe: ['管道', '安装', '试压'],
     equipment: ['设备', '安装', '调试'],
-    default: ['企业定额', '污水处理'],
+    default: ['常用定额', '污水处理'],
   }[intent] || [];
   return [...new Set([...(it.tags || []), ...base])].slice(0, 6);
 }
@@ -792,7 +792,7 @@ async function addSelectedToBoq() {
   const projectId = window.__app?.state?.currentProjectId;
   if (!it) return;
   if (!projectId) {
-    toast('先去「项目管理」新建/选择项目，或进入「工程量清单」选择项目后再加入清单。', 'error');
+    toast('先去「我的项目」新建/选择项目，或进入「工程量清单」选择项目后再加入清单。', 'error');
     return;
   }
   await boqService.addFromQuota(projectId, it.id, 0);

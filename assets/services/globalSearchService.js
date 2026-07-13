@@ -1,10 +1,11 @@
 // 全局搜索：聚合定额、项目、指标、经验和常用入口
-import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo } from '../data/repository.js?v=3.9';
+import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo } from '../data/repository.js?v=1.0';
 import { fmtMoney } from '../utils/dom.js';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 
 const TYPE_META = {
   quota: { label: '定额', icon: 'menu_book' },
+  boq_library: { label: '清单库', icon: 'format_list_bulleted' },
   project: { label: '项目', icon: 'folder_managed' },
   indicator: { label: '指标', icon: 'analytics' },
   experience: { label: '经验', icon: 'psychology_alt' },
@@ -14,8 +15,9 @@ const TYPE_META = {
 export async function searchAll(keyword = '') {
   const kw = String(keyword || '').trim().toLowerCase();
   if (!kw) return [];
-  const [quotas, projects, boq, versions, indicators, cards] = await Promise.all([
+  const [quotas, libraryItems, projects, boq, versions, indicators, cards] = await Promise.all([
     quotaRepo.all(),
+    boqLibraryRepo.all(),
     projectRepo.all(),
     boqRepo.all(),
     versionRepo.all(),
@@ -25,6 +27,7 @@ export async function searchAll(keyword = '') {
   return [
     ...importActionResults(kw),
     ...quotaResults(quotas, kw),
+    ...boqLibraryResults(libraryItems, kw),
     ...projectResults(projects, boq, versions, kw),
     ...indicatorResults(indicators, kw),
     ...experienceResults(cards, kw),
@@ -32,9 +35,21 @@ export async function searchAll(keyword = '') {
 }
 
 export function searchGroups(results = []) {
-  return ['quota', 'project', 'indicator', 'experience', 'import_action']
+  return ['quota', 'boq_library', 'project', 'indicator', 'experience', 'import_action']
     .map(type => ({ type, meta: TYPE_META[type], items: results.filter(r => r.type === type) }))
     .filter(group => group.items.length);
+}
+
+function boqLibraryResults(rows, kw) {
+  return rows.filter(item => item.status !== 'inactive')
+    .filter(item => includes(item, kw, ['code', 'name', 'feature', 'major', 'scope', 'unit']))
+    .slice(0, 8)
+    .map(item => result(
+      'boq_library', item.id, item.name || '未命名清单',
+      `${item.code || '未编码'} · ${item.unit || '-'} · ${(item.quotaItemIds || []).length ? `关联定额 ${(item.quotaItemIds || []).length} 条` : '未关联定额'}`,
+      'boq-library', { keyword: item.name || kw, selectedId: item.id },
+      scoreText(`${item.code} ${item.name}`, kw) + 19, item.feature || ''
+    ));
 }
 
 function result(type, id, title, subtitle, targetView, params, score = 1, excerpt = '') {
@@ -120,7 +135,7 @@ function experienceResults(rows, kw) {
 
 function importActionResults(kw) {
   const actions = [
-    ['boq', '导入项目工程量清单', 'Excel 清单入库，先质检再写入项目', { view: 'importer', params: { mode: 'boq' } }],
+    ['boq', 'AI 导入项目工程量清单', '上传任意 Excel，由 AI 识别字段并确认后写入项目', { view: 'ai-import', params: { targetType: 'project_boq' } }],
     ['quota', '导入企业定额库', '上传定额 Excel，进入定额库检查价格', { view: 'importer', params: { action: 'quota' } }],
     ['backup', '导入 JSON 备份', '恢复本地 IndexedDB 业务数据', { view: 'settings', params: { section: 'backup' } }],
     ['version', '历史报价 / 版本', '打开工程量清单保存或管理报价版本', { view: 'boq', params: {} }],

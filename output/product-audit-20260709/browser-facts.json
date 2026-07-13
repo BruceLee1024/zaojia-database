@@ -1,0 +1,92 @@
+{
+  "titles": [
+    [
+      "importer",
+      "数据导入"
+    ],
+    [
+      "quota",
+      "定额库"
+    ],
+    [
+      "projects",
+      "项目管理"
+    ],
+    [
+      "boq",
+      "工程量清单"
+    ],
+    [
+      "indicators",
+      "指标分析"
+    ],
+    [
+      "dashboard",
+      "仪表盘"
+    ],
+    [
+      "experience",
+      "经验萃取"
+    ],
+    [
+      "settings",
+      "设置"
+    ],
+    [
+      "ai",
+      "AI 助手"
+    ]
+  ],
+  "facts": {
+    "nav": [
+      {
+        "id": "dashboard",
+        "text": "dashboard / 仪表盘 / 经营概览"
+      },
+      {
+        "id": "importer",
+        "text": "upload_file / 数据导入 / Excel / 入库"
+      },
+      {
+        "id": "quota",
+        "text": "menu_book / 定额库 / 价格基础"
+      },
+      {
+        "id": "projects",
+        "text": "folder_managed / 项目管理 / 项目档案"
+      },
+      {
+        "id": "boq",
+        "text": "list_alt / 工程量清单 / 报价编制"
+      },
+      {
+        "id": "indicators",
+        "text": "analytics / 指标分析 / 样本对标"
+      },
+      {
+        "id": "ai",
+        "text": "smart_toy / AI / 助手 / 报价辅助"
+      },
+      {
+        "id": "experience",
+        "text": "psychology_alt / 经验萃取 / 复盘沉淀"
+      },
+      {
+        "id": "settings",
+        "text": "settings / 设置 / 数据维护"
+      }
+    ],
+    "currentView": "ai",
+    "currentProjectId": "k6yzt0bs",
+    "bodyText": "S\n工程造价数据库\n企业定额 · 指标 · 报价\n模式\n本地版\n数据\nIndexedDB\n工作台\ndashboard\n仪表盘\n经营概览\nupload_file\n数据导入\nExcel 入库\nmenu_book\n定额库\n价格基础\nfolder_managed\n项目管理\n项目档案\nlist_alt\n工程量清单\n报价编制\nanalytics\n指标分析\n样本对标\n智能与配置\nsmart_toy\nAI 助手\n报价辅助\npsychology_alt\n经验萃取\n复盘沉淀\nsettings\n设置\n数据维护\n运行版本\nv5.4\n浏览器本地存储\nsmart_toy\nAI 助手\n智能与配置\n报价辅助\n本地数据 · IndexedDB\nsearch\nEnter\nauto_awesome\nAI 助手\ndownload\nAI 模型配置\n服务商 \nDeepSeek\n通义千问\n豆包\n智谱 GLM\nOpenAI 兼容\nBase URL \nModel \nAPI Key  仅保存在浏览器 localStorage\n系统提示词 \n保存\n连通测试\n数据管理\n导入 JSON 备份\n导出 JSON 备份\n加载演示数据\n重置演示数据\n清空全部\n所有业务数据保存在浏览器 IndexedDB；AI Key 仅保存在本机 localStorage。\n• 备份：导出 JSON 文件，可在另一台机器导入还原，请按商业敏感数据妥善保存。\n• 导入备份会覆盖当前定额、项目、清单、报价版本、经验卡与指标。\n• 演示数据：3 个项目（产品水池/预处理车间/变电站）+ 现有定额库，自动入库用于体验。\n数据引擎\n管理自动沉淀、质量扫描和指标重建。候选样本默认不参与指标统计。\n运行流水线\n回填归档项目\n数据质量扫描\n重建指标\n清理候选\n正式事实\n68条\n候选样本\n0条\n质量报告\n5份\n健康分\n100分\n低可信报告\n0份\n经验卡\n0张\n待确认复盘\n0个\n过期经验\n0张\n流水线阶段\n归档项目已接入样本池\n采集\n5次\n标准化\n5次\n质量检查\n5次\n沉淀入库\n5次\n指标重建\n2次\n最近质量建议\n当前数据可进入正式样本池。\nversion 42\narchived_project 26\n最近任务\t来源\t状态\t质量分\t事实/候选\t时间\ningest_archived_project\tarchived_project\tsuccess\t100\t11\t2026/7/9 10:41:34\ningest_version\tversion\tsuccess\t100\t11\t2026/7/9 10:41:34\ningest_archived_project\tarchived_project\tsuccess\t100\t15\t2026/7/9 10:41:34\ningest_version\tversion\tsuccess\t100\t15\t2026/7/9 10:41:34\ningest_version\tversion\tsuccess\t100\t16\t2026/7/9 10:41:34\n使用说明\n首次使用：点「加载演示数据」快速体验，或点「导入 Excel」上传你自己的定额库。\n新建项目 → 进入「工程量清单」→ 点「+ 添加清单」选择定额 → 填工程量 → 自动算价。\n项目完工后，编辑项目把状态改为「已归档」，指标库会自动重算。\n「指标分析」查看同类型项目造价区间，支持下钻到分项占比。\n点击右上角「AI 助手」或左侧菜单，随时用自然语言查询指标 / 推荐定额。\n导出 Excel 报价单按你的现有格式：序号/编码/项目名称/项目特征/单位/工程量/综合单价/合价。\nsmart_toy\nAI 造价助手\n本地数据优先 · 不自动改清单\nclose\n你好，我是工程造价助手。\n\n我会优先读取本地项目、清单、指标和报价版本，帮助你做审查、对标、推荐定额和估算。\n常用问题\n审查报价\n复盘项目\n查经验\n检查缺单价\n项目对标\n报价版本\n推荐定额\n发送\n提示：在「设置」中配置国内大模型 API Key。数据仅在本机与所配置 AI 间传输。"
+  },
+  "logs": [
+    {
+      "type": "warning",
+      "text": "cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation"
+    }
+  ],
+  "errors": [
+    "fmt is not defined"
+  ]
+}

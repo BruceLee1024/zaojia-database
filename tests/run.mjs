@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js';
-import { detectRowKind, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix } from '../assets/data/excel.js';
+import { detectCombinedNameFeatureMeta, detectRowKind, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js';
 import { applyMappingTemplate, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js';
 import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js';
+import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js';
+import { createRecognitionRequest, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js';
+import { getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js';
+import { getLibraryDetailSummary } from '../assets/views/boqLibrary.js';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -154,6 +158,21 @@ function testImportPricingRules() {
   assert.equal(resolveImportPricing({ qty: 0, amount: 400, amountRule: 'deriveUnitPrice' }).unitPrice, 0);
 }
 
+function testBoqLibraryItemIdentity() {
+  const existing = [
+    { id: 'a', code: '030101001001', name: '土方开挖', feature: '三类土', unit: 'm³' },
+    { id: 'b', code: '', name: '钢筋混凝土池壁', feature: 'C30 P6', unit: 'm³' },
+  ];
+  assert.equal(findDuplicateLibraryItem(existing, { code: '030101001001', name: '别名', feature: '', unit: '项' }).id, 'a');
+  assert.equal(findDuplicateLibraryItem(existing, { code: '', name: '钢筋混凝土池壁', feature: 'C30 P6', unit: 'm³' }).id, 'b');
+  assert.equal(findDuplicateLibraryItem(existing, { code: '', name: '钢筋混凝土池壁', feature: 'C35', unit: 'm³' }), null);
+
+  const item = normalizeLibraryItem({ name: '池壁', unit: 'm3', defaultQty: '12.5', quotaItemIds: 'q-1' });
+  assert.equal(item.status, 'active');
+  assert.equal(item.defaultQty, 12.5);
+  assert.deepEqual(item.quotaItemIds, ['q-1']);
+}
+
 function memoryStorage() {
   const data = new Map();
   return {
@@ -176,6 +195,116 @@ function testSheetHeaderDetection() {
   assert.equal(rows[0]['工程量 m3'], 12.5);
   assert.equal(rows[0]['综合单价 含税'], 680);
   assert.throws(() => rowsFromSheetMatrix([['产品水池扩建工程'], ['说明：请填写完整']]), /未能识别/);
+}
+
+function testCombinedNameFeatureColumnMetadata() {
+  const source = '项目名称 项目特征';
+  const meta = detectCombinedNameFeatureMeta([source, '计量单位'], [
+    { [source]: '钢管内填芯\r\n1、混凝土灌芯长度：1.5m\r\n\r\n2、砼强度：C40', 计量单位: 'm3' },
+    { [source]: '截桩\n1、桩类型：预应力混凝土空心方桩', 计量单位: '根' },
+  ]);
+  assert.deepEqual(meta, {
+    source,
+    strategy: 'first_line_name_rest_feature',
+    status: 'ready',
+    sampleCount: 2,
+    validSampleCount: 2,
+    preview: [
+      { name: '钢管内填芯', feature: '1、混凝土灌芯长度：1.5m\n2、砼强度：C40' },
+      { name: '截桩', feature: '1、桩类型：预应力混凝土空心方桩' },
+    ],
+  });
+  assert.equal(detectCombinedNameFeatureMeta(['项目名称', '项目特征'], [{ 项目名称: '池壁', 项目特征: 'C30' }]), null);
+  assert.equal(detectCombinedNameFeatureMeta([source], [{ [source]: '只有名称' }]).status, 'invalid');
+}
+
+function testAiImportRecognitionContract() {
+  const request = createRecognitionRequest({
+    targetType: 'project_boq',
+    sheetName: '工程量清单',
+    headers: ['编号', '项目内容', '单位', '数量'],
+    sampleRows: Array.from({ length: 55 }, (_, index) => ({ 编号: index + 1, 项目内容: `条目${index + 1}`, 单位: 'm', 数量: index + 1 })),
+  });
+  assert.equal(request.sampleRows.length, 50);
+  assert.deepEqual(Object.keys(request).sort(), ['availableFields', 'headers', 'sampleRows', 'sheetName', 'targetType']);
+  assert.equal(request.availableFields.some(field => field.key === 'qty' && field.required), true);
+
+  const valid = validateRecognitionPayload({
+    summary: '识别到工程量清单',
+    amountRule: 'calculated',
+    fields: {
+      name: { sourceType: 'column', source: '项目内容', confidence: 'high', reason: '名称列' },
+      unit: { sourceType: 'column', source: '单位', confidence: 'high', reason: '单位列' },
+      qty: { sourceType: 'column', source: '数量', confidence: 'high', reason: '数值列' },
+    },
+  }, { targetType: 'project_boq', sheetName: '工程量清单', sampleRows: [{ 项目内容: '池壁混凝土' }], headers: ['编号', '项目内容', '单位', '数量'] });
+  assert.equal(valid.fields.name.source, '项目内容');
+  assert.equal(valid.fields.name.confirmed, false);
+  assert.equal(valid.fields.feature.sourceType, 'none');
+  assert.equal(valid.analysis.sheetName, '工程量清单');
+  assert.equal(valid.analysis.sampleRowCount, 1);
+  assert.equal(valid.fields.feature.reason.includes('未匹配'), true);
+
+  assert.throws(() => validateRecognitionPayload({
+    fields: {
+      name: { sourceType: 'column', source: '项目内容', confidence: 'high', reason: '' },
+      unit: { sourceType: 'column', source: '单位', confidence: 'high', reason: '' },
+      qty: { sourceType: 'column', source: '单位', confidence: 'high', reason: '' },
+    },
+  }, { targetType: 'project_boq', headers: ['项目内容', '单位'] }), /重复映射/);
+
+  assert.throws(() => validateRecognitionPayload({
+    fields: { name: { sourceType: 'column', source: '不存在列', confidence: 'high', reason: '' } },
+  }, { targetType: 'boq_library', headers: ['清单名称', '单位'] }), /不存在/);
+}
+
+function testAiImportWizardSafety() {
+  assert.equal(normalizeWizardStep('confirm', { recognition: null, hasSheet: false }), 'upload');
+  assert.equal(normalizeWizardStep('confirm', { recognition: null, hasSheet: true }), 'sheet');
+  assert.equal(normalizeWizardStep('confirm', { recognition: { fields: {} }, hasSheet: true }), 'confirm');
+  assert.deepEqual(
+    splitImportedNameFeature('钢管内填芯\n1、混凝土灌芯长度：1.5m\n2、砼强度：C40', '钢管内填芯\n1、混凝土灌芯长度：1.5m\n2、砼强度：C40'),
+    { name: '钢管内填芯', feature: '1、混凝土灌芯长度：1.5m\n2、砼强度：C40' },
+  );
+}
+
+function testAiImportReadinessExplainsMissingRequiredMapping() {
+  const fields = [
+    { key: 'name', label: '清单名称', required: true },
+    { key: 'unit', label: '单位', required: true },
+  ];
+  const reasons = getImportBlockingReasons(fields, {
+    name: { sourceType: 'none', confirmed: true },
+    unit: { sourceType: 'column', source: '计量单位', confirmed: true },
+  }, { targetType: 'boq_library' });
+  assert.deepEqual(reasons, ['“清单名称”是必填字段：请选择 Excel 来源列或填写固定值']);
+  assert.deepEqual(getImportBlockingReasons(fields, {
+    name: { sourceType: 'fixed', fixedValue: '', confirmed: true },
+    unit: { sourceType: 'column', source: '计量单位', confirmed: true },
+  }, { targetType: 'boq_library' }), ['“清单名称”填写了固定值，但内容为空']);
+}
+
+function testLibraryDetailSummary() {
+  assert.deepEqual(getLibraryDetailSummary({
+    code: '010501004001', name: '油池防水底板', unit: 'm3', defaultQty: 25,
+    quotaItemIds: ['q-1', 'q-2'], source: '企业自建', version: 'V1.2', status: 'active',
+    referenceCount: 3, lastReferencedProjectName: '油池改造工程', lastReferencedAt: '2026-07-13',
+  }), {
+    code: '010501004001', sourceLabel: '企业自建 · V1.2', statusLabel: '启用',
+    qty: '25', quotaCount: 2, referenceLabel: '3 次', lastReference: '油池改造工程 · 2026-07-13',
+  });
+}
+
+function testWorkbookSummariesForAiImport() {
+  const sheets = summarizeSheetMatrices([
+    { name: '封面', matrix: [['污水厂项目'], ['编制单位：某设计院']] },
+    { name: '不规范清单', matrix: [['序号', '工作内容描述', '计量', '工程量'], [1, '池壁混凝土', 'm3', 12]] },
+  ]);
+  assert.equal(sheets.length, 2);
+  assert.equal(sheets[0].headers.length, 0);
+  assert.equal(sheets[1].headers.includes('工作内容描述'), true);
+  assert.equal(sheets[1].rows[0].工作内容描述, '池壁混凝土');
+  assert.equal(sheets[1].previewRows.length, 1);
 }
 
 class MemoryDirectoryHandle {
@@ -236,7 +365,14 @@ testExcelRows();
 testImportMapping();
 testMappingTemplates();
 testImportPricingRules();
+testBoqLibraryItemIdentity();
 testSheetHeaderDetection();
+testCombinedNameFeatureColumnMetadata();
+testAiImportRecognitionContract();
+testAiImportWizardSafety();
+testAiImportReadinessExplainsMissingRequiredMapping();
+testLibraryDetailSummary();
+testWorkbookSummariesForAiImport();
 await testLocalFolderJsonStorage();
 await testVersions();
 await testArchiveEligibility();
@@ -244,6 +380,7 @@ await testDataEngine();
 await testGlobalSearch();
 await testAIAssistService();
 await testExperienceService();
+await testBoqLibraryService();
 await testBuiltinDemoData();
 console.log('All tests passed');
 
@@ -495,6 +632,7 @@ async function testGlobalSearch() {
   const repo = await import('../assets/data/repository.js?v=test-search');
   const { searchAll } = await import('../assets/services/globalSearchService.js?v=test-search');
   await repo.quotaRepo.replaceAll([{ id: 'q-search', name: '水池防水定额', feature: '池壁', category: '防水防腐', unit: 'm²', priceTotal: 118 }]);
+  await repo.boqLibraryRepo.replaceAll([{ id: 'bl-search', code: 'BL-001', name: '水池防水清单', feature: '池壁防腐', unit: 'm²', status: 'active', quotaItemIds: ['q-search'] }]);
   await repo.projectRepo.replaceAll([{ id: 'p-search', name: '水池项目', type: '水厂', scale: '中型', process: 'AAO', structure: '钢筋砼', status: 'doing' }]);
   await repo.boqRepo.replaceAll([{ id: 'b-search', projectId: 'p-search', name: '水池防水', unit: 'm²', qty: 1, unitPrice: 0, amount: 0 }]);
   await repo.versionRepo.replaceAll([{ id: 'v-search', projectId: 'p-search', name: '水池版本', totalCost: 0, lines: [] }]);
@@ -503,6 +641,7 @@ async function testGlobalSearch() {
   const results = await searchAll('水池');
   const types = new Set(results.map(r => r.type));
   assert.equal(types.has('quota'), true);
+  assert.equal(types.has('boq_library'), true);
   assert.equal(types.has('project'), true);
   assert.equal(types.has('indicator'), true);
   assert.equal(types.has('experience'), true);
@@ -750,6 +889,33 @@ async function testExperienceService() {
   globalThis.fetch = originalFetch;
 }
 
+async function testBoqLibraryService() {
+  const memory = new Map();
+  globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+  globalThis.window = { idbKeyval: { get: async key => memory.get(key), set: async (key, value) => memory.set(key, value) } };
+  const repo = await import('../assets/data/repository.js?v=1.0');
+  const { boqLibraryService } = await import('../assets/services/boqLibraryService.js');
+  await repo.projectRepo.replaceAll([{ id: 'library-project', name: '清单库测试项目', totalCost: 0 }]);
+  await repo.quotaRepo.replaceAll([{ id: 'library-quota', name: '池壁定额', unit: 'm³', priceTotal: 680, useBreakdown: false }]);
+  await repo.boqRepo.replaceAll([]);
+  await repo.boqLibraryRepo.replaceAll([]);
+  const item = await boqLibraryService.save({ code: 'LIB-001', name: '钢筋混凝土池壁', feature: 'C30 P6', unit: 'm³', defaultQty: 12, quotaItemIds: ['library-quota'] });
+  const line = await boqLibraryService.applyToProject(item.id, 'library-project');
+  assert.equal(line.boqLibraryItemId, item.id);
+  assert.equal(line.unitPrice, 680);
+  assert.equal(line.amount, 8160);
+  const saved = await repo.boqLibraryRepo.findById(item.id);
+  assert.equal(saved.referenceCount, 1);
+  assert.equal(saved.lastReferencedProjectName, '清单库测试项目');
+  await repo.boqRepo.update(line.id, { qty: 20 });
+  assert.equal((await repo.boqLibraryRepo.findById(item.id)).defaultQty, 12);
+
+  const noPrice = await boqLibraryService.save({ code: 'LIB-002', name: '未匹配项', unit: '项', quotaItemIds: [] });
+  const noPriceLine = await boqLibraryService.applyToProject(noPrice.id, 'library-project');
+  assert.equal(noPriceLine.priceMissing, true);
+  assert.equal(noPriceLine.quotaItemId, '');
+}
+
 async function testBuiltinDemoData() {
   const memory = new Map();
   if (!globalThis.crypto?.randomUUID) {
@@ -773,6 +939,7 @@ async function testBuiltinDemoData() {
 
   await Promise.all([
     repo.quotaRepo.replaceAll([]),
+    repo.boqLibraryRepo.replaceAll([]),
     repo.projectRepo.replaceAll([]),
     repo.boqRepo.replaceAll([]),
     repo.versionRepo.replaceAll([]),
@@ -789,6 +956,7 @@ async function testBuiltinDemoData() {
   assert.equal(first.loaded, true);
   assert.equal((await repo.projectRepo.all()).length, 3);
   assert.equal((await repo.quotaRepo.all()).length >= 10, true);
+  assert.equal((await repo.boqLibraryRepo.all()).length >= 5, true);
   assert.equal((await repo.boqRepo.all()).length >= 20, true);
   assert.equal((await repo.versionRepo.all()).length >= 3, true);
   assert.equal((await repo.dataFactRepo.all()).some(f => f.sourceType === 'archived_project'), true);

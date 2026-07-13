@@ -98,17 +98,15 @@ function exposeImporterActions() {
         window.__app.go('projects', { action: 'new', returnTo: 'importer' });
         return;
       }
-      state.mode = 'boq';
-      if (!state.rawRows.length) loadSample();
-      paint();
+      window.__app.go('ai-import', { targetType: 'project_boq', projectId: state.projectId || state.projects[0].id });
     },
     importQuotaExcel,
     goBackup: () => {
-      toast('JSON 备份导入仍在「设置」的数据管理中执行。');
+      toast('JSON 备份导入仍在「数据与备份」中执行。');
       window.__app.go('settings');
     },
     goVersions: () => {
-      toast('历史报价版本来自工程量清单里的「保存版本」。');
+      toast('历史报价版本来自工程量清单里的「保存报价版本」。');
       if (state.projectId) window.__app.go('boq', { projectId: state.projectId });
       else window.__app.go('boq');
     },
@@ -279,7 +277,7 @@ function renderHub() {
               数据入口
             </div>
             <h1 class="mt-3 text-2xl font-semibold tracking-normal text-slate-950">导入什么，从这里开始</h1>
-            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">选择定额、工程量清单、历史版本或备份数据。系统会先识别字段并检查数据质量，确认后再写入对应的本地数据区。</p>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">选择定额、工程量清单、历史版本或备份数据。系统会先识别字段并检查数据质量，确认后再保存到你的本地资料库。</p>
           </div>
           <div class="flex-1"></div>
           <div class="grid grid-cols-3 gap-2 text-sm">
@@ -294,17 +292,17 @@ function renderHub() {
         ${hubCard({
           icon: 'list_alt',
           tone: 'teal',
-          title: '导入项目工程量清单',
+          title: '导入历史项目清单',
           desc: '上传项目清单 Excel，先做字段映射和质量检查，再写入当前项目清单。',
           action: state.projects.length ? '进入清单导入' : '先新建项目',
           handler: 'startBOQImport',
-          note: state.projectId ? `当前目标项目：${state.projects.find(p => p.id === state.projectId)?.name || '已选择项目'}` : '导入清单需要先建立项目档案，用于绑定清单、版本和指标样本。',
+          note: state.projectId ? `当前目标项目：${state.projects.find(p => p.id === state.projectId)?.name || '已选择项目'}` : '导入清单需要先建立项目，用于绑定清单和报价版本。',
         })}
         ${hubCard({
           icon: 'menu_book',
           tone: 'blue',
-          title: '导入企业定额库',
-          desc: '上传定额 Excel，复用定额库导入逻辑，导入后进入定额库查看价格和缺单价。',
+          title: '导入常用定额',
+          desc: '上传定额 Excel，保存到我的定额库，之后可以直接加入项目清单。',
           action: '选择定额 Excel',
           handler: 'importQuotaExcel',
           note: '支持清单名称、项目特征、单位、综合单价等字段',
@@ -312,8 +310,8 @@ function renderHub() {
         ${hubCard({
           icon: 'backup',
           tone: 'slate',
-          title: '导入 JSON 备份',
-          desc: '恢复整套本地数据，包括定额、项目、清单、报价版本、指标和经验卡。',
+          title: '恢复 JSON 备份',
+          desc: '恢复你之前导出的资料，包括定额、项目、清单、报价版本、参考和复盘笔记。',
           action: '去设置导入',
           handler: 'goBackup',
           note: '备份导入会覆盖当前业务数据',
@@ -322,7 +320,7 @@ function renderHub() {
           icon: 'history',
           tone: 'amber',
           title: '历史报价 / 版本',
-          desc: '报价版本从工程量清单中保存生成，用于对比、回退和沉淀指标样本。',
+          desc: '报价版本从工程量清单中保存生成，用于对比、回退和收录案例。',
           action: '打开工程量清单',
           handler: 'goVersions',
           note: '本轮暂不新增历史报价 Excel 解析器',
@@ -339,10 +337,10 @@ function renderHub() {
             <button onclick="window.__importer.startBOQImport()" class="h-9 px-3 text-sm brand-bg text-white">开始导入清单</button>
           </div>
           <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-            ${flowStep('1', '导入定额库', '建立企业价格基础')}
+            ${flowStep('1', '导入常用定额', '建立自己的价格参考')}
             ${flowStep('2', '新建项目', '填写规模和工艺口径')}
             ${flowStep('3', '导入清单', '预检后写入项目')}
-            ${flowStep('4', '保存版本', '沉淀指标和复盘经验')}
+            ${flowStep('4', '保存版本', '收录案例和复盘笔记')}
           </div>
         </div>
         <aside class="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
@@ -409,8 +407,8 @@ function paint() {
           <span class="material-symbols-outlined text-[20px]">arrow_back</span>
         </button>
         <div>
-          <div class="text-lg font-semibold text-slate-900">当前任务：导入项目工程量清单</div>
-          <div class="mt-0.5 text-xs text-slate-500">把 Excel 清单转成结构化项目清单，先预检、再入库、再沉淀指标样本。</div>
+          <div class="text-lg font-semibold text-slate-900">当前任务：导入项目清单</div>
+          <div class="mt-0.5 text-xs text-slate-500">把 Excel 清单整理成可编辑的项目清单，先检查，再保存到当前项目。</div>
         </div>
         <div class="flex-1"></div>
         <label class="h-10 min-w-[260px] rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 flex items-center gap-2">
@@ -423,7 +421,7 @@ function paint() {
           <span class="material-symbols-outlined text-[18px]">save</span>保存草稿
         </button>
         <button onclick="window.__importer.confirmImport()" class="h-10 px-4 text-sm brand-bg text-white flex items-center gap-1.5">
-          <span class="material-symbols-outlined text-[18px]">download_done</span>确认入库
+          <span class="material-symbols-outlined text-[18px]">download_done</span>保存到项目
         </button>
       </div>
 
@@ -523,7 +521,7 @@ function mappingGrid() {
           <option value="sourceAmount" ${state.amountRule === 'sourceAmount' ? 'selected' : ''}>优先使用 Excel 合价</option>
           <option value="deriveUnitPrice" ${state.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option>
         </select>
-        <span class="text-slate-400">当前规则会同步用于预览与确认入库。</span>
+        <span class="text-slate-400">当前规则会同步用于预览与保存。</span>
       </div>
       <div class="max-h-[220px] overflow-auto scroll-thin">
         <table class="w-full min-w-[760px] table-fixed text-sm">
@@ -707,7 +705,7 @@ function qualityPanel(quality, project) {
         <div class="font-semibold text-slate-900">导入检查</div>
         <div class="mt-2 grid grid-cols-3 gap-2">
           ${metricBox('识别行', quality.total, '')}
-          ${metricBox('可入库', quality.importable, 'text-teal-700')}
+          ${metricBox('可保存', quality.importable, 'text-teal-700')}
           ${metricBox('质量分', `${quality.score}`, quality.score >= 80 ? 'text-teal-700' : 'text-amber-700')}
         </div>
         <div class="mt-4 flex border-b border-slate-200">
@@ -735,7 +733,7 @@ function qualityPanel(quality, project) {
       <div class="mt-4 shrink-0 rounded-lg border border-slate-200 bg-white p-3">
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-[18px] text-teal-700">inventory_2</span>
-          <div class="font-medium text-slate-900">入库目标</div>
+          <div class="font-medium text-slate-900">保存目标</div>
         </div>
         <div class="mt-2 text-xs text-slate-500">项目：${esc(project?.name || '未选择项目')}</div>
         <div class="mt-3 grid grid-cols-2 gap-2">
@@ -750,7 +748,7 @@ function qualityPanel(quality, project) {
         </div>
         <div class="mt-3 flex gap-2">
           <button onclick="window.__importer.goBOQ()" class="flex-1 h-9 text-sm border border-slate-300 bg-white hover:bg-slate-50">打开清单</button>
-          <button onclick="window.__importer.confirmImport()" class="flex-1 h-9 text-sm brand-bg text-white">确认入库</button>
+          <button onclick="window.__importer.confirmImport()" class="flex-1 h-9 text-sm brand-bg text-white">保存到项目</button>
         </div>
       </div>
     </div>
@@ -779,7 +777,7 @@ function issueCards(quality) {
       icon: 'rule',
       tone: 'red',
       title: `必填字段未映射（${quality.requiredUnmapped.length}）`,
-      desc: '名称、单位和工程量必须绑定 Excel 列后才能确认入库。',
+      desc: '名称、单位和工程量必须绑定 Excel 列后才能保存。',
       rows: [],
       action: '',
       handler: '',
@@ -844,7 +842,7 @@ function issueCards(quality) {
       icon: 'tips_and_updates',
       tone: 'blue',
       title: `重复清单项（${quality.duplicates.length}）`,
-      desc: '存在重复的清单名称及项目特征，可合并后再入库。',
+      desc: '存在重复的清单名称及项目特征，可合并后再保存。',
       rows: quality.duplicates,
       action: '合并重复项',
       handler: 'mergeDuplicateRows',
@@ -853,7 +851,7 @@ function issueCards(quality) {
       icon: 'check_circle',
       tone: 'green',
       title: `已通过检查项（${quality.passCount}）`,
-      desc: '这些行已具备入库所需的名称、单位、工程量字段。',
+      desc: '这些行已具备保存所需的名称、单位、工程量字段。',
       rows: [],
       action: '',
       handler: '',
@@ -869,9 +867,9 @@ function priceIssueTitle(quality) {
 }
 
 function priceIssueDescription(quality) {
-  if (quality.priceMapped) return '存在综合单价为空或非数字的行，入库后将按 0 计价。';
+  if (quality.priceMapped) return '存在综合单价为空或非数字的行，保存后将按 0 计价。';
   if (quality.priceField.status === 'needs-review') return `检测到候选列“${quality.priceField.candidateSource}”，因置信度不足未自动使用，请在字段映射区确认。`;
-  return '源文件中未找到可识别的综合单价列。若文件本身没有报价，可继续入库并在后续补价。';
+  return '源文件中未找到可识别的综合单价列。若文件本身没有报价，可继续保存并在后续补价。';
 }
 
 function issueCard(issue) {
@@ -969,14 +967,14 @@ async function importQuotaExcel() {
 }
 
 function showQuotaImportResult(result) {
-  openModal('企业定额库导入结果', `
+  openModal('常用定额导入结果', `
     <div class="grid grid-cols-4 gap-2 text-sm mb-4">
       ${importResultBox('总行数', result.total)}
       ${importResultBox('成功', result.success)}
       ${importResultBox('失败', result.failed)}
       ${importResultBox('缺单价', result.missingPrice)}
     </div>
-    <div class="text-sm text-slate-600 mb-3">新增 ${result.added} 条，更新 ${result.updated} 条，跳过 ${result.skipped} 条。已跳转到定额库，可继续筛选缺单价或加入项目清单。</div>
+    <div class="text-sm text-slate-600 mb-3">新增 ${result.added} 条，更新 ${result.updated} 条，跳转到我的定额库后可继续筛选缺单价或加入项目清单。</div>
     ${(result.warnings || []).length ? `
       <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 max-h-56 overflow-auto scroll-thin">
         <div class="font-medium text-amber-900 mb-1">需要注意</div>
@@ -1177,7 +1175,7 @@ async function confirmImport() {
     return;
   }
   if (quality.templateMissing.length) {
-    toast('模板存在缺失来源列，请重新选择对应 Excel 列后再入库', 'error');
+    toast('模板存在缺失来源列，请重新选择对应 Excel 列后再保存', 'error');
     return;
   }
   if (quality.amountRuleInvalid) {
@@ -1200,10 +1198,10 @@ async function confirmImport() {
       structureGroup: row.costCategory || categoryGuess(row.name),
     }));
   if (!rows.length) {
-    toast('没有可入库的清单行', 'error');
+    toast('没有可保存的清单行', 'error');
     return;
   }
-  if (!state.fileName && !confirm('当前显示的是示例预览数据。确认后会写入所选项目清单，仅建议用于体验流程。确定入库？')) return;
+  if (!state.fileName && !confirm('当前显示的是示例预览数据。确认后会保存到所选项目清单，仅建议用于体验流程。确定保存？')) return;
   if (state.importMode === 'replace' && !confirm('覆盖会删除当前项目现有清单，但不会删除已保存的报价版本。确定覆盖？')) return;
   try {
     const result = await boqService.importLines(state.projectId, rows, { mode: state.importMode });
@@ -1211,12 +1209,12 @@ async function confirmImport() {
       sourceType: 'excel_import_workbench',
       sourceId: state.fileName || '示例预览数据',
     });
-    toast(`已入库 ${result.success} 条，沉淀候选 ${engine.candidates.length} 条`, 'success');
+    toast(`已保存 ${result.success} 条，新增 ${engine.candidates.length} 条待检查记录`, 'success');
     window.__app.state.currentProjectId = state.projectId;
     window.__app.go('boq', { projectId: state.projectId, imported: true });
   } catch (err) {
     console.error(err);
-    toast(`入库失败：${err.message}`, 'error');
+    toast(`保存失败：${err.message}`, 'error');
   }
 }
 
@@ -1383,7 +1381,7 @@ function updateActiveTemplate() {
 
 function deleteTemplate(id) {
   const template = getMappingTemplate(id);
-  if (!template || !confirm(`删除模板“${template.name}”？已入库的数据不会受影响。`)) return;
+  if (!template || !confirm(`删除模板“${template.name}”？已保存的数据不会受影响。`)) return;
   deleteMappingTemplate(id);
   if (state.activeTemplateId === id) state.activeTemplateId = '';
   refreshTemplates();

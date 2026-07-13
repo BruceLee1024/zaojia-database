@@ -1,5 +1,5 @@
 // 演示数据加载 + 智能兜底单价
-import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from './repository.js?v=3.9';
+import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from './repository.js?v=1.0';
 import { parseExcel, detectRowKind, rowToQuotaItem, rowToBOQ } from './excel.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
 import { uid } from '../utils/dom.js';
@@ -77,6 +77,14 @@ const BUILTIN_LINES = {
     ['PLC 控制柜安装', 1, 1],
   ],
 };
+
+const BUILTIN_BOQ_LIBRARY = [
+  ['030101001001', '土方开挖', '土壤类别：三类土；挖土深度：≤3m', 'm³', 100, '水处理工程', '市政污水处理工程', 'civil', ['机械挖一般土方']],
+  ['030201002001', '钢筋混凝土池壁', '混凝土强度等级：C30；抗渗等级：P6', 'm³', 80, '水处理工程', '污水厂池体工程', 'civil', ['C30 钢筋混凝土池壁']],
+  ['030501001001', '潜水搅拌机安装', '含支架、吊装、单机调试', '台', 2, '设备安装工程', '污水处理设备安装', 'equipment', ['潜水搅拌机安装']],
+  ['030601001001', 'HDPE 排水管安装', 'DN300；热熔连接；含管件安装', 'm', 120, '管网工程', '厂区污水管网', 'pipe', ['HDPE 排水管 DN300', '阀门井砌筑']],
+  ['030701001001', 'PLC 控制柜安装', '含 I/O 检查、联动调试', '台', 1, '电气自控工程', '污水处理自控系统', 'electric', []],
+];
 
 // 关键词兜底单价（行业经验值）
 const KW_PRICE = [
@@ -280,6 +288,7 @@ export async function ensureDemoData({ force = false } = {}) {
   if (force) {
     await Promise.all([
       quotaRepo.replaceAll([]),
+      boqLibraryRepo.replaceAll([]),
       projectRepo.replaceAll([]),
       boqRepo.replaceAll([]),
       versionRepo.replaceAll([]),
@@ -323,6 +332,15 @@ async function ensureBuiltinDemoData() {
     quotaByName.set(name, item);
   }
   await quotaRepo.replaceAll(quota);
+
+  const library = await boqLibraryRepo.all();
+  const libraryCodes = new Set(library.map(item => item.code));
+  for (const [code, name, feature, unit, defaultQty, major, scope, structureGroup, quotaNames] of BUILTIN_BOQ_LIBRARY) {
+    if (libraryCodes.has(code)) continue;
+    library.push({ id: uid(), code, name, feature, unit, defaultQty, major, scope, structureGroup,
+      quotaItemIds: quotaNames.map(name => quotaByName.get(name)?.id).filter(Boolean), source: '系统示例', version: 'v1.0', note: '', status: 'active', referenceCount: 0, lastReferencedAt: '', lastReferencedProjectName: '', createdAt: now, updatedAt: now });
+  }
+  await boqLibraryRepo.replaceAll(library);
 
   const projects = await projectRepo.all();
   const projectByKey = new Map(projects.map(p => [p.demoKey, p]));
