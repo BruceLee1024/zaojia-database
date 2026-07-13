@@ -6,7 +6,7 @@ import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, sav
 import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js';
 import { createRecognitionRequest, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js';
 import { getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js';
-import { getLibraryDetailSummary } from '../assets/views/boqLibrary.js';
+import { applyLibraryAISuggestions, buildLibraryEditPayload, getLibraryDetailSummary } from '../assets/views/boqLibrary.js';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -171,6 +171,26 @@ function testBoqLibraryItemIdentity() {
   assert.equal(item.status, 'active');
   assert.equal(item.defaultQty, 12.5);
   assert.deepEqual(item.quotaItemIds, ['q-1']);
+}
+
+function testBoqLibraryEditPayload() {
+  const existing = {
+    id: 'library-1', createdAt: '2026-01-01T00:00:00.000Z', referenceCount: 3,
+    lastReferencedAt: '2026-07-01T00:00:00.000Z', lastReferencedProjectName: '一期工程',
+  };
+  const payload = buildLibraryEditPayload(existing, {
+    code: ' 030101001001 ', name: ' 土方开挖 ', feature: ' 三类土 ', unit: ' m³ ', defaultQty: '120',
+    major: '水处理工程', scope: '市政污水处理工程', structureGroup: '土建', source: '系统示例',
+    version: 'v1.1', status: 'inactive', note: '已复核', quotaItemIds: ['q-1', 'q-1', 'q-2'],
+  });
+  assert.equal(payload.id, existing.id);
+  assert.equal(payload.createdAt, existing.createdAt);
+  assert.equal(payload.referenceCount, existing.referenceCount);
+  assert.equal(payload.lastReferencedAt, existing.lastReferencedAt);
+  assert.equal(payload.lastReferencedProjectName, existing.lastReferencedProjectName);
+  assert.equal(payload.name, '土方开挖');
+  assert.equal(payload.defaultQty, 120);
+  assert.deepEqual(payload.quotaItemIds, ['q-1', 'q-2']);
 }
 
 function memoryStorage() {
@@ -366,6 +386,7 @@ testImportMapping();
 testMappingTemplates();
 testImportPricingRules();
 testBoqLibraryItemIdentity();
+testBoqLibraryEditPayload();
 testSheetHeaderDetection();
 testCombinedNameFeatureColumnMetadata();
 testAiImportRecognitionContract();
@@ -700,6 +721,67 @@ async function testAIAssistService() {
 
   const connection = await ai.testAIConnection();
   assert.equal(connection.confidence, 'low');
+
+  const libraryItem = { name: 'C30 钢筋混凝土池壁', feature: '', unit: '', major: '', scope: '', structureGroup: '' };
+  const localLibrary = await ai.suggestLibraryItem(libraryItem, await repo.quotaRepo.all());
+  assert.equal(localLibrary.source, 'local');
+  assert.equal(localLibrary.quotaSuggestions.length <= 5, true);
+  assert.equal(localLibrary.quotaSuggestions[0].quotaId, 'q-ai-1');
+  assert.equal(localLibrary.suggestions.some(s => s.field === 'feature' && s.apply === true), true);
+
+  const protectedLibrary = await ai.suggestLibraryItem({ ...libraryItem, unit: '项', major: '人工确认专业' }, await repo.quotaRepo.all());
+  assert.equal(protectedLibrary.suggestions.find(s => s.field === 'unit')?.apply, false);
+  assert.equal(protectedLibrary.suggestions.find(s => s.field === 'major')?.apply, false);
+
+  memory.set('ai:ai_config', JSON.stringify({ api_key: 'test-key', base_url: 'https://example.invalid/v1', model: 'test-model' }));
+  globalThis.fetch = async () => { throw new Error('network unavailable'); };
+  const fallbackLibrary = await ai.suggestLibraryItem(libraryItem, await repo.quotaRepo.all());
+  assert.equal(fallbackLibrary.source, 'local');
+  assert.equal(fallbackLibrary.warnings.some(w => w.includes('远端 AI')), true);
+
+  // 远端建议可补充本地规则未覆盖的允许字段，且不得自动覆盖已有值。
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ choices: [{ message: { content: JSON.stringify({
+      fields: [{ field: 'scope', suggestedValue: '远端补充适用范围', confidence: 'high', reason: '远端语义判断' }],
+      quotaIds: [],
+    }) } }] }),
+  });
+  const remoteExtraField = await ai.suggestLibraryItem({ name: '未知工序', feature: '', unit: '', major: '', scope: '', structureGroup: '' }, await repo.quotaRepo.all());
+  const scopeSuggestion = remoteExtraField.suggestions.find(s => s.field === 'scope');
+  assert.equal(remoteExtraField.source, 'remote');
+  assert.equal(scopeSuggestion?.suggestedValue, '远端补充适用范围');
+  assert.equal(scopeSuggestion?.apply, true);
+
+  // 无法解析或结构不合规的远端内容必须回退本地建议，并给出警告。
+  for (const content of [
+    '{not valid json',
+    JSON.stringify({ fields: [{ field: 'feature', suggestedValue: '缺少 quotaIds' }] }),
+    JSON.stringify({ fields: {}, quotaIds: [] }),
+    JSON.stringify({ fields: [], quotaIds: 'q-ai-1' }),
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content } }] }),
+    });
+    const invalidRemoteFallback = await ai.suggestLibraryItem(libraryItem, await repo.quotaRepo.all());
+    assert.equal(invalidRemoteFallback.source, 'local');
+    assert.equal(invalidRemoteFallback.warnings.some(w => w.includes('远端 AI')), true);
+  }
+  globalThis.fetch = undefined;
+
+  const applied = applyLibraryAISuggestions(libraryItem, ['q-ai-2'], {
+    suggestions: [
+      { field: 'feature', suggestedValue: 'AI 补全特征', apply: true },
+      { field: 'unit', suggestedValue: 'm³', apply: false },
+      { field: 'code', suggestedValue: '不可修改', apply: true },
+    ],
+    quotaSuggestions: [{ quotaId: 'q-ai-1', apply: true }, { quotaId: 'q-ai-2', apply: false }],
+  });
+  assert.equal(applied.fields.feature, 'AI 补全特征');
+  assert.equal(applied.fields.unit, undefined);
+  assert.equal(applied.fields.code, undefined);
+  assert.deepEqual(applied.quotaItemIds, ['q-ai-2', 'q-ai-1']);
 }
 
 async function testExperienceService() {
@@ -907,8 +989,38 @@ async function testBoqLibraryService() {
   const saved = await repo.boqLibraryRepo.findById(item.id);
   assert.equal(saved.referenceCount, 1);
   assert.equal(saved.lastReferencedProjectName, '清单库测试项目');
+  const projectLineSnapshot = {
+    name: line.name,
+    feature: line.feature,
+    unit: line.unit,
+    qty: line.qty,
+    unitPrice: line.unitPrice,
+  };
+  const edited = await boqLibraryService.save({
+    ...saved,
+    name: '复核后的池壁',
+    feature: 'C35 P8',
+    unit: 'm²',
+    defaultQty: 99,
+    quotaItemIds: [],
+  });
+  assert.equal(edited.id, item.id);
+  assert.equal(edited.createdAt, item.createdAt);
+  assert.equal(edited.referenceCount, 1);
+  assert.equal(edited.lastReferencedProjectName, '清单库测试项目');
+  assert.deepEqual(edited.quotaItemIds, []);
+  const projectLineAfterLibraryEdit = (await repo.boqRepo.byProject('library-project')).find(row => row.id === line.id);
+  assert.deepEqual({
+    name: projectLineAfterLibraryEdit.name,
+    feature: projectLineAfterLibraryEdit.feature,
+    unit: projectLineAfterLibraryEdit.unit,
+    qty: projectLineAfterLibraryEdit.qty,
+    unitPrice: projectLineAfterLibraryEdit.unitPrice,
+  }, projectLineSnapshot);
+  await assert.rejects(() => boqLibraryService.save({ code: 'LIB-001', name: '重复编码', unit: '项' }), /已存在相同清单/);
+  await assert.rejects(() => boqLibraryService.save({ name: '复核后的池壁', feature: 'C35 P8', unit: 'm²' }), /已存在相同清单/);
   await repo.boqRepo.update(line.id, { qty: 20 });
-  assert.equal((await repo.boqLibraryRepo.findById(item.id)).defaultQty, 12);
+  assert.equal((await repo.boqLibraryRepo.findById(item.id)).defaultQty, 99);
 
   const noPrice = await boqLibraryService.save({ code: 'LIB-002', name: '未匹配项', unit: '项', quotaItemIds: [] });
   const noPriceLine = await boqLibraryService.applyToProject(noPrice.id, 'library-project');

@@ -33,6 +33,23 @@ export async function suggestBoqLine(line = {}, context = {}) {
   });
 }
 
+// 清单库维护专用：只生成可选择的字段与定额建议，不写入任何数据。
+export async function suggestLibraryItem(item = {}, quotas) {
+  const availableQuotas = Array.isArray(quotas) ? quotas : await quotaRepo.all();
+  const local = buildLocalLibrarySuggestion(item, availableQuotas);
+  const cfg = getAIConfig();
+  if (!cfg.api_key) return local;
+  try {
+    const remote = await enhanceLibrarySuggestion(item, local, cfg);
+    return mergeRemoteLibrarySuggestion(item, local, remote);
+  } catch (err) {
+    return wrap({
+      ...local,
+      warnings: [...(local.warnings || []), `远端 AI 增强不可用，已保留本地建议：${String(err?.message || err).slice(0, 120)}`],
+    });
+  }
+}
+
 export async function suggestMissingPrices(lines = [], context = {}) {
   const quotas = context.quotas || await quotaRepo.all();
   const allBoq = await boqRepo.all();
@@ -270,6 +287,81 @@ function wrap(obj) {
 
 function suggestion(field, currentValue, suggestedValue, confidence, reason) {
   return { field, currentValue, suggestedValue, confidence, reason, apply: confidence === 'high' || !currentValue };
+}
+
+function buildLocalLibrarySuggestion(item = {}, quotas = []) {
+  const candidates = rankQuotas(quotas, item).slice(0, 5);
+  const best = candidates[0];
+  const confidence = best?.score >= 6 ? 'high' : best?.score >= 3 ? 'medium' : 'low';
+  const text = `${item.name || ''} ${item.feature || ''}`;
+  const major = /水|污水|水池|泵|曝气|格栅/.test(text) ? '水处理工程' : /管道|电缆|阀门/.test(text) ? '安装工程' : /土方|混凝土|砼|钢筋|防水/.test(text) ? '土建工程' : '';
+  const scope = /污水|水池|曝气|格栅|泵/.test(text) ? '市政污水处理工程' : '';
+  const structureGroup = /土方|混凝土|砼|钢筋|防水/.test(text) ? 'civil' : /管道|电缆|阀门|设备/.test(text) ? 'installation' : '';
+  const fields = [
+    libraryFieldSuggestion('feature', item.feature, inferFeature(item.name), confidence, best ? `参考相似定额「${best.name}」补充项目特征` : '根据清单名称生成常用项目特征'),
+    libraryFieldSuggestion('unit', item.unit, best?.unit || inferUnit(item.name, item.feature), confidence, best ? `参考相似定额单位「${best.unit || '-'}」` : '根据清单名称和项目特征判断单位'),
+    libraryFieldSuggestion('major', item.major, major, major ? 'medium' : 'low', '按清单名称识别工程专业'),
+    libraryFieldSuggestion('scope', item.scope, scope, scope ? 'medium' : 'low', '按清单名称识别适用范围'),
+    libraryFieldSuggestion('structureGroup', item.structureGroup, structureGroup, structureGroup ? 'medium' : 'low', '按清单内容归入土建或安装分组'),
+  ].filter(entry => entry.suggestedValue !== '');
+  const quotaSuggestions = candidates.map(quota => {
+    const quotaConfidence = quota.score >= 6 ? 'high' : quota.score >= 3 ? 'medium' : 'low';
+    return { quotaId: quota.id, code: quota.code || '', name: quota.name || '', unit: quota.unit || '', confidence: quotaConfidence, reason: `名称、特征和单位匹配得分 ${quota.score.toFixed(1)}`, apply: quotaConfidence === 'high' };
+  });
+  return wrap({
+    source: 'local', confidence, summary: best ? `已按本地定额库推荐 ${quotaSuggestions.length} 条关联定额。` : '未找到高匹配定额，已生成保守字段建议。',
+    suggestions: fields,
+    quotaSuggestions,
+    warnings: fields.some(entry => entry.confidence === 'low') || quotaSuggestions.some(entry => entry.confidence === 'low') ? ['低置信度建议默认不勾选，请人工确认。'] : [],
+  });
+}
+
+function libraryFieldSuggestion(field, currentValue, suggestedValue, confidence, reason) {
+  return { field, currentValue: String(currentValue || ''), suggestedValue, confidence, reason, apply: !currentValue && confidence === 'high' };
+}
+
+async function enhanceLibrarySuggestion(item, local, cfg) {
+  const candidates = (local.quotaSuggestions || []).map(quota => ({ id: quota.quotaId, code: quota.code, name: quota.name, unit: quota.unit }));
+  const prompt = `为工程量清单库生成保守的辅助建议。仅返回 JSON，不要 Markdown：{"fields":[{"field":"feature|unit|major|scope|structureGroup","suggestedValue":"","confidence":"high|medium|low","reason":""}],"quotaIds":["候选定额ID"]}。不得建议 code、defaultQty、source、version、status、note 或引用字段。当前清单：${JSON.stringify({ code: item.code || '', name: item.name || '', feature: item.feature || '', unit: item.unit || '', major: item.major || '', scope: item.scope || '', structureGroup: item.structureGroup || '' })}。候选定额：${JSON.stringify(candidates)}`;
+  const url = String(cfg.base_url || '').replace(/\/$/, '') + '/chat/completions';
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
+    body: JSON.stringify({ model: cfg.model, messages: [{ role: 'system', content: '你是工程造价清单库助手，严格返回 JSON。' }, { role: 'user', content: prompt }], temperature: 0.1, stream: false }),
+  });
+  if (!response.ok) throw new Error(`请求失败：${response.status}`);
+  const data = await response.json();
+  const raw = data?.choices?.[0]?.message?.content;
+  if (typeof raw !== 'string') throw new Error('远端返回为空');
+  const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
+  if (!Array.isArray(parsed.fields) || !Array.isArray(parsed.quotaIds)) throw new Error('远端返回格式无效');
+  return parsed;
+}
+
+function mergeRemoteLibrarySuggestion(item, local, remote) {
+  const allowed = new Set(['feature', 'unit', 'major', 'scope', 'structureGroup']);
+  const remoteFields = new Map((remote.fields || [])
+    .filter(entry => allowed.has(entry?.field) && String(entry.suggestedValue || '').trim())
+    .map(entry => [entry.field, entry]));
+  const localFields = new Set();
+  const mergeField = field => {
+    const remoteEntry = remoteFields.get(field);
+    if (!remoteEntry) return null;
+    const confidence = ['high', 'medium', 'low'].includes(remoteEntry.confidence) ? remoteEntry.confidence : 'medium';
+    return libraryFieldSuggestion(field, item[field], String(remoteEntry.suggestedValue).trim(), confidence, String(remoteEntry.reason || '远端模型结合候选定额判断'));
+  };
+  const suggestions = (local.suggestions || []).map(localEntry => {
+    localFields.add(localEntry.field);
+    return mergeField(localEntry.field) || localEntry;
+  });
+  // 远端模型可以补足本地关键词规则没有生成的允许字段。
+  for (const field of allowed) {
+    if (!localFields.has(field) && remoteFields.has(field)) suggestions.push(mergeField(field));
+  }
+  const allowedQuotaIds = new Set((local.quotaSuggestions || []).map(entry => entry.quotaId));
+  const remoteQuotaIds = new Set((remote.quotaIds || []).filter(id => allowedQuotaIds.has(id)));
+  const quotaSuggestions = (local.quotaSuggestions || []).map(entry => ({ ...entry, apply: remoteQuotaIds.has(entry.quotaId) && entry.confidence === 'high', reason: remoteQuotaIds.has(entry.quotaId) ? `${entry.reason}；远端模型确认` : entry.reason }));
+  return wrap({ ...local, source: 'remote', summary: '已结合远端 AI 与本地定额库生成建议。', suggestions, quotaSuggestions });
 }
 
 function rankQuotas(quotas, line) {
