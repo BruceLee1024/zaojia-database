@@ -1,20 +1,33 @@
 // 项目服务
 import { projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.9';
 import { uid } from '../utils/dom.js';
-import { recomputeProjectCost } from './boqService.js?v=3.9';
-import { dataEngineService } from './dataEngineService.js?v=3.9';
+import { recomputeProjectCost } from './boqService.js?v=4.0';
+import { dataEngineService } from './dataEngineService.js?v=4.0';
 import { archiveEligibility } from './projectWorkflow.js?v=1.0';
+
+export function normalizeProjectMetadata(data = {}) {
+  const priceYear = String(data.priceYear || '').trim();
+  return {
+    ...data,
+    code: String(data.code || '').trim(),
+    client: String(data.client || '').trim(),
+    region: String(data.region || '').trim(),
+    stage: String(data.stage || '').trim(),
+    priceYear: /^\d{4}$/.test(priceYear) ? priceYear : '',
+  };
+}
 
 export const projectService = {
   async list() { return await projectRepo.all(); },
   async get(id) { return await projectRepo.findById(id); },
 
   async save(data) {
-    const obj = { ...data };
+    const obj = normalizeProjectMetadata(data);
+    const current = obj.id ? await projectRepo.findById(obj.id) : null;
     obj.typeKey = [obj.type, obj.scale, obj.structure].filter(Boolean).join(' / ');
     if (obj.status === 'archived') {
       const [current, lines, versions] = await Promise.all([
-        obj.id ? projectRepo.findById(obj.id) : Promise.resolve(null),
+        Promise.resolve(current),
         obj.id ? boqRepo.byProject(obj.id) : Promise.resolve([]),
         obj.id ? versionRepo.byProject(obj.id) : Promise.resolve([]),
       ]);
@@ -32,6 +45,7 @@ export const projectService = {
     if (obj.id) {
       const updated = await projectRepo.update(obj.id, obj);
       if (updated?.status === 'archived') await dataEngineService.ingestArchivedProject(obj.id);
+      if (current?.status === 'archived' && updated?.status !== 'archived') await dataEngineService.discardProjectArtifacts(obj.id);
       return updated;
     }
     obj.id = uid();
@@ -46,6 +60,7 @@ export const projectService = {
     await boqRepo.replaceAll(boq.filter(b => b.projectId !== id));
     const versions = await versionRepo.all();
     await versionRepo.replaceAll(versions.filter(v => v.projectId !== id));
+    await dataEngineService.discardProjectArtifacts(id, { includeVersions: true });
   },
 
   async archive(id) {
@@ -68,6 +83,7 @@ export const projectService = {
     if (p.status === 'archived') p.archivedAt = new Date().toISOString();
     await projectRepo.update(id, p);
     if (p.status === 'archived') await dataEngineService.ingestArchivedProject(id);
+    else await dataEngineService.discardProjectArtifacts(id);
     return p;
   },
 

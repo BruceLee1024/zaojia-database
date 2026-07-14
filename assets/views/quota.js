@@ -1,6 +1,6 @@
 // 视图：定额库
-import { quotaService } from '../services/quotaService.js?v=3.9';
-import { boqService } from '../services/boqService.js?v=3.9';
+import { quotaService } from '../services/quotaService.js?v=4.0';
+import { boqService } from '../services/boqService.js?v=4.0';
 import { fmtMoney, esc, $, openModal, closeModal, toast } from '../utils/dom.js';
 import { exportQuotaTemplate } from '../data/excel.js?v=4.0';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
@@ -241,8 +241,8 @@ function kpiCard(label, value, unit, icon, color, note) {
           ${note ? `<span class="pb-1 text-xs font-semibold ${color}">${note}</span>` : ''}
         </div>
       </div>
-      <span class="h-10 w-10 rounded-full bg-slate-50 border border-slate-100 ${color} flex items-center justify-center">
-        <span class="material-symbols-outlined text-[21px]">${icon}</span>
+      <span class="icon-surface icon-surface-slate ${color}">
+        <span class="material-symbols-outlined icon-kpi">${icon}</span>
       </span>
     </div>
   </div>`;
@@ -437,11 +437,19 @@ async function selectQuota(id) {
 }
 
 async function removeQuota(id) {
-  if (!confirm('确定删除该定额？')) return;
-  await quotaService.remove(id);
+  if (!confirm('确定删除该定额？未被引用时可直接删除。')) return;
+  let usage;
+  try {
+    usage = await quotaService.remove(id);
+  } catch (err) {
+    if (err?.code !== 'QUOTA_IN_USE') throw err;
+    const detail = `项目清单 ${err.usage.projectLineCount} 条、清单库 ${err.usage.libraryItemCount} 条正在引用。强制删除会保留项目当前单价，但标记这些行“关联定额已删除”；清单库会解除关联。确定继续？`;
+    if (!confirm(detail)) return;
+    usage = await quotaService.remove(id, { force: true });
+  }
   if (editorState.selectedId === id) editorState.selectedId = '';
   await renderList();
-  toast('已删除');
+  toast(usage.total ? `已删除，已处理 ${usage.total} 处引用` : '已删除');
 }
 
 function openQuotaForm(item, mode = 'edit') {

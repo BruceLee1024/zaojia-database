@@ -1,10 +1,10 @@
 // 视图：工程量清单
 import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo } from '../data/repository.js?v=1.0';
-import { boqService, groupForLine } from '../services/boqService.js?v=3.9';
+import { boqService, groupForLine } from '../services/boqService.js?v=4.0';
 import { boqLibraryService } from '../services/boqLibraryService.js?v=1.0';
-import { projectService } from '../services/projectService.js?v=3.9';
+import { projectService } from '../services/projectService.js?v=4.0';
 import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=3.9';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=1.1';
 import { openReview } from './experience.js?v=4.4';
 import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
@@ -551,6 +551,7 @@ function boqToolbar(selectedCount) {
         <option value="zeroQty" ${boqState.riskStatus === 'zeroQty' ? 'selected' : ''}>工程量为 0</option>
         <option value="factorRisk" ${boqState.riskStatus === 'factorRisk' ? 'selected' : ''}>系数异常</option>
         <option value="unmatchedQuota" ${boqState.riskStatus === 'unmatchedQuota' ? 'selected' : ''}>未匹配定额</option>
+        <option value="invalidQuotaReference" ${boqState.riskStatus === 'invalidQuotaReference' ? 'selected' : ''}>关联定额已删除</option>
       </select>
       ${toolbarGroup('数据', [
         ['btnAdd', 'add', '添加清单', 'primary'],
@@ -737,6 +738,7 @@ function lineRisks(line) {
   if (!(Number(line.qty) > 0)) risks.push({ id: 'zeroQty', label: '工程量0', cls: 'badge-gray' });
   if (Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8) risks.push({ id: 'factorRisk', label: '系数异常', cls: 'badge-red' });
   if (!line.quotaItemId) risks.push({ id: 'unmatchedQuota', label: '未匹配', cls: 'badge-gray' });
+  if (line.quotaReferenceStatus === 'missing') risks.push({ id: 'invalidQuotaReference', label: '定额已删除', cls: 'badge-red' });
   return risks;
 }
 

@@ -7,7 +7,7 @@ import {
   experienceSessionRepo,
   experienceCardRepo,
 } from '../data/repository.js?v=3.9';
-import { getAIConfig } from './aiService.js?v=3.9';
+import { getAIConfig } from './aiService.js?v=4.0';
 import { uid } from '../utils/dom.js';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';

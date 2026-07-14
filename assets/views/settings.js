@@ -1,7 +1,8 @@
 // 视图：数据与备份
-import { getAIConfig, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=3.9';
+import { AI_SYSTEM_PROMPT_PRESETS, getAIConfig, getAISystemPromptPreset, setAIConfig, listProviders, getProviderDefaults, toBackupSafeAIConfig, restoreBackupSafeAIConfig } from '../services/aiService.js?v=4.1';
+import { generateSystemPromptDraft } from '../services/aiPromptService.js?v=1.0';
 import { testAIConnection } from '../services/aiAssistService.js?v=1.1';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { experienceService } from '../services/experienceService.js?v=3.9';
 import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from '../data/repository.js?v=1.0';
 import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, switchToBrowserStorage, syncBrowserCacheToLocalFolder } from '../data/storage.js?v=1.0';
@@ -195,6 +196,7 @@ function renderStorageTab(ctx) {
 }
 
 function renderAiTab({ cfg, providers }) {
+  const promptCount = (cfg.system || '').length;
   return `
     <div class="grid grid-cols-12 gap-4">
       <section class="col-span-12 xl:col-span-8 rounded-lg border border-slate-200 bg-white p-5">
@@ -223,9 +225,55 @@ function renderAiTab({ cfg, providers }) {
             <input id="cfg_key" type="password" class="mt-1 w-full border rounded px-2 py-2" value="${esc(cfg.api_key)}" placeholder="sk-..." />
             <span class="text-xs text-gray-400">仅保存在浏览器 localStorage，不写入本地数据文件夹。</span>
           </label>
-          <label class="block col-span-2">系统提示词
-            <textarea id="cfg_sys" rows="5" class="mt-1 w-full border rounded px-2 py-2">${esc(cfg.system)}</textarea>
-          </label>
+          <section class="col-span-2 rounded-lg border border-slate-200 bg-slate-50/70 p-4" aria-labelledby="system-prompt-title">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 id="system-prompt-title" class="text-sm font-semibold text-slate-800">系统提示词 <span class="font-normal text-slate-400">（可自由编辑）</span></h3>
+                <p id="cfg_sys_help" class="mt-1 text-xs leading-5 text-slate-500">它决定 AI 的角色、回答边界和输出方式。选择模板只会填入编辑框，保存后才会生效。</p>
+              </div>
+              <span class="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500"><span class="material-symbols-outlined text-[15px]">devices</span>仅保存在当前浏览器</span>
+            </div>
+            <div class="mt-3 flex flex-wrap gap-2" aria-label="提示词起始模板">
+              <button id="btnPromptGenerateToggle" type="button" class="h-8 rounded-md border border-teal-300 bg-teal-50 px-3 text-xs font-medium text-teal-800 hover:bg-teal-100"><span class="material-symbols-outlined mr-1 text-[15px]">auto_awesome</span>AI 帮我生成</button>
+              ${Object.entries(AI_SYSTEM_PROMPT_PRESETS).map(([key, preset]) => `
+                <button type="button" data-ai-prompt-template="${key}" class="h-8 rounded-md border border-slate-300 bg-white px-3 text-xs text-slate-700 hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800" title="${esc(preset.description)}">${esc(preset.label)}</button>
+              `).join('')}
+            </div>
+            <section id="promptGenerator" class="hidden mt-3 rounded-lg border border-teal-200 bg-white p-3" aria-labelledby="prompt-generator-title">
+              <div class="flex items-start gap-2">
+                <span class="material-symbols-outlined text-[18px] text-teal-700">auto_awesome</span>
+                <div class="min-w-0 flex-1">
+                  <h4 id="prompt-generator-title" class="text-xs font-semibold text-slate-800">让 AI 生成提示词草案</h4>
+                  <p class="mt-0.5 text-xs leading-5 text-slate-500">仅发送以下填写内容；勾选后才会附带当前编辑框中的提示词。生成结果不会自动保存。</p>
+                </div>
+              </div>
+              <div class="mt-3 grid grid-cols-2 gap-3 text-xs">
+                <label class="col-span-2 block font-medium text-slate-600">希望 AI 协助什么？<span class="text-red-500"> *</span>
+                  <textarea id="promptGenScenario" rows="2" class="mt-1 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 text-xs font-normal text-slate-700" placeholder="例如：污水厂投标报价复核，重点检查漏项、异常工程量和定额匹配"></textarea>
+                </label>
+                <label class="block font-medium text-slate-600">重点关注（可选）
+                  <input id="promptGenFocus" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs font-normal text-slate-700" placeholder="例如：风险分级、数据依据" />
+                </label>
+                <label class="block font-medium text-slate-600">回答风格
+                  <select id="promptGenStyle" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs font-normal text-slate-700">
+                    <option value="detailed">完整分析</option><option value="concise">简洁结论</option><option value="table">对比表格优先</option>
+                  </select>
+                </label>
+              </div>
+              <label class="mt-3 flex items-start gap-2 text-xs text-slate-600"><input id="promptGenUseCurrent" type="checkbox" class="mt-0.5" />基于当前编辑框内容优化 <span class="text-slate-400">（勾选后该文本会发送给 AI）</span></label>
+              <div class="mt-3 flex items-center gap-2"><button id="btnPromptGenerate" type="button" class="h-8 rounded-md bg-teal-700 px-3 text-xs text-white hover:bg-teal-800"><span class="material-symbols-outlined mr-1 text-[15px]">auto_awesome</span>生成草案</button><span id="promptGenStatus" class="text-xs text-slate-400"></span></div>
+              <section id="promptDraftPanel" class="hidden mt-3 border-t border-slate-100 pt-3">
+                <div class="flex items-center justify-between gap-3"><div class="text-xs font-semibold text-slate-700">生成的提示词草案</div><button id="btnPromptApplyDraft" type="button" class="h-7 rounded-md border border-teal-300 bg-white px-2 text-xs text-teal-700">应用到编辑框</button></div>
+                <textarea id="promptDraft" rows="8" readonly class="mt-2 w-full resize-y rounded-md border border-slate-300 bg-slate-50 px-2 py-1.5 font-mono text-xs leading-5 text-slate-700"></textarea>
+              </section>
+            </section>
+            <label class="mt-3 block text-xs font-medium text-slate-600" for="cfg_sys">提示词内容</label>
+            <textarea id="cfg_sys" rows="13" class="mt-1 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs leading-5 text-slate-700 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100" aria-describedby="cfg_sys_help cfg_sys_count">${esc(cfg.system)}</textarea>
+            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span id="cfg_sys_count" class="text-slate-400">${promptCount} 个字符</span>
+              <button id="btnPromptReset" type="button" class="inline-flex items-center gap-1 text-slate-600 hover:text-teal-700"><span class="material-symbols-outlined text-[16px]">restart_alt</span>恢复推荐默认</button>
+            </div>
+          </section>
         </div>
         <div class="mt-5 flex gap-2">
           <button id="btnSave" class="h-10 px-4 text-sm brand-bg text-white rounded-lg">保存配置</button>
@@ -297,7 +345,7 @@ function renderBackupTab() {
         </div>
       </div>
       <div class="mt-5 grid grid-cols-3 gap-4">
-        ${backupAction('恢复 JSON 备份', '恢复会覆盖当前定额、项目、清单、版本、参考和 AI 配置。', 'upload_file', 'btnImport')}
+        ${backupAction('恢复 JSON 备份', '恢复会覆盖业务资料和 AI 偏好；当前设备的 API Key 会保留。', 'upload_file', 'btnImport')}
         ${backupAction('导出 JSON 备份', '导出当前业务数据，适合迁移或交接前留档。', 'download', 'btnExport')}
         ${backupAction('加载演示数据', '已有业务数据不会被覆盖，用于快速体验系统流程。', 'database', 'btnDemo')}
       </div>
@@ -380,6 +428,17 @@ function bindSettingsEvents() {
       }
     };
   }
+  const systemPrompt = document.getElementById('cfg_sys');
+  if (systemPrompt) {
+    systemPrompt.oninput = updateSystemPromptCount;
+  }
+  document.querySelectorAll('[data-ai-prompt-template]').forEach(button => {
+    button.onclick = () => applySystemPromptTemplate(button.dataset.aiPromptTemplate);
+  });
+  on('btnPromptGenerateToggle', togglePromptGenerator);
+  on('btnPromptGenerate', generatePromptDraft);
+  on('btnPromptApplyDraft', applyPromptDraft);
+  on('btnPromptReset', () => applySystemPromptTemplate('general'));
   on('btnSave', saveAIConfig);
   on('btnTest', testAI);
   on('btnImport', importAll);
@@ -408,20 +467,101 @@ function bindTabEvents() {
 }
 
 function saveAIConfig() {
+  const system = document.getElementById('cfg_sys').value.trim();
+  if (!system) {
+    toast('系统提示词不能为空；你可以自行编辑，或恢复推荐默认。', 'error');
+    document.getElementById('cfg_sys').focus();
+    return false;
+  }
   setAIConfig({
     provider: document.getElementById('cfg_prov').value,
     base_url: document.getElementById('cfg_url').value.trim(),
     model: document.getElementById('cfg_model').value.trim(),
     api_key: document.getElementById('cfg_key').value.trim(),
-    system: document.getElementById('cfg_sys').value.trim(),
+    system,
   });
-  toast('已保存', 'success');
+  toast('AI 配置已保存', 'success');
+  return true;
 }
 
 async function testAI() {
-  saveAIConfig();
+  if (!saveAIConfig()) return;
   const result = await testAIConnection();
   toast(result.summary, result.confidence === 'high' ? 'success' : 'error');
+}
+
+function updateSystemPromptCount() {
+  const prompt = document.getElementById('cfg_sys');
+  const count = document.getElementById('cfg_sys_count');
+  if (prompt && count) count.textContent = `${prompt.value.length} 个字符`;
+}
+
+function applySystemPromptTemplate(key) {
+  const prompt = document.getElementById('cfg_sys');
+  if (!prompt) return;
+  const next = getAISystemPromptPreset(key);
+  const saved = getAIConfig().system || '';
+  if (prompt.value.trim() && prompt.value.trim() !== saved.trim() && !confirm('替换会覆盖当前未保存的提示词修改。是否继续？')) return;
+  prompt.value = next;
+  updateSystemPromptCount();
+  prompt.focus();
+  toast('已填入模板；请检查或继续编辑后保存。', 'success');
+}
+
+function togglePromptGenerator() {
+  const generator = document.getElementById('promptGenerator');
+  if (!generator) return;
+  generator.classList.toggle('hidden');
+  if (!generator.classList.contains('hidden')) document.getElementById('promptGenScenario')?.focus();
+}
+
+async function generatePromptDraft() {
+  const scenario = document.getElementById('promptGenScenario')?.value.trim();
+  const focus = document.getElementById('promptGenFocus')?.value.trim();
+  const responseStyle = document.getElementById('promptGenStyle')?.value;
+  const includeCurrent = document.getElementById('promptGenUseCurrent')?.checked;
+  const current = document.getElementById('cfg_sys')?.value.trim() || '';
+  const status = document.getElementById('promptGenStatus');
+  const button = document.getElementById('btnPromptGenerate');
+  if (!scenario) {
+    toast('请先填写希望 AI 协助的工作场景。', 'error');
+    document.getElementById('promptGenScenario')?.focus();
+    return;
+  }
+  if (!getAIConfig().api_key) {
+    toast('请先填写并保存 API Key，再使用 AI 生成提示词。', 'error');
+    document.getElementById('cfg_key')?.focus();
+    return;
+  }
+  const scope = includeCurrent ? '使用场景、关注重点、回答风格和当前提示词' : '使用场景、关注重点和回答风格';
+  if (!confirm(`将发送给已配置的 AI 服务：${scope}。不会发送项目、清单、定额、报价或 API Key。是否生成草案？`)) return;
+  button.disabled = true;
+  button.classList.add('opacity-60');
+  if (status) status.textContent = '正在生成草案…';
+  try {
+    const draft = await generateSystemPromptDraft({ scenario, focus, responseStyle, basePrompt: includeCurrent ? current : '' });
+    document.getElementById('promptDraft').value = draft;
+    document.getElementById('promptDraftPanel').classList.remove('hidden');
+    if (status) status.textContent = '草案已生成，请检查后应用。';
+  } catch (err) {
+    if (status) status.textContent = '';
+    toast(err.message || '生成提示词草案失败，请重试。', 'error');
+  } finally {
+    button.disabled = false;
+    button.classList.remove('opacity-60');
+  }
+}
+
+function applyPromptDraft() {
+  const draft = document.getElementById('promptDraft')?.value.trim();
+  const prompt = document.getElementById('cfg_sys');
+  if (!draft || !prompt) return;
+  const saved = getAIConfig().system || '';
+  if (prompt.value.trim() && prompt.value.trim() !== saved.trim() && !confirm('应用草案会覆盖当前未保存的提示词修改。是否继续？')) return;
+  prompt.value = draft;
+  updateSystemPromptCount();
+  prompt.focus();
+  toast('草案已应用到编辑框；请检查后保存。', 'success');
 }
 
 async function activateFolder() {
@@ -709,7 +849,7 @@ async function importAll() {
   input.accept = '.json';
   input.onchange = async e => {
     const file = e.target.files[0]; if (!file) return;
-    if (!confirm('恢复 JSON 备份会覆盖当前定额、项目、清单、报价版本、复盘笔记、造价参考和 AI 配置。建议先导出当前备份。确定恢复？')) return;
+    if (!confirm('恢复 JSON 备份会覆盖当前定额、项目、清单、报价版本、复盘笔记、造价参考和 AI 偏好；当前设备的 API Key 不会被导入或覆盖。建议先导出当前备份。确定恢复？')) return;
     let data;
     try {
       data = JSON.parse(await file.text());
@@ -729,7 +869,7 @@ async function importAll() {
     await dataQualityReportRepo.replaceAll(data.data_quality_reports || []);
     await experienceSessionRepo.replaceAll(data.experience_sessions || []);
     await experienceCardRepo.replaceAll(data.experience_cards || []);
-    if (data.ai_config) setAIConfig(data.ai_config);
+    if (data.ai_config) setAIConfig(restoreBackupSafeAIConfig(data.ai_config, getAIConfig()));
     toast('导入完成', 'success');
     location.reload();
   };
@@ -756,7 +896,7 @@ async function clearBusinessData() {
 async function exportAll() {
   const data = {
     ...(await collectBusinessData()),
-    ai_config:   JSON.parse(localStorage.getItem('ai_config') || 'null'),
+    ai_config: toBackupSafeAIConfig(getAIConfig()),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');

@@ -1,8 +1,8 @@
 // 视图：Excel 导入工作台
-import { projectService } from '../services/projectService.js?v=3.9';
-import { boqService } from '../services/boqService.js?v=3.9';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
-import { quotaService } from '../services/quotaService.js?v=3.9';
+import { projectService } from '../services/projectService.js?v=4.0';
+import { boqService } from '../services/boqService.js?v=4.0';
+import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
+import { quotaService } from '../services/quotaService.js?v=4.0';
 import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=1.1';
 import { quotaRepo } from '../data/repository.js?v=3.9';
 import { parseExcel, exportQuotaTemplate } from '../data/excel.js?v=4.0';
@@ -374,8 +374,8 @@ function hubCard({ icon, tone, title, desc, action, handler, note }) {
     slate: 'border-slate-200 bg-slate-50 text-slate-700',
   };
   return `<article class="rounded-lg border border-slate-200 bg-white p-4 min-h-[260px] flex flex-col">
-    <div class="h-11 w-11 rounded-lg border ${tones[tone] || tones.slate} flex items-center justify-center">
-      <span class="material-symbols-outlined text-[23px]">${icon}</span>
+    <div class="icon-surface ${tones[tone] || tones.slate}">
+      <span class="material-symbols-outlined icon-kpi">${icon}</span>
     </div>
     <h2 class="mt-4 text-base font-semibold text-slate-900">${esc(title)}</h2>
     <p class="mt-2 text-sm leading-6 text-slate-500">${esc(desc)}</p>

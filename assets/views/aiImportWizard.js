@@ -1,10 +1,10 @@
 // AI 自由格式清单导入向导。模型只给映射建议，所有字段必须由用户确认。
 import { readWorkbookSummary } from '../data/excel.js?v=1.1';
 import { recognizeBoqImport, getRecognitionFields } from '../services/aiImportRecognitionService.js?v=1.1';
-import { boqService } from '../services/boqService.js?v=3.9';
+import { boqService } from '../services/boqService.js?v=4.0';
 import { boqLibraryService } from '../services/boqLibraryService.js?v=1.0';
 import { projectRepo } from '../data/repository.js?v=1.0';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
 import { normalizeImportHeader } from '../services/importMappingService.js?v=1.2';

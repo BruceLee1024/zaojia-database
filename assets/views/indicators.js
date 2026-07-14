@@ -1,6 +1,6 @@
 // 视图：造价参考
 import { indicatorService } from '../services/indicatorService.js?v=3.9';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=1.1';
 import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=3.9';
 import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js';
@@ -15,10 +15,12 @@ const state = {
   estimate: { area: '', dailyCapacity: '' },
   sample: { projectId: '', sourceType: '', quality: '' },
   scope: 'formal',
+  benchmarkQueueIds: [],
 };
 
-let cache = { indicators: [], projects: [], archived: [], benchmark: null, estimate: null, facts: [], candidates: [], reports: [], jobs: [] };
+let cache = { indicators: [], projects: [], archived: [], benchmark: null, queue: [], estimate: null, facts: [], candidates: [], reports: [], jobs: [] };
 const chartState = { confidence: null, year: null };
+const favoriteKeys = new Set(readFavorites());
 
 export async function render() {
   const params = window.__app?.state?.routeParams || {};
@@ -34,7 +36,10 @@ export async function render() {
   if (!state.benchmarkProjectId) {
     state.benchmarkProjectId = (cache.projects.find(p => p.status === 'doing') || cache.archived[0] || cache.projects[0] || {}).id || '';
   }
+  if (state.benchmarkProjectId && !state.benchmarkQueueIds.length) state.benchmarkQueueIds = [state.benchmarkProjectId];
+  state.benchmarkQueueIds = state.benchmarkQueueIds.filter(id => cache.projects.some(project => project.id === id));
   cache.benchmark = state.benchmarkProjectId ? await indicatorService.benchmarkProject(state.benchmarkProjectId) : null;
+  cache.queue = (await Promise.all(state.benchmarkQueueIds.map(id => indicatorService.benchmarkProject(id)))).filter(Boolean);
   cache.estimate = await indicatorService.estimate(state.filters, state.estimate);
 
   expose();
@@ -109,6 +114,23 @@ function expose() {
     showMouth: () => showIndicatorMouth(),
     drill: idx => drill(cache.indicators[idx]),
     selectProject: async value => { state.benchmarkProjectId = value; await render(); },
+    queueAdd: async () => {
+      if (!state.benchmarkProjectId) return toast('请先选择项目', 'error');
+      if (state.benchmarkQueueIds.includes(state.benchmarkProjectId)) return toast('该项目已在对标队列中');
+      state.benchmarkQueueIds.push(state.benchmarkProjectId);
+      toast('已加入对标队列', 'success');
+      await render();
+    },
+    queueRemove: async id => { state.benchmarkQueueIds = state.benchmarkQueueIds.filter(item => item !== id); await render(); },
+    queueClear: async () => { state.benchmarkQueueIds = []; await render(); },
+    toggleFavorite: key => {
+      if (favoriteKeys.has(key)) favoriteKeys.delete(key);
+      else favoriteKeys.add(key);
+      saveFavorites();
+      toast(favoriteKeys.has(key) ? '已收藏指标' : '已取消收藏');
+      render();
+    },
+    exportCurrent: () => exportCurrentIndicators(),
     updateEstimate: async (field, value) => { state.estimate[field] = value; await render(); },
     sampleFilter: async (field, value) => { state.sample[field] = value; await render(); },
     promote: async id => { await dataEngineService.promoteCandidates([id]); toast('已确认记录可用于造价参考', 'success'); await render(); },
@@ -180,8 +202,8 @@ function decisionFilters() {
         <button onclick="window.__indicators.recompute()" class="inline-flex h-10 items-center gap-1.5 rounded px-3 text-sm brand-bg text-white">
           <span class="material-symbols-outlined text-[18px]">refresh</span>重算指标
         </button>
-        <button onclick="window.__app.exportAll()" class="inline-flex h-10 items-center gap-1.5 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
-          <span class="material-symbols-outlined text-[18px]">download</span>导出
+        <button onclick="window.__indicators.exportCurrent()" class="inline-flex h-10 items-center gap-1.5 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
+          <span class="material-symbols-outlined text-[18px]">download</span>导出当前指标
         </button>
       </div>
     </div>
@@ -307,14 +329,16 @@ function catalogRow(f, selected) {
 function indicatorDecisionCard(entry) {
   const it = entry.it;
   const dims = bucketParts(it.typeKey);
+  const key = indicatorFavoriteKey(it);
+  const favorite = favoriteKeys.has(key);
   return `<section class="card p-0 overflow-hidden min-h-[520px]">
     <div class="px-4 py-3 border-b border-slate-200 flex items-start gap-3">
       <div class="min-w-0 flex-1">
         <div class="font-semibold text-slate-900">${esc(metricDisplayName(it.metric))}指标</div>
         <div class="mt-2 flex flex-wrap gap-1.5">${dims.slice(0, 3).map(v => `<span class="badge badge-blue">${esc(v)}</span>`).join('') || '<span class="badge badge-gray">未归类</span>'}</div>
       </div>
-      <button title="收藏指标" class="p-1.5 rounded text-slate-400 hover:bg-slate-50 hover:text-slate-700"><span class="material-symbols-outlined text-[18px]">bookmark</span></button>
-      <button title="更多" class="p-1.5 rounded text-slate-400 hover:bg-slate-50 hover:text-slate-700"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>
+      <button onclick="window.__indicators.toggleFavorite('${escAttr(key)}')" title="${favorite ? '取消收藏' : '收藏指标'}" class="p-1.5 rounded ${favorite ? 'text-teal-700 bg-teal-50' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}"><span class="material-symbols-outlined text-[18px]">bookmark</span></button>
+      <button onclick="window.__indicators.showMouth()" title="查看口径与边界" class="p-1.5 rounded text-slate-400 hover:bg-slate-50 hover:text-slate-700"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>
     </div>
     <div class="p-4">
       ${rangeDecisionBand(it)}
@@ -469,7 +493,10 @@ function benchmarkQueue() {
         <div class="font-semibold text-slate-900">指标对标队列</div>
         <div class="mt-1 text-xs text-slate-500">将选中的项目组成对标队列，快速评估偏差与合理性。</div>
       </div>
-      <button class="inline-flex h-9 items-center gap-1.5 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><span class="material-symbols-outlined text-[18px]">delete</span>清空队列</button>
+      <div class="flex items-center gap-2">
+        <button onclick="window.__indicators.queueAdd()" class="inline-flex h-9 items-center gap-1.5 rounded border border-teal-300 bg-white px-3 text-sm text-teal-700 hover:bg-teal-50"><span class="material-symbols-outlined text-[18px]">add</span>加入当前项目</button>
+        <button onclick="window.__indicators.queueClear()" class="inline-flex h-9 items-center gap-1.5 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><span class="material-symbols-outlined text-[18px]">delete</span>清空队列</button>
+      </div>
     </div>
     <div class="p-3 space-y-2">
       ${rows.map(queueRow).join('') || `<div class="py-10 text-center text-sm text-slate-400">暂无对标项目</div>`}
@@ -478,14 +505,21 @@ function benchmarkQueue() {
 }
 
 function benchmarkQueueRows() {
-  const entry = selectedIndicator();
-  const it = entry?.it;
-  const projects = (cache.projects.length ? cache.projects : cache.archived).slice(0, 4);
-  return projects.map((p, idx) => {
-    const base = Number(it?.median || 0);
-    const current = idx === 0 ? base * 2.3 : idx === 1 ? base * 1.53 : idx === 2 ? base * .96 : 0;
-    const dev = base ? Math.round((current - base) / base * 100) : 0;
-    return { project: p, metric: it?.metric || '单水造价(元/(m³·d))', current, p25: it?.p25 || 0, p75: it?.p75 || 0, dev, confidence: it?.confidence || '样本不足' };
+  return cache.queue.map(benchmark => {
+    const metric = benchmark.metrics.find(item => metricFamily(item.label) === state.selectedFamily) || benchmark.metrics[0];
+    const indicator = metric?.indicator || null;
+    const current = Number(metric?.value || 0);
+    const median = Number(indicator?.median || 0);
+    const dev = median ? Math.round((current - median) / median * 100) : 0;
+    return {
+      project: benchmark.project,
+      metric: metric?.label || '总造价(元)',
+      current,
+      p25: Number(indicator?.p25 || 0),
+      p75: Number(indicator?.p75 || 0),
+      dev,
+      confidence: indicator?.confidence || '样本不足',
+    };
   });
 }
 
@@ -500,8 +534,8 @@ function queueRow(row) {
     <div class="font-semibold tabular-nums ${tone === 'red' ? 'text-red-600' : tone === 'amber' ? 'text-amber-700' : 'text-teal-700'}">${row.current ? `${row.dev > 0 ? '+' : ''}${row.dev}%` : '-'}</div>
     <div class="flex items-center gap-2"><span class="badge ${tone === 'red' ? 'badge-red' : tone === 'amber' ? 'badge-yellow' : 'badge-green'}">${status}</span><span class="badge ${confidenceBadgeClass(row.confidence)}">${esc(row.confidence)}</span></div>
     <div class="flex justify-end gap-1">
-      <button class="h-8 w-8 rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" title="查看"><span class="material-symbols-outlined text-[17px]">visibility</span></button>
-      <button class="h-8 w-8 rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" title="移除"><span class="material-symbols-outlined text-[17px]">delete</span></button>
+      <button onclick="window.__indicators.selectProject('${escAttr(row.project.id)}')" class="h-8 w-8 rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" title="查看"><span class="material-symbols-outlined text-[17px]">visibility</span></button>
+      <button onclick="window.__indicators.queueRemove('${escAttr(row.project.id)}')" class="h-8 w-8 rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" title="移除"><span class="material-symbols-outlined text-[17px]">delete</span></button>
     </div>
   </div>`;
 }
@@ -628,6 +662,39 @@ function showIndicatorMouth() {
 
 function escAttr(value) {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ');
+}
+
+function indicatorFavoriteKey(indicator = {}) {
+  return [indicator.typeKey, indicator.level, indicator.metric].join('::');
+}
+
+function readFavorites() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('indicator_favorites') || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFavorites() {
+  localStorage.setItem('indicator_favorites', JSON.stringify([...favoriteKeys]));
+}
+
+function exportCurrentIndicators() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    filters: { ...state.filters },
+    scope: state.scope,
+    excludeOutliers: state.excludeOutliers,
+    indicators: cache.indicators,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `造价参考指标-${Date.now()}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 function select(name, label) {

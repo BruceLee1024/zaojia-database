@@ -171,6 +171,26 @@ export const dataEngineService = {
     return { count };
   },
 
+  /** 项目取消收录或删除时，移除失去来源的整理记录并重建指标。 */
+  async discardProjectArtifacts(projectId, { includeVersions = false } = {}) {
+    const belongsToProject = item => item.projectId === projectId;
+    const archivedSource = item => item.sourceType === 'archived_project';
+    const shouldRemove = item => belongsToProject(item) && (includeVersions || archivedSource(item));
+    const [facts, candidates, jobs, reports] = await Promise.all([
+      dataFactRepo.all(),
+      dataCandidateRepo.all(),
+      dataJobRepo.all(),
+      dataQualityReportRepo.all(),
+    ]);
+    await Promise.all([
+      dataFactRepo.replaceAll(facts.filter(item => !shouldRemove(item))),
+      dataCandidateRepo.replaceAll(candidates.filter(item => !shouldRemove(item))),
+      dataJobRepo.replaceAll(jobs.filter(item => !shouldRemove(item))),
+      dataQualityReportRepo.replaceAll(reports.filter(item => !shouldRemove(item))),
+    ]);
+    await this.rebuildIndicators({ skipBackfill: true });
+  },
+
   async clearCandidates() {
     await dataCandidateRepo.replaceAll([]);
   },

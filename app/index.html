@@ -38,7 +38,33 @@
   .material-symbols-outlined {
     font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
     line-height: 1;
+    display: inline-block;
+    vertical-align: middle;
   }
+  /* Icon roles: use these rather than one-off size and variation overrides. */
+  .icon-nav { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20 !important; font-size: 20px !important; }
+  .icon-page { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 22 !important; font-size: 22px !important; }
+  .icon-action, .icon-control { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20 !important; font-size: 18px !important; }
+  .icon-inline { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 16 !important; font-size: 16px !important; }
+  .icon-state { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20 !important; font-size: 20px !important; }
+  .icon-empty { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 28 !important; font-size: 26px !important; }
+  .icon-kpi { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 22 !important; font-size: 22px !important; }
+  .icon-surface {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+  }
+  .icon-surface-teal { color: #0f766e; background: #f0fdfa; border-color: #99f6e4; }
+  .icon-surface-blue { color: #2563eb; background: #eff6ff; border-color: #bfdbfe; }
+  .icon-surface-amber { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+  .icon-surface-red { color: #dc2626; background: #fef2f2; border-color: #fecaca; }
+  .icon-surface-slate { color: #475569; background: #f8fafc; border-color: #e2e8f0; }
+  .kpi-content-top { align-items: flex-start !important; }
   .brand-bg { background: var(--brand-container); }
   .brand-text { color: var(--brand); }
   .nav-item {
@@ -185,7 +211,7 @@
       <div class="h-full max-w-[1680px] mx-auto flex items-center gap-4">
         <div class="flex items-center gap-3 min-w-0">
           <div class="h-9 w-9 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
-            <span id="crumbIcon" class="material-symbols-outlined text-[20px]" aria-hidden="true">dashboard</span>
+            <span id="crumbIcon" class="material-symbols-outlined icon-page" aria-hidden="true">dashboard</span>
           </div>
           <div class="min-w-0">
             <div class="flex items-center gap-2">
@@ -204,15 +230,15 @@
         <div class="relative hidden md:block w-[min(420px,32vw)] min-w-[260px]">
           <input id="globalSearch" type="text" placeholder="搜索定额 / 项目 / 指标 / 经验…"
             class="w-full pl-9 pr-14 py-2 text-sm border bg-slate-50 text-slate-800 placeholder:text-slate-400" />
-          <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]" aria-hidden="true">search</span>
+          <span class="material-symbols-outlined icon-control absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">search</span>
           <span class="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-data text-slate-400">Enter</span>
         </div>
         <button id="aiOpenButton" onclick="window.__app.openAI()" aria-controls="aiDrawer" aria-expanded="false" class="h-9 px-3 text-sm brand-bg text-white flex items-center gap-1.5 shrink-0">
-          <span class="material-symbols-outlined text-[17px]" aria-hidden="true">auto_awesome</span>
+          <span class="material-symbols-outlined icon-action" aria-hidden="true">auto_awesome</span>
         <span>问 AI</span>
         </button>
         <button onclick="window.__app.exportAll()" class="h-9 w-9 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-700 shrink-0 border border-slate-200 bg-white" title="导出备份" aria-label="导出备份">
-          <span class="material-symbols-outlined text-[19px]" aria-hidden="true">download</span>
+          <span class="material-symbols-outlined icon-action" aria-hidden="true">download</span>
         </button>
       </div>
     </header>
@@ -227,7 +253,7 @@
     <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
       <div id="modalTitle" class="font-semibold"></div>
       <button type="button" onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-1" aria-label="关闭弹窗">
-        <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
+        <span class="material-symbols-outlined icon-action" aria-hidden="true">close</span>
       </button>
     </div>
     <div id="modalBody" class="flex-1 overflow-auto scroll-thin p-5 bg-slate-50"></div>
@@ -240,13 +266,13 @@
   <div class="h-14 px-4 border-b border-slate-200 flex items-center justify-between shrink-0">
     <div class="min-w-0">
       <div class="font-semibold flex items-center gap-2">
-        <span class="material-symbols-outlined text-[18px] text-teal-700">smart_toy</span>
+        <span class="material-symbols-outlined icon-action text-teal-700">smart_toy</span>
         <span id="aiDrawerTitle">个人造价助手</span>
       </div>
       <div class="mt-0.5 text-[11px] text-slate-500">只读参考 · 不自动修改你的清单</div>
     </div>
     <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1" aria-label="关闭 AI 助手">
-      <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
+      <span class="material-symbols-outlined icon-action" aria-hidden="true">close</span>
     </button>
   </div>
   <div id="aiMsgs" class="flex-1 min-h-0 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50" role="log" aria-live="polite" aria-relevant="additions"></div>
@@ -261,6 +287,6 @@
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="../app.js?v=5.29"></script>
+<script type="module" src="../app.js?v=5.39"></script>
 </body>
 </html>

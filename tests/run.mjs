@@ -6,7 +6,10 @@ import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, sav
 import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js';
 import { createRecognitionRequest, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js';
 import { getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js';
-import { applyLibraryAISuggestions, buildLibraryEditPayload, getLibraryDetailSummary } from '../assets/views/boqLibrary.js';
+import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js';
+import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js';
+import { AI_SYSTEM_PROMPT_PRESETS, DEFAULT_AI_SYSTEM_PROMPT, getAIConfig, getAISystemPromptPreset, restoreBackupSafeAIConfig, toBackupSafeAIConfig } from '../assets/services/aiService.js';
+import { buildSystemPromptGenerationMessages, parseSystemPromptDraft } from '../assets/services/aiPromptService.js';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -15,6 +18,57 @@ function testCosting() {
   assert.equal(hasMissingPrice(0), true);
   assert.equal(hasMissingPrice(''), true);
   assert.equal(hasMissingPrice(1), false);
+}
+
+function testBackupSafeAIConfig() {
+  const safe = toBackupSafeAIConfig({
+    provider: 'openai', base_url: 'https://example.com/v1', model: 'gpt-test', system: 'test', api_key: 'secret-key', ignored: 'x',
+  });
+  assert.deepEqual(safe, { provider: 'openai', base_url: 'https://example.com/v1', model: 'gpt-test', system: 'test' });
+  const restored = restoreBackupSafeAIConfig(
+    { ...safe, api_key: 'backup-key' },
+    { provider: 'deepseek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat', system: 'old', api_key: 'device-key' },
+  );
+  assert.equal(restored.provider, 'openai');
+  assert.equal(restored.api_key, 'device-key');
+}
+
+function testAISystemPromptPresets() {
+  assert.equal(getAISystemPromptPreset(), DEFAULT_AI_SYSTEM_PROMPT);
+  assert.equal(getAISystemPromptPreset('unknown'), DEFAULT_AI_SYSTEM_PROMPT);
+  assert.equal(AI_SYSTEM_PROMPT_PRESETS.review.prompt.includes('报价审查'), true);
+  assert.equal(AI_SYSTEM_PROMPT_PRESETS.knowledge.prompt.includes('资料'), true);
+  assert.equal(DEFAULT_AI_SYSTEM_PROMPT.includes('不虚构价格'), true);
+  assert.equal(DEFAULT_AI_SYSTEM_PROMPT.includes('建议动作：'), true);
+}
+
+function testLegacyDefaultSystemPromptMigration() {
+  const originalLocalStorage = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: () => JSON.stringify({ system: '你是工程造价专家和报价审核助手。基于「企业定额库」「项目清单」「报价版本」「指标库」回答用户问题。先给结论，再给数据依据、风险提示和建议动作；样本不足或缺单价时必须说明。' }),
+    setItem: () => {},
+  };
+  assert.equal(getAIConfig().system, DEFAULT_AI_SYSTEM_PROMPT);
+  globalThis.localStorage = {
+    getItem: () => JSON.stringify({ system: '我自己的提示词' }),
+    setItem: () => {},
+  };
+  assert.equal(getAIConfig().system, '我自己的提示词');
+  globalThis.localStorage = originalLocalStorage;
+}
+
+function testSystemPromptGenerationContract() {
+  const messages = buildSystemPromptGenerationMessages({
+    scenario: '污水厂投标报价复核', focus: '漏项与异常工程量', responseStyle: 'concise',
+  });
+  assert.equal(messages.length, 2);
+  assert.equal(messages[1].content.includes('污水厂投标报价复核'), true);
+  assert.equal(messages[1].content.includes('当前提示词'), false);
+  const withBase = buildSystemPromptGenerationMessages({ scenario: '资料整理', basePrompt: '已有提示词' });
+  assert.equal(withBase[1].content.includes('已有提示词'), true);
+  assert.throws(() => buildSystemPromptGenerationMessages({ scenario: '' }), /工作场景/);
+  assert.equal(parseSystemPromptDraft('```json\n{"prompt":"新的提示词"}\n```'), '新的提示词');
+  assert.throws(() => parseSystemPromptDraft('{"summary":"缺少草案"}'), /未返回/);
 }
 
 function testExcelRows() {
@@ -315,6 +369,24 @@ function testLibraryDetailSummary() {
   });
 }
 
+function testLibraryMetricCards() {
+  assert.deepEqual(buildLibraryMetricCards({ total: 1268, water: 892, added: 48, references: 326 }), [
+    { label: '清单总数', value: '1,268', unit: '个', note: '全部标准清单', icon: 'format_list_bulleted', tone: 'blue' },
+    { label: '水处理工程清单', value: '892', unit: '个', note: '占比 70.3%', icon: 'water_drop', tone: 'teal' },
+    { label: '本月新增清单', value: '48', unit: '个', note: '本月新增', icon: 'add', tone: 'blue' },
+    { label: '被引用次数', value: '326', unit: '次', note: '累计引用', icon: 'trending_up', tone: 'amber' },
+  ]);
+}
+
+function testIconSystem() {
+  assert.equal(ICONS.navigation.boqLibrary, 'format_list_bulleted');
+  assert.equal(ICONS.action.import, 'upload');
+  assert.equal(ICONS.status.error, 'error');
+  assert.equal(ICON_TONES.primary, 'teal');
+  assert.equal(getIcon('action', 'remove'), 'delete');
+  assert.equal(getIcon('missing', 'missing', 'info'), 'info');
+}
+
 function testWorkbookSummariesForAiImport() {
   const sheets = summarizeSheetMatrices([
     { name: '封面', matrix: [['污水厂项目'], ['编制单位：某设计院']] },
@@ -381,6 +453,10 @@ function notFound() {
 }
 
 testCosting();
+testBackupSafeAIConfig();
+testAISystemPromptPresets();
+testLegacyDefaultSystemPromptMigration();
+testSystemPromptGenerationContract();
 testExcelRows();
 testImportMapping();
 testMappingTemplates();
@@ -393,6 +469,8 @@ testAiImportRecognitionContract();
 testAiImportWizardSafety();
 testAiImportReadinessExplainsMissingRequiredMapping();
 testLibraryDetailSummary();
+testLibraryMetricCards();
+testIconSystem();
 testWorkbookSummariesForAiImport();
 await testLocalFolderJsonStorage();
 await testVersions();
@@ -509,6 +587,19 @@ async function testVersions() {
   assert.equal(audit.issues.zeroQty.length, 1);
   assert.equal(audit.issues.factorRisk.length, 1);
   assert.equal(audit.issues.unmatchedQuota.length, 1);
+
+  await repo.projectRepo.replaceAll([{ id: 'p-ref', name: '引用测试项目', totalCost: 100 }]);
+  await repo.quotaRepo.replaceAll([{ id: 'q-ref', name: '被引用定额', unit: 'm³', priceTotal: 10 }]);
+  await repo.boqRepo.replaceAll([{ id: 'line-ref', projectId: 'p-ref', quotaItemId: 'q-ref', name: '被引用清单', unit: 'm³', qty: 10, unitPrice: 10, factor: 1, amount: 100 }]);
+  await repo.boqLibraryRepo.replaceAll([{ id: 'lib-ref', name: '引用清单库', unit: 'm³', quotaItemIds: ['q-ref'] }]);
+  const { quotaService } = await import('../assets/services/quotaService.js?v=test-version');
+  await assert.rejects(() => quotaService.remove('q-ref'), err => err.code === 'QUOTA_IN_USE' && err.usage.total === 2);
+  const removal = await quotaService.remove('q-ref', { force: true });
+  assert.equal(removal.projectLineCount, 1);
+  assert.equal((await repo.boqRepo.byProject('p-ref')).find(line => line.id === 'line-ref').quotaReferenceStatus, 'missing');
+  assert.deepEqual((await repo.boqLibraryRepo.findById('lib-ref')).quotaItemIds, []);
+  const invalidAudit = await boqService.audit('p-ref');
+  assert.equal(invalidAudit.issues.invalidQuotaReference.length, 1);
 }
 
 async function testDataEngine() {
@@ -571,6 +662,9 @@ async function testDataEngine() {
   assert.equal(dashboard.qualityScore > 0, true);
   assert.equal(dashboard.sourceSummary.archived_project > 0, true);
   assert.equal(dashboard.stageSummary['采集'] > 0, true);
+  await projectService.archive('p2');
+  assert.equal((await repo.dataFactRepo.all()).some(f => f.projectId === 'p2' && f.sourceType === 'archived_project'), false);
+  assert.equal((await repo.indicatorRepo.all()).some(i => (i.sampleProjectIds || []).includes('p2')), false);
 
   await repo.projectRepo.replaceAll([
     ...(await repo.projectRepo.all()),
@@ -611,10 +705,14 @@ async function testArchiveEligibility() {
   };
   const repo = await import('../assets/data/repository.js?v=test-workflow');
   const { archiveEligibility } = await import('../assets/services/projectWorkflow.js?v=test-workflow');
-  const { projectService } = await import('../assets/services/projectService.js?v=test-workflow');
+  const { projectService, normalizeProjectMetadata } = await import('../assets/services/projectService.js?v=test-workflow');
   const { versionService } = await import('../assets/services/versionService.js?v=test-workflow');
 
   const project = { id: 'pa', name: '归档校验项目', status: 'doing', totalCost: 0 };
+  assert.deepEqual(normalizeProjectMetadata({ code: ' P-01 ', client: ' 业主 ', region: ' 南京 ', stage: '投标报价', priceYear: 2026 }), {
+    code: 'P-01', client: '业主', region: '南京', stage: '投标报价', priceYear: '2026',
+  });
+  assert.equal(normalizeProjectMetadata({ priceYear: '20x6' }).priceYear, '');
   await repo.projectRepo.replaceAll([project]);
   await repo.boqRepo.replaceAll([
     { id: 'la1', projectId: 'pa', name: '缺价项', unit: 'm²', qty: 0, factor: 1, unitPrice: 0, amount: 0 },

@@ -2,8 +2,8 @@
 import { boqRepo, projectRepo, versionRepo } from '../data/repository.js?v=3.9';
 import { uid } from '../utils/dom.js';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { dataEngineService } from './dataEngineService.js?v=3.9';
-import { groupForLine } from './boqService.js?v=3.9';
+import { dataEngineService } from './dataEngineService.js?v=4.0';
+import { groupForLine } from './boqService.js?v=4.0';
 
 const LINE_FIELDS = ['quotaItemId', 'code', 'name', 'feature', 'unit', 'qty', 'factor', 'unitPrice', 'amount', 'priceMissing', 'structureGroup'];
 

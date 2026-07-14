@@ -1,5 +1,5 @@
 // 定额库服务
-import { quotaRepo } from '../data/repository.js?v=3.9';
+import { quotaRepo, boqRepo, boqLibraryRepo } from '../data/repository.js?v=3.9';
 import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=4.0';
 import { uid } from '../utils/dom.js';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
@@ -44,8 +44,46 @@ export const quotaService = {
     return obj;
   },
 
-  /** 删除 */
-  async remove(id) { return await quotaRepo.remove(id); },
+  /** 删除前先检查引用。强制删除会保留项目工作价，但把引用标记为已失效。 */
+  async usage(id) {
+    const [projectLines, libraryItems] = await Promise.all([boqRepo.all(), boqLibraryRepo.all()]);
+    const lines = projectLines.filter(line => line.quotaItemId === id);
+    const libraries = libraryItems.filter(item => (item.quotaItemIds || []).includes(id));
+    return {
+      projectLineCount: lines.length,
+      projectIds: [...new Set(lines.map(line => line.projectId).filter(Boolean))],
+      libraryItemCount: libraries.length,
+      libraryItemIds: libraries.map(item => item.id),
+      total: lines.length + libraries.length,
+    };
+  },
+
+  async remove(id, { force = false } = {}) {
+    const usage = await this.usage(id);
+    if (usage.total && !force) {
+      const err = new Error('该定额仍被项目清单或清单库引用，请先替换关联定额，或确认强制删除。');
+      err.code = 'QUOTA_IN_USE';
+      err.usage = usage;
+      throw err;
+    }
+    if (force && usage.total) {
+      const [lines, libraryItems] = await Promise.all([boqRepo.all(), boqLibraryRepo.all()]);
+      await Promise.all([
+        boqRepo.replaceAll(lines.map(line => line.quotaItemId === id ? {
+          ...line,
+          quotaReferenceStatus: 'missing',
+          quotaReferenceNote: '关联定额已删除，请重新匹配或确认保留当前项目单价。',
+        } : line)),
+        boqLibraryRepo.replaceAll(libraryItems.map(item => (item.quotaItemIds || []).includes(id) ? {
+          ...item,
+          quotaItemIds: item.quotaItemIds.filter(quotaId => quotaId !== id),
+          updatedAt: new Date().toISOString(),
+        } : item)),
+      ]);
+    }
+    await quotaRepo.remove(id);
+    return usage;
+  },
 
   /** 从 Excel 导入（定额库格式） */
   async importFromExcel(file) {

@@ -1,6 +1,6 @@
 // 视图：仪表盘
 import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.9';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { experienceService } from '../services/experienceService.js?v=3.9';
 import { fmt, fmtMoney, esc } from '../utils/dom.js';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
@@ -288,8 +288,8 @@ function summaryMini(label, value, note, tone = 'slate') {
 function summaryKpi(label, value, note, icon, tone = 'slate') {
   return `<div class="card p-3 min-w-0 min-h-[95px]">
     <div class="flex items-center gap-3">
-      <div class="h-11 w-11 rounded-lg border ${toneClass(tone)} flex items-center justify-center shrink-0">
-        <span class="material-symbols-outlined text-[22px]">${icon}</span>
+      <div class="icon-surface ${toneClass(tone)}">
+        <span class="material-symbols-outlined icon-kpi">${icon}</span>
       </div>
       <div class="min-w-0">
         <div class="text-xs text-slate-500 truncate">${label}</div>
@@ -309,7 +309,7 @@ function metricCard(label, value, unit, note, icon, tone = 'slate') {
         <div class="mt-1 text-xl font-semibold tabular-nums text-slate-900 truncate">${value}<span class="ml-1 text-xs font-normal text-slate-500">${unit}</span></div>
       </div>
       <div class="h-8 w-8 rounded border ${toneCls} flex items-center justify-center shrink-0">
-        <span class="material-symbols-outlined text-[18px]">${icon}</span>
+        <span class="material-symbols-outlined icon-action">${icon}</span>
       </div>
     </div>
     <div class="mt-2 text-xs text-slate-500 truncate">${note}</div>

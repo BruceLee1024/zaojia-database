@@ -1,5 +1,5 @@
 // 视图：我的项目
-import { projectService } from '../services/projectService.js?v=3.9';
+import { projectService } from '../services/projectService.js?v=4.0';
 import { indicatorService } from '../services/indicatorService.js?v=3.9';
 import { boqRepo, versionRepo } from '../data/repository.js?v=3.9';
 import { fmt, fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
@@ -96,7 +96,7 @@ export async function render() {
       </section>
     </div>
   `;
-  document.getElementById('btnNew').onclick = () => editForm({ id: '', name: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', status: 'doing' });
+  document.getElementById('btnNew').onclick = () => editForm({ id: '', name: '', code: '', client: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing' });
   document.getElementById('pf_keyword_filter')?.addEventListener('input', e => {
     projectState.keyword = e.target.value;
     clearTimeout(window.__projectSearchTimer);
@@ -147,7 +147,7 @@ export async function render() {
   });
   if (params.action === 'new') {
     window.__app.state.routeParams = {};
-    editForm({ id: '', name: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', status: 'doing' });
+    editForm({ id: '', name: '', code: '', client: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing' });
   }
 }
 
@@ -301,6 +301,8 @@ function projectCard(summary) {
       <div class="mt-4 flex items-center gap-2 text-xs text-slate-500">
         <span class="badge badge-gray">${esc(p.structure || '未填结构')}</span>
         <span class="badge badge-gray">${esc(p.process || '未填工艺')}</span>
+        ${p.region ? `<span class="badge badge-gray">${esc(p.region)}</span>` : ''}
+        ${p.stage ? `<span class="badge badge-gray">${esc(p.stage)}</span>` : ''}
       </div>
       <button data-open="${p.id}" ${next.priceStatus ? `data-price-status="${next.priceStatus}"` : ''} ${next.riskStatus ? `data-risk-status="${next.riskStatus}"` : ''} class="mt-4 w-full rounded border ${nextToneClass(next.tone)} px-3 py-2 text-left text-xs hover:bg-white">
         <div class="font-medium">${esc(next.title)}</div>
@@ -353,6 +355,12 @@ function editForm(p) {
           <label class="col-span-4 block text-xs font-medium text-slate-500">项目名称 <span class="text-red-500">*</span>
             <input id="pf_name" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-800" value="${esc(p.name)}" placeholder="例如：产品水池 / 预处理车间" />
           </label>
+          <label class="col-span-2 block text-xs font-medium text-slate-500">项目编号
+            <input id="pf_code" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.code || '')}" placeholder="例如：WS-2026-001" />
+          </label>
+          <label class="col-span-2 block text-xs font-medium text-slate-500">建设单位 / 客户
+            <input id="pf_client" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.client || '')}" placeholder="用于项目档案与成果封面" />
+          </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">项目类型
             <select id="pf_type" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${TYPES.map(t => `<option value="${esc(t)}" ${selectedType === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="__custom__" ${selectedType === '__custom__' ? 'selected' : ''}>自定义</option></select>
             <input id="pf_type_custom" class="mt-2 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm ${isCustomType ? '' : 'hidden'}" value="${esc(isCustomType ? p.type : '')}" placeholder="请输入项目类型，例如：再生水厂 / 污泥处置中心" aria-label="自定义项目类型" />
@@ -389,12 +397,21 @@ function editForm(p) {
           <div class="font-semibold text-slate-800">指标口径</div>
           <div class="mt-1 text-xs text-slate-500">这些字段会影响指标分桶和项目对标，请尽量填写。</div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-4 gap-3">
           <label class="block text-xs font-medium text-slate-500">结构形式
             <input id="pf_struct" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="钢筋砼 / 砖混 / 钢结构" value="${esc(p.structure || '')}" />
           </label>
           <label class="block text-xs font-medium text-slate-500">工艺类型
             <input id="pf_proc" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="AAO / MBR / SBR" value="${esc(p.process || '')}" />
+          </label>
+          <label class="block text-xs font-medium text-slate-500">地区
+            <input id="pf_region" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="例如：江苏·南京" value="${esc(p.region || '')}" />
+          </label>
+          <label class="block text-xs font-medium text-slate-500">价格年份
+            <input id="pf_price_year" type="number" min="2000" max="2100" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm tabular-nums" value="${esc(p.priceYear || '')}" placeholder="2026" />
+          </label>
+          <label class="col-span-2 block text-xs font-medium text-slate-500">计价阶段
+            <select id="pf_stage" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${['概算', '预算', '招标控制价', '投标报价', '结算参考'].map(stage => `<option value="${stage}" ${p.stage === stage ? 'selected' : ''}>${stage}</option>`).join('')}</select>
           </label>
         </div>
       </section>
@@ -430,12 +447,17 @@ function editForm(p) {
     const obj = {
       id: p.id || null,
       name: document.getElementById('pf_name').value.trim(),
+      code: document.getElementById('pf_code').value.trim(),
+      client: document.getElementById('pf_client').value.trim(),
       type: typeSelect.value === '__custom__' ? customTypeInput.value.trim() : typeSelect.value,
       scale: document.getElementById('pf_scale').value,
       dailyCapacity: document.getElementById('pf_daily').value,
       area: document.getElementById('pf_area').value,
       structure: document.getElementById('pf_struct').value,
       process: document.getElementById('pf_proc').value,
+      region: document.getElementById('pf_region').value.trim(),
+      priceYear: document.getElementById('pf_price_year').value.trim(),
+      stage: document.getElementById('pf_stage').value,
       status: document.getElementById('pf_status').value,
     };
     if (!obj.name) {

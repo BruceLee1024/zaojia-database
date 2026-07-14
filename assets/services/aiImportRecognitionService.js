@@ -1,5 +1,5 @@
 // AI 自由格式清单识别：只传递当前工作表的有限样本，且只返回待用户确认的映射建议。
-import { getAIConfig } from './aiService.js?v=3.9';
+import { getAIConfig } from './aiService.js?v=4.0';
 import { normalizeImportHeader } from './importMappingService.js?v=1.2';
 
 const PROJECT_FIELDS = [

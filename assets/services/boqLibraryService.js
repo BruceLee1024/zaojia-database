@@ -3,7 +3,7 @@ import { boqLibraryRepo, boqRepo, projectRepo, quotaRepo } from '../data/reposit
 import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=1.0';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { uid } from '../utils/dom.js';
-import { groupForLine, recomputeProjectCost } from './boqService.js?v=3.9';
+import { groupForLine, recomputeProjectCost } from './boqService.js?v=4.0';
 
 const now = () => new Date().toISOString();
 const clean = value => String(value ?? '').trim();

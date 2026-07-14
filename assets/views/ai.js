@@ -1,9 +1,10 @@
 // 视图：AI 抽屉
 import { tryLocalCommand } from '../ai/localCommands.js?v=3.9';
-import { callLLM } from '../ai/remoteLLM.js?v=3.9';
+import { callLLM } from '../ai/remoteLLM.js?v=4.0';
 
 const history = [];
 let aiReturnFocus = null;
+let remoteConsentGranted = false;
 
 export function open() {
   aiReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -15,7 +16,7 @@ export function open() {
     addMsg('assistant',
 `你好，我是工程造价助手。
 
-我会优先读取本地项目、清单、指标和报价版本，帮助你做审查、对标、推荐定额和估算。`);
+我会优先处理本地问题；只有需要远端模型时，才会在本次会话首次发送前征得你的确认。`);
     addSuggestions();
   }
 }
@@ -100,6 +101,14 @@ export async function send(text) {
 
   addMsg('assistant', '…思考中');
   try {
+    if (!remoteConsentGranted) {
+      const approved = confirm('本次远端 AI 请求会发送：当前项目摘要、最多 30 条当前清单、最近 5 个报价版本摘要、最多 30 条指标摘要及最多 8 条相关复盘摘要；不会发送 API Key。是否继续？');
+      if (!approved) {
+        replaceLast('已取消远端 AI 请求。你仍可使用本地查询、报价审查和资料库筛选。');
+        return;
+      }
+      remoteConsentGranted = true;
+    }
     const reply = await callLLM(text, history);
     history.push({ role: 'user', content: text });
     history.push({ role: 'assistant', content: reply });

@@ -1,8 +1,8 @@
 // AI 辅助建议服务：本地规则优先，远端模型作为增强
-import { getAIConfig } from './aiService.js?v=3.9';
-import { testConnection as remoteTestConnection } from '../ai/remoteLLM.js?v=3.9';
+import { getAIConfig } from './aiService.js?v=4.1';
+import { testConnection as remoteTestConnection } from '../ai/remoteLLM.js?v=4.0';
 import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo } from '../data/repository.js?v=3.9';
-import { boqService } from './boqService.js?v=3.9';
+import { boqService } from './boqService.js?v=4.0';
 import { versionService } from './versionService.js?v=3.9';
 import { searchAll } from './globalSearchService.js?v=1.0';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';

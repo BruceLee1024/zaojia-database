@@ -1,30 +1,31 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=4.9';
-import * as importer  from './assets/views/importer.js?v=1.6';
-import * as quota     from './assets/views/quota.js?v=4.4';
-import * as projects  from './assets/views/projects.js?v=4.8';
-import * as boq       from './assets/views/boq.js?v=4.5';
-import * as indicators from './assets/views/indicators.js?v=5.7';
+import * as dashboard from './assets/views/dashboard.js?v=5.0';
+import * as importer  from './assets/views/importer.js?v=1.7';
+import * as quota     from './assets/views/quota.js?v=4.6';
+import * as projects  from './assets/views/projects.js?v=4.9';
+import * as boq       from './assets/views/boq.js?v=4.6';
+import * as indicators from './assets/views/indicators.js?v=5.9';
 import * as experience from './assets/views/experience.js?v=4.8';
-import * as settings  from './assets/views/settings.js?v=4.3';
-import * as ai        from './assets/views/ai.js?v=4.0';
+import * as settings  from './assets/views/settings.js?v=4.6';
+import * as ai        from './assets/views/ai.js?v=4.2';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
 import { smartSearch } from './assets/services/aiAssistService.js?v=1.2';
 import { getStorageStatus } from './assets/data/storage.js?v=1.0';
 import { openModal, closeModal, esc } from './assets/utils/dom.js';
+import { ICONS } from './assets/utils/icons.js?v=1.0';
 
 const VIEWS = [
-  { id: 'dashboard',  label: '我的概览',   icon: 'dashboard', group: '我的工作台', desc: '继续最近工作' },
-  { id: 'importer',   label: '导入资料',   icon: 'upload_file', group: '我的工作台', desc: '清单、定额与备份' },
-  { id: 'ai-import',  label: 'AI 导入',    icon: 'auto_awesome', group: '我的工作台', desc: '自由格式清单识别', hidden: true },
-  { id: 'quota',      label: '我的定额库', icon: 'menu_book', group: '我的工作台', desc: '常用价格参考' },
-  { id: 'boq-library', label: '我的清单库', icon: 'format_list_bulleted', group: '我的工作台', desc: '通用清单复用' },
-  { id: 'projects',   label: '我的项目',   icon: 'folder_managed', group: '我的工作台', desc: '项目资料与案例' },
-  { id: 'boq',        label: '工程量清单', icon: 'list_alt', group: '工作台', desc: '报价编制' },
-  { id: 'indicators', label: '造价参考',   icon: 'analytics', group: '工作台', desc: '案例与指标' },
-  { id: 'experience', label: '复盘笔记',   icon: 'psychology_alt', group: '个人积累', desc: '记录可复用经验' },
-  { id: 'settings',   label: '数据与备份', icon: 'settings', group: '个人积累', desc: '本地存储与维护' },
+  { id: 'dashboard',  label: '我的概览',   icon: ICONS.navigation.overview, group: '我的工作台', desc: '继续最近工作' },
+  { id: 'importer',   label: '导入资料',   icon: ICONS.navigation.import, group: '我的工作台', desc: '清单、定额与备份' },
+  { id: 'ai-import',  label: 'AI 导入',    icon: ICONS.resource.ai, group: '我的工作台', desc: '自由格式清单识别', hidden: true },
+  { id: 'quota',      label: '我的定额库', icon: ICONS.navigation.quota, group: '我的工作台', desc: '常用价格参考' },
+  { id: 'boq-library', label: '我的清单库', icon: ICONS.navigation.boqLibrary, group: '我的工作台', desc: '通用清单复用' },
+  { id: 'projects',   label: '我的项目',   icon: ICONS.navigation.projects, group: '我的工作台', desc: '项目资料与案例' },
+  { id: 'boq',        label: '工程量清单', icon: ICONS.navigation.boq, group: '工作台', desc: '报价编制' },
+  { id: 'indicators', label: '造价参考',   icon: ICONS.navigation.indicators, group: '工作台', desc: '案例与指标' },
+  { id: 'experience', label: '复盘笔记',   icon: ICONS.navigation.experience, group: '个人积累', desc: '记录可复用经验' },
+  { id: 'settings',   label: '数据与备份', icon: ICONS.navigation.settings, group: '个人积累', desc: '本地存储与维护' },
 ];
 
 const state = {
@@ -37,7 +38,7 @@ const renderers = {
   dashboard, importer, quota, projects, boq, indicators, experience, settings,
   'boq-library': {
     render: async () => {
-      const module = await import('./assets/views/boqLibrary.js?v=1.6');
+      const module = await import('./assets/views/boqLibrary.js?v=2.0');
       return module.render();
     },
   },
@@ -59,7 +60,7 @@ function renderNav() {
         const active = state.currentView === v.id;
         return `
           <div class="nav-item px-3 py-2.5 cursor-pointer flex items-center gap-3 text-sm font-medium ${active ? 'active' : ''}" data-go="${v.id}">
-            <span class="material-symbols-outlined text-[21px] shrink-0">${v.icon}</span>
+            <span class="material-symbols-outlined icon-nav shrink-0">${v.icon}</span>
             <div class="min-w-0 flex-1">
               <div class="leading-5">${v.label}</div>
               <div class="text-[11px] leading-4 ${active ? 'text-teal-50/80' : 'text-slate-500'}">${v.desc}</div>
@@ -109,7 +110,7 @@ function renderErrorState(current, err) {
     <div class="min-h-full flex items-center justify-center p-6">
       <section class="max-w-xl w-full rounded-lg border border-red-200 bg-white p-6 text-center">
         <div class="mx-auto h-12 w-12 rounded-lg border border-red-200 bg-red-50 text-red-600 flex items-center justify-center">
-          <span class="material-symbols-outlined text-[26px]">error</span>
+          <span class="material-symbols-outlined icon-empty">${ICONS.status.error}</span>
         </div>
         <h1 class="mt-4 text-lg font-semibold text-slate-900">${escapeHtml(current.label || '当前页面')} 加载失败</h1>
         <p class="mt-2 text-sm leading-6 text-slate-500">页面渲染时遇到错误，已保留控制台日志，主内容不再停留在旧页面。</p>
@@ -130,7 +131,7 @@ function escapeHtml(value) {
 }
 
 function exportAll() {
-  import('./assets/views/settings.js?v=4.3').then(m => m.triggerExportBackup());
+  import('./assets/views/settings.js?v=4.6').then(m => m.triggerExportBackup());
   go('settings');
 }
 

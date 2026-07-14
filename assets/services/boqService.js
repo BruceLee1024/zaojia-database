@@ -189,11 +189,13 @@ export const boqService = {
   },
 
   async audit(projectId) {
-    const [project, lines, versions] = await Promise.all([
+    const [project, lines, versions, quotas] = await Promise.all([
       projectRepo.findById(projectId),
       boqRepo.byProject(projectId),
       versionRepo.byProject(projectId),
+      quotaRepo.all(),
     ]);
+    const quotaIds = new Set(quotas.map(item => item.id));
     const duplicateMap = new Map();
     lines.forEach(line => {
       const key = [line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|');
@@ -204,6 +206,7 @@ export const boqService = {
       zeroQty: lines.filter(line => !(Number(line.qty) > 0)),
       factorRisk: lines.filter(line => Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8),
       unmatchedQuota: lines.filter(line => !line.quotaItemId),
+      invalidQuotaReference: lines.filter(line => line.quotaReferenceStatus === 'missing' || (line.quotaItemId && !quotaIds.has(line.quotaItemId))),
       duplicate: lines.filter(line => duplicateMap.get([line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|')) > 1),
       noVersion: versions.length ? [] : [project].filter(Boolean),
     };
@@ -212,6 +215,7 @@ export const boqService = {
       - issues.zeroQty.length * 8
       - issues.factorRisk.length * 5
       - issues.unmatchedQuota.length * 4
+      - issues.invalidQuotaReference.length * 8
       - issues.duplicate.length * 3
       - (versions.length ? 0 : 10));
     return {
