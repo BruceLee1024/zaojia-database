@@ -44,7 +44,7 @@ const renderers = {
   },
   'ai-import': {
     render: async () => {
-      const module = await import('./assets/views/aiImportWizard.js?v=1.5');
+      const module = await import('./assets/views/aiImportWizard.js?v=1.6');
       return module.render();
     },
   },

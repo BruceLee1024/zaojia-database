@@ -1,4 +1,5 @@
-// AI 自由格式清单识别：只传递当前工作表的有限样本，且只返回待用户确认的映射建议。
+// AI 自由格式清单识别：只传递当前工作表的有限样本。
+// 标准表头由本地规则优先自动匹配，AI 只负责补充模糊列的建议。
 import { getAIConfig } from './aiService.js?v=4.0';
 import { normalizeImportHeader } from './importMappingService.js?v=1.2';
 
@@ -116,7 +117,7 @@ export function validateRecognitionPayload(payload, { targetType, sheetName = ''
     };
   });
   const amountRule = AMOUNT_RULES.has(payload?.amountRule) ? payload.amountRule : 'calculated';
-  return {
+  return applyAutomaticHeaderMappings({
     summary: String(payload?.summary || 'AI 已生成字段映射建议'),
     targetType,
     fields,
@@ -129,8 +130,94 @@ export function validateRecognitionPayload(payload, { targetType, sheetName = ''
       sampleRowCount: Array.isArray(sampleRows) ? Math.min(sampleRows.length, 50) : 0,
       headers: headers.slice(0, 20),
     },
+  }, { targetType, headers, sampleRows });
+}
+
+// 对明确的标准表头做确定性匹配。这样即使模型漏识别，常规 Excel 也不必逐项手动选择。
+export function applyAutomaticHeaderMappings(recognition, { targetType, headers = [], sampleRows = [] } = {}) {
+  const defs = getRecognitionFields(targetType || recognition?.targetType);
+  const fields = { ...(recognition?.fields || {}) };
+  const usedSources = new Set(Object.values(fields)
+    .filter(field => field?.sourceType === 'column')
+    .map(field => field.source));
+
+  defs.forEach(def => {
+    const current = fields[def.key] || emptyRecognitionField(def);
+    const exactHeader = findExactAliasHeader(def, headers, sampleRows, usedSources);
+
+    if (current.sourceType === 'column') {
+      const isExactAlias = def.aliases.some(alias => normalizeImportHeader(alias) === normalizeImportHeader(current.source));
+      fields[def.key] = {
+        ...current,
+        // 高置信度的 AI 建议及标准表头匹配均可直接采用；用户改动后仍需自行确认。
+        confirmed: current.confidence === 'high' || isExactAlias,
+        autoMatched: current.confidence === 'high' || isExactAlias,
+        reason: isExactAlias
+          ? `已按标准表头「${current.source}」自动匹配`
+          : current.reason,
+      };
+      return;
+    }
+
+    if (exactHeader) {
+      usedSources.add(exactHeader);
+      fields[def.key] = {
+        ...current,
+        sourceType: 'column',
+        source: exactHeader,
+        fixedValue: '',
+        confidence: 'high',
+        reason: `已按标准表头「${exactHeader}」自动匹配`,
+        alternatives: unique([exactHeader, ...(current.alternatives || [])]).slice(0, 3),
+        confirmed: true,
+        autoMatched: true,
+      };
+      return;
+    }
+
+    // 可选字段没有来源列本身就是完整选择，无需用户再勾选一次“不导入”。
+    if (current.sourceType === 'none' && !def.required) {
+      fields[def.key] = {
+        ...current,
+        confirmed: true,
+        autoMatched: true,
+        reason: current.reason || `未检测到可用于“${def.label}”的来源列，已设为不导入`,
+      };
+    }
+  });
+
+  return { ...recognition, targetType: targetType || recognition?.targetType, fields };
+}
+
+function emptyRecognitionField(def) {
+  return {
+    key: def.key, label: def.label, required: Boolean(def.required), sourceType: 'none', source: '', fixedValue: '',
+    confidence: 'low', reason: `未匹配到可用于“${def.label}”的来源列`, alternatives: [], confirmed: false,
   };
 }
+
+function findExactAliasHeader(def, headers, sampleRows, usedSources) {
+  for (const alias of def.aliases || []) {
+    const header = headers.find(value => normalizeImportHeader(value) === normalizeImportHeader(alias));
+    if (header && !usedSources.has(header) && hasUsableValues(def, header, sampleRows)) return header;
+  }
+  return '';
+}
+
+function hasUsableValues(def, header, sampleRows) {
+  const values = sampleRows.map(row => String(row?.[header] ?? '').trim()).filter(Boolean);
+  if (!values.length) return false;
+  if (def.kind === 'number' || def.kind === 'money') return values.filter(isNumericValue).length / values.length >= 0.6;
+  if (def.kind === 'unit') return values.some(value => /^(?:m[23]?|m²|m³|㎡|㎥|t|kg|台|套|项|个|根|米|吨|千克|平方(?:米)?|立方(?:米)?)$/i.test(value.replace(/\s/g, '')));
+  return true;
+}
+
+function isNumericValue(value) {
+  const normalized = String(value).replace(/[,，\s]/g, '');
+  return normalized !== '' && Number.isFinite(Number(normalized));
+}
+
+function unique(values) { return [...new Set(values.filter(Boolean))]; }
 
 function recognitionSystemPrompt() {
   return `你是工程量清单 Excel 字段识别器。只返回 JSON 对象，不能返回 Markdown 或解释文字。\n字段必须来自 availableFields，source 必须精确等于 headers 中的列名。每个字段返回 sourceType(column/fixed/none)、source、fixedValue、confidence(high/medium/low)、reason、alternatives。不要猜测不存在的列，不要填入业务数据。amountRule 只能是 calculated、sourceAmount 或 deriveUnitPrice。`;

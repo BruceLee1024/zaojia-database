@@ -313,8 +313,10 @@ function testAiImportRecognitionContract() {
     },
   }, { targetType: 'project_boq', sheetName: '工程量清单', sampleRows: [{ 项目内容: '池壁混凝土' }], headers: ['编号', '项目内容', '单位', '数量'] });
   assert.equal(valid.fields.name.source, '项目内容');
-  assert.equal(valid.fields.name.confirmed, false);
+  assert.equal(valid.fields.name.confirmed, true);
+  assert.equal(valid.fields.name.autoMatched, true);
   assert.equal(valid.fields.feature.sourceType, 'none');
+  assert.equal(valid.fields.feature.confirmed, true);
   assert.equal(valid.analysis.sheetName, '工程量清单');
   assert.equal(valid.analysis.sampleRowCount, 1);
   assert.equal(valid.fields.feature.reason.includes('未匹配'), true);
@@ -330,6 +332,20 @@ function testAiImportRecognitionContract() {
   assert.throws(() => validateRecognitionPayload({
     fields: { name: { sourceType: 'column', source: '不存在列', confidence: 'high', reason: '' } },
   }, { targetType: 'boq_library', headers: ['清单名称', '单位'] }), /不存在/);
+
+  const localFallback = validateRecognitionPayload({ fields: {} }, {
+    targetType: 'boq_library',
+    headers: ['专业', '清单编码', '清单名称', '项目特征', '单位', '工程数量'],
+    sampleRows: [{ 专业: '水处理工程', 清单编码: '010101', 清单名称: '池壁混凝土', 项目特征: 'C40', 单位: 'm3', 工程数量: 18.5 }],
+  });
+  assert.equal(localFallback.fields.major.source, '专业');
+  assert.equal(localFallback.fields.code.source, '清单编码');
+  assert.equal(localFallback.fields.name.source, '清单名称');
+  assert.equal(localFallback.fields.unit.source, '单位');
+  assert.equal(localFallback.fields.defaultQty.source, '工程数量');
+  assert.equal(localFallback.fields.name.confirmed, true);
+  assert.equal(localFallback.fields.source.sourceType, 'none');
+  assert.equal(localFallback.fields.source.confirmed, true);
 }
 
 function testAiImportWizardSafety() {
@@ -356,6 +372,11 @@ function testAiImportReadinessExplainsMissingRequiredMapping() {
     name: { sourceType: 'fixed', fixedValue: '', confirmed: true },
     unit: { sourceType: 'column', source: '计量单位', confirmed: true },
   }, { targetType: 'boq_library' }), ['“清单名称”填写了固定值，但内容为空']);
+
+  assert.deepEqual(getImportBlockingReasons(fields, {
+    name: { sourceType: 'column', source: '名称', confirmed: true },
+    unit: { sourceType: 'none', confirmed: false },
+  }, { targetType: 'boq_library' }), ['“单位”是必填字段：请选择 Excel 来源列或填写固定值']);
 }
 
 function testLibraryDetailSummary() {

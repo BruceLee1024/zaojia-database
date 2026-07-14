@@ -1,6 +1,6 @@
-// AI 自由格式清单导入向导。模型只给映射建议，所有字段必须由用户确认。
+// AI 自由格式清单导入向导。标准表头自动采用，模型仅补充模糊映射建议。
 import { readWorkbookSummary } from '../data/excel.js?v=1.1';
-import { recognizeBoqImport, getRecognitionFields } from '../services/aiImportRecognitionService.js?v=1.1';
+import { recognizeBoqImport, getRecognitionFields } from '../services/aiImportRecognitionService.js?v=1.2';
 import { boqService } from '../services/boqService.js?v=4.0';
 import { boqLibraryService } from '../services/boqLibraryService.js?v=1.0';
 import { projectRepo } from '../data/repository.js?v=1.0';
@@ -97,7 +97,7 @@ function confirmPanel(projects) {
   const confirmedCount = fields.filter(field => state.fieldState[field.key]?.confirmed).length;
   const blockingReasons = getImportBlockingReasons(fields, state.fieldState, { targetType: state.targetType, projectId: state.projectId });
   const valid = blockingReasons.length === 0;
-  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden"><div class="p-5 border-b border-slate-200"><div class="flex items-start gap-3"><div><h2 class="font-semibold text-slate-900">确认“系统字段 ← Excel 列”的对应关系</h2><p class="mt-1 text-sm text-slate-500">左侧是清单库中要保存的字段；中间下拉框是从上传 Excel 的哪一列取值。每个字段都需点击确认。</p></div><button onclick="window.__aiImport.back()" class="ml-auto h-9 px-3 text-sm border border-slate-300 bg-white">返回工作表</button></div>${mappingGuide()}${combinedMappingPanel()}${recognitionBasisPanel(selected)}${state.recognition.warnings?.length ? `<div class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">${state.recognition.warnings.map(esc).join('；')}</div>` : ''}</div><div class="overflow-auto"><table class="w-full min-w-[960px] text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="p-3">① 系统字段（要保存什么）</th><th class="p-3">② Excel 来源列（从哪列取值）</th><th class="p-3">③ 该列样本值</th><th class="p-3">AI 为什么这样建议</th><th class="p-3 w-20 text-center">④ 确认</th></tr></thead><tbody>${regularFields.map(field => fieldRow(field, selected)).join('')}</tbody></table></div><div class="border-t border-slate-200 bg-slate-50 p-5"><div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-5"><div>${state.targetType === 'project_boq' ? projectPicker(projects) + importModePicker() + amountRulePicker() : '<div class="text-sm text-slate-600">将按编码优先、名称 + 特征 + 单位兜底规则更新或新增清单库条目。</div>'}<div class="mt-3 text-xs ${valid ? 'text-teal-700' : 'text-amber-700'}">已确认 ${confirmedCount} / ${fields.length} 个字段。${valid ? '可以导入。' : `还不能导入：${esc(blockingReasons.join('；'))}`}</div></div><div class="flex items-end justify-end gap-2"><button onclick="window.__aiImport.cancel()" class="h-10 px-4 text-sm border border-slate-300 bg-white">取消</button><button onclick="window.__aiImport.save()" ${valid || state.busy ? '' : 'disabled'} class="h-10 px-4 text-sm brand-bg text-white disabled:opacity-50">${state.busy ? '导入中…' : state.targetType === 'boq_library' ? '确认导入清单库' : '确认导入项目清单'}</button></div></div></div></section>`;
+  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden"><div class="p-5 border-b border-slate-200"><div class="flex items-start gap-3"><div><h2 class="font-semibold text-slate-900">确认“系统字段 ← Excel 列”的对应关系</h2><p class="mt-1 text-sm text-slate-500">系统会先自动采用标准表头和高置信度匹配；只有你改过或识别不确定的字段才需要确认。</p></div><button onclick="window.__aiImport.back()" class="ml-auto h-9 px-3 text-sm border border-slate-300 bg-white">返回工作表</button></div>${mappingGuide()}${combinedMappingPanel()}${recognitionBasisPanel(selected)}${state.recognition.warnings?.length ? `<div class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">${state.recognition.warnings.map(esc).join('；')}</div>` : ''}</div><div class="overflow-auto"><table class="w-full min-w-[960px] text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="p-3">① 系统字段（要保存什么）</th><th class="p-3">② Excel 来源列（从哪列取值）</th><th class="p-3">③ 该列样本值</th><th class="p-3">AI / 规则为什么这样建议</th><th class="p-3 w-24 text-center">④ 状态</th></tr></thead><tbody>${regularFields.map(field => fieldRow(field, selected)).join('')}</tbody></table></div><div class="border-t border-slate-200 bg-slate-50 p-5"><div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-5"><div>${state.targetType === 'project_boq' ? projectPicker(projects) + importModePicker() + amountRulePicker() : '<div class="text-sm text-slate-600">将按编码优先、名称 + 特征 + 单位兜底规则更新或新增清单库条目。</div>'}<div class="mt-3 text-xs ${valid ? 'text-teal-700' : 'text-amber-700'}">已采用 ${confirmedCount} / ${fields.length} 个字段。${valid ? '可以导入。' : `还不能导入：${esc(blockingReasons.join('；'))}`}</div></div><div class="flex items-end justify-end gap-2"><button onclick="window.__aiImport.cancel()" class="h-10 px-4 text-sm border border-slate-300 bg-white">取消</button><button onclick="window.__aiImport.save()" ${valid || state.busy ? '' : 'disabled'} class="h-10 px-4 text-sm brand-bg text-white disabled:opacity-50">${state.busy ? '导入中…' : state.targetType === 'boq_library' ? '确认导入清单库' : '确认导入项目清单'}</button></div></div></div></section>`;
 }
 
 function isCombinedField(key) { return state.combinedMapping?.status === 'ready' && (key === 'name' || key === 'feature'); }
@@ -106,11 +106,11 @@ function combinedMappingPanel() {
   const mapping = state.combinedMapping;
   if (!mapping) return '';
   if (mapping.status !== 'ready') return `<div class="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950"><strong>合并列无法安全拆分。</strong>「${esc(mapping.source)}」的样本中有 ${mapping.sampleCount - mapping.validSampleCount} 行没有换行后的项目特征。系统不会猜测文本边界；请在下方手动只映射“清单名称”，或返回工作表选择正确的独立列。</div>`;
-  return `<div class="mt-4 rounded-md border border-teal-300 bg-teal-50 p-4 text-sm text-teal-950"><div class="flex items-start gap-3"><div><div class="font-semibold">已识别“名称 + 特征”合并列</div><div class="mt-1 text-xs text-teal-800">来源列：Excel「${esc(mapping.source)}」 · 拆分规则：首行 → 清单名称；其余非空行 → 项目特征。</div></div><button onclick="window.__aiImport.disableCombinedMapping()" class="ml-auto h-8 shrink-0 border border-teal-300 bg-white px-2 text-xs text-teal-900">改为手动映射</button></div><div class="mt-3 grid gap-2">${mapping.preview.map((item, index) => `<div class="rounded border border-teal-200 bg-white px-3 py-2 text-xs"><span class="mr-2 text-teal-700">样本 ${index + 1}</span><strong>${esc(item.name)}</strong><span class="mx-2 text-teal-500">→</span><span class="whitespace-pre-line text-slate-700">${esc(item.feature)}</span></div>`).join('')}</div><label class="mt-3 flex items-center gap-2 text-sm font-medium"><input type="checkbox" ${mapping.confirmed ? 'checked' : ''} onchange="window.__aiImport.confirmCombinedMapping(this.checked)" />确认上述拆分规则（同时确认清单名称和项目特征）</label></div>`;
+  return `<div class="mt-4 rounded-md border border-teal-300 bg-teal-50 p-4 text-sm text-teal-950"><div class="flex items-start gap-3"><div><div class="font-semibold">已自动识别“名称 + 特征”合并列</div><div class="mt-1 text-xs text-teal-800">来源列：Excel「${esc(mapping.source)}」 · 拆分规则：首行 → 清单名称；其余非空行 → 项目特征。</div></div><button onclick="window.__aiImport.disableCombinedMapping()" class="ml-auto h-8 shrink-0 border border-teal-300 bg-white px-2 text-xs text-teal-900">改为手动映射</button></div><div class="mt-3 grid gap-2">${mapping.preview.map((item, index) => `<div class="rounded border border-teal-200 bg-white px-3 py-2 text-xs"><span class="mr-2 text-teal-700">样本 ${index + 1}</span><strong>${esc(item.name)}</strong><span class="mx-2 text-teal-500">→</span><span class="whitespace-pre-line text-slate-700">${esc(item.feature)}</span></div>`).join('')}</div><div class="mt-3 text-xs font-medium text-teal-800">已自动采用；如拆分结果不符合原表，可改为手动映射。</div></div>`;
 }
 
 function mappingGuide() {
-  return `<div class="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-xs text-teal-950"><div class="flex flex-wrap items-center gap-x-2 gap-y-1"><strong>怎么看这张表：</strong><span>系统字段「清单名称」</span><span class="font-semibold text-teal-700">←</span><span>Excel 来源列「项目名称」</span><span class="text-teal-700">表示把 Excel 每一行的“项目名称”写入清单库的“清单名称”。</span></div><div class="mt-1 text-teal-800">若 AI 没有建议来源列，请在中间下拉框自行选择最匹配的 Excel 列；没有对应数据则选“不导入”。带 <span class="text-red-600">*</span> 的“清单名称”和“单位”必须选择来源列或填写固定值。</div></div>`;
+  return `<div class="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-xs text-teal-950"><div class="flex flex-wrap items-center gap-x-2 gap-y-1"><strong>怎么看这张表：</strong><span>系统字段「清单名称」</span><span class="font-semibold text-teal-700">←</span><span>Excel 来源列「项目名称」</span><span class="text-teal-700">表示把 Excel 每一行的“项目名称”写入清单库的“清单名称”。</span></div><div class="mt-1 text-teal-800">系统会先按标准表头自动匹配并直接采用；只有没有标准列或置信度不足时，才需要在中间下拉框修改并确认。没有对应数据的可选字段会自动设为“不导入”。带 <span class="text-red-600">*</span> 的字段仍必须有来源列或固定值。</div></div>`;
 }
 
 function incompleteRecognitionPanel() {
@@ -131,7 +131,16 @@ function fieldRow(field, sheet) {
   const selected = value.sourceType === 'fixed' ? '__fixed__' : value.sourceType === 'column' ? value.source : '';
   const noMatch = value.sourceType === 'none';
   const alternatives = value.alternatives?.length ? `<div class="mt-1 text-xs text-slate-500">候选列：${esc(value.alternatives.join('、'))}</div>` : '';
-  return `<tr class="border-t border-slate-100 ${value.confirmed ? 'bg-teal-50/30' : ''}"><td class="p-3"><div class="font-medium text-slate-800">${field.label}${field.required ? '<span class="ml-1 text-red-500">*</span>' : ''}</div></td><td class="p-3"><select onchange="window.__aiImport.setSource('${field.key}', this.value)" class="h-9 min-w-56 rounded border border-slate-300 bg-white px-2 text-sm">${options.replace(`value="${esc(selected)}"`, `value="${esc(selected)}" selected`)}</select>${value.sourceType === 'fixed' ? `<input value="${esc(value.fixedValue)}" oninput="window.__aiImport.setFixedValue('${field.key}', this.value)" placeholder="输入固定值" class="ml-2 h-9 w-40 rounded border border-slate-300 px-2 text-sm" />` : ''}</td><td class="p-3 text-slate-600">${esc(noMatch ? '没有可用来源列' : sample == null ? '-' : String(sample).slice(0, 80))}</td><td class="p-3"><span class="text-xs ${value.confidence === 'high' ? 'text-teal-700' : value.confidence === 'medium' ? 'text-amber-700' : 'text-slate-500'}">${value.confidence === 'high' ? '高' : value.confidence === 'medium' ? '中' : '低'}置信度</span><div class="mt-1 text-xs text-slate-500">${esc(value.reason || (noMatch ? '未匹配到来源列，请手动选择、设为固定值或不导入' : 'AI 识别建议'))}</div>${alternatives}</td><td class="p-3 text-center"><input type="checkbox" ${value.confirmed ? 'checked' : ''} onchange="window.__aiImport.confirmField('${field.key}', this.checked)" /></td></tr>`;
+  const status = noMatch
+    ? field.required
+      ? '<span class="text-xs text-amber-700">请选择来源</span>'
+      : '<span class="text-xs text-slate-500">不导入</span>'
+    : value.autoMatched
+      ? '<span class="inline-flex rounded-full bg-teal-100 px-2 py-1 text-xs font-medium text-teal-800">已自动匹配</span>'
+      : value.confirmed
+        ? '<span class="inline-flex rounded-full bg-teal-100 px-2 py-1 text-xs font-medium text-teal-800">已确认</span>'
+        : `<label class="inline-flex cursor-pointer items-center gap-1 text-xs text-amber-800"><input type="checkbox" onchange="window.__aiImport.confirmField('${field.key}', this.checked)" />确认</label>`;
+  return `<tr class="border-t border-slate-100 ${value.confirmed ? 'bg-teal-50/30' : ''}"><td class="p-3"><div class="font-medium text-slate-800">${field.label}${field.required ? '<span class="ml-1 text-red-500">*</span>' : ''}</div></td><td class="p-3"><select onchange="window.__aiImport.setSource('${field.key}', this.value)" class="h-9 min-w-56 rounded border border-slate-300 bg-white px-2 text-sm">${options.replace(`value="${esc(selected)}"`, `value="${esc(selected)}" selected`)}</select>${value.sourceType === 'fixed' ? `<input value="${esc(value.fixedValue)}" oninput="window.__aiImport.setFixedValue('${field.key}', this.value)" placeholder="输入固定值" class="ml-2 h-9 w-40 rounded border border-slate-300 px-2 text-sm" />` : ''}</td><td class="p-3 text-slate-600">${esc(noMatch ? '没有可用来源列' : sample == null ? '-' : String(sample).slice(0, 80))}</td><td class="p-3"><span class="text-xs ${value.confidence === 'high' ? 'text-teal-700' : value.confidence === 'medium' ? 'text-amber-700' : 'text-slate-500'}">${value.confidence === 'high' ? '高' : value.confidence === 'medium' ? '中' : '低'}置信度</span><div class="mt-1 text-xs text-slate-500">${esc(value.reason || (noMatch ? '未匹配到来源列，请手动选择、设为固定值或不导入' : 'AI 识别建议'))}</div>${alternatives}</td><td class="p-3 text-center">${status}</td></tr>`;
 }
 
 function projectPicker(projects) { return `<label class="mt-4 block text-sm text-slate-700">导入项目<select onchange="window.__aiImport.setProject(this.value)" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2">${projects.map(project => `<option value="${project.id}" ${project.id === state.projectId ? 'selected' : ''}>${esc(project.name)}</option>`).join('')}</select></label>`; }
@@ -171,15 +180,15 @@ async function runRecognition() {
   finally { state.busy = false; await paint(); }
 }
 
-function setSource(key, source) { const field = state.fieldState[key]; if (!field) return; state.fieldState[key] = { ...field, sourceType: source === '__fixed__' ? 'fixed' : source ? 'column' : 'none', source: source && source !== '__fixed__' ? source : '', fixedValue: source === '__fixed__' ? field.fixedValue : '', confirmed: false }; paint(); }
-function setFixedValue(key, fixedValue) { state.fieldState[key] = { ...state.fieldState[key], fixedValue, confirmed: false }; }
+function setSource(key, source) { const field = state.fieldState[key]; if (!field) return; state.fieldState[key] = { ...field, sourceType: source === '__fixed__' ? 'fixed' : source ? 'column' : 'none', source: source && source !== '__fixed__' ? source : '', fixedValue: source === '__fixed__' ? field.fixedValue : '', confirmed: false, autoMatched: false }; paint(); }
+function setFixedValue(key, fixedValue) { state.fieldState[key] = { ...state.fieldState[key], fixedValue, confirmed: false, autoMatched: false }; }
 function confirmField(key, confirmed) { state.fieldState[key] = { ...state.fieldState[key], confirmed }; paint(); }
-function createCombinedMapping(meta) { return meta ? { ...meta, confirmed: false } : null; }
+function createCombinedMapping(meta) { return meta ? { ...meta, confirmed: meta.status === 'ready', autoMatched: meta.status === 'ready' } : null; }
 function applyCombinedFieldState(mapping) {
   ['name', 'feature'].forEach(key => {
     const field = state.fieldState[key];
     if (!field) return;
-    state.fieldState[key] = { ...field, sourceType: 'combined', source: mapping.source, fixedValue: '', transform: mapping.strategy, confidence: 'high', reason: '系统根据合并表头和换行样本识别为“名称 + 特征”列', confirmed: false };
+    state.fieldState[key] = { ...field, sourceType: 'combined', source: mapping.source, fixedValue: '', transform: mapping.strategy, confidence: 'high', reason: '系统根据合并表头和换行样本识别为“名称 + 特征”列', confirmed: true, autoMatched: true };
   });
 }
 function clearUnsafeCombinedSuggestions(source) {
@@ -209,7 +218,10 @@ function currentSheet() { return state.sheets[state.sheetIndex] || null; }
 
 export function getImportBlockingReasons(fields = [], fieldState = {}, { targetType, projectId } = {}) {
   const reasons = [];
-  if (fields.some(field => !fieldState[field.key]?.confirmed)) reasons.push('请逐项确认所有字段');
+  if (fields.some(field => {
+    const value = fieldState[field.key];
+    return value && value.sourceType !== 'none' && !value.confirmed;
+  })) reasons.push('请确认你修改过或识别不确定的字段');
   fields.filter(field => field.required).forEach(field => {
     const value = fieldState[field.key] || {};
     if (!value.sourceType || value.sourceType === 'none') reasons.push(`“${field.label}”是必填字段：请选择 Excel 来源列或填写固定值`);
