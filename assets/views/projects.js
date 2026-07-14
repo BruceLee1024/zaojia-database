@@ -37,7 +37,7 @@ export async function render() {
   });
   const portfolio = portfolioStats(summaries);
   document.getElementById('workspace').innerHTML = `
-    <div class="min-h-full flex flex-col gap-4 max-w-[1680px] mx-auto">
+    <div class="page-frame min-h-full flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="flex items-start gap-4">
           <div>

@@ -268,7 +268,7 @@ function renderHub() {
     ? `当前数据同步到“${state.storageStatus.directoryName || '已选文件夹'}”，并保留浏览器镜像。`
     : '当前数据保存在此浏览器的 IndexedDB 中。';
   document.getElementById('workspace').innerHTML = `
-    <div class="min-h-full max-w-[1680px] mx-auto flex flex-col gap-4">
+    <div class="page-frame min-h-full flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-5">
         <div class="flex flex-col lg:flex-row lg:items-end gap-4">
           <div>
@@ -401,7 +401,7 @@ function paint() {
   const hasUploaded = Boolean(state.fileName);
 
   document.getElementById('workspace').innerHTML = `
-    <div class="h-[calc(100dvh-112px)] min-h-[620px] flex flex-col">
+    <div class="page-frame h-[calc(100dvh-112px)] min-h-[620px] flex flex-col">
       <div class="mb-3 flex items-center gap-3">
         <button onclick="window.__importer.showHub()" class="h-10 w-10 border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 flex items-center justify-center" title="返回导入中心" aria-label="返回导入中心">
           <span class="material-symbols-outlined text-[20px]">arrow_back</span>

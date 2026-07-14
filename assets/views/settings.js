@@ -30,7 +30,7 @@ export async function render() {
   ]);
   const ctx = { cfg, providers, engine, experience, storageStatus, storageEstimate };
   document.getElementById('workspace').innerHTML = `
-    <div class="max-w-[1680px] mx-auto space-y-4">
+    <div class="page-frame space-y-4">
       ${settingsTabs()}
       ${renderActiveTab(ctx)}
     </div>

@@ -69,7 +69,7 @@ export async function render() {
   ]);
   exposeQuotaActions();
   document.getElementById('workspace').innerHTML = `
-    <div class="h-full min-h-[760px] flex flex-col gap-4">
+    <div class="page-frame h-full min-h-[760px] flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white px-4 py-4 shrink-0">
         <div class="flex items-center gap-4">
           <div>

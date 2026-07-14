@@ -61,7 +61,7 @@ export async function render() {
   const visibleProjects = filterReviewProjects(projectRows);
 
   document.getElementById('workspace').innerHTML = `
-    <div class="min-h-full flex flex-col gap-3 max-w-[1680px] mx-auto">
+    <div class="page-frame min-h-full flex flex-col gap-3">
       <section class="card p-4 shrink-0">
         <div class="flex flex-col lg:flex-row lg:items-center gap-4">
           <div class="h-11 w-11 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">

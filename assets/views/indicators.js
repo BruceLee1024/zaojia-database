@@ -44,7 +44,7 @@ export async function render() {
 
   expose();
   document.getElementById('workspace').innerHTML = `
-    <div class="min-h-full flex flex-col gap-3 max-w-[1680px] mx-auto">
+    <div class="page-frame min-h-full flex flex-col gap-3">
       ${decisionHeader()}
       ${trustExplainer()}
       ${decisionFilters()}

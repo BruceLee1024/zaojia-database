@@ -1,12 +1,12 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=5.0';
-import * as importer  from './assets/views/importer.js?v=1.7';
-import * as quota     from './assets/views/quota.js?v=4.6';
-import * as projects  from './assets/views/projects.js?v=4.9';
-import * as boq       from './assets/views/boq.js?v=4.6';
-import * as indicators from './assets/views/indicators.js?v=5.9';
-import * as experience from './assets/views/experience.js?v=4.8';
-import * as settings  from './assets/views/settings.js?v=4.6';
+import * as dashboard from './assets/views/dashboard.js?v=5.1';
+import * as importer  from './assets/views/importer.js?v=1.8';
+import * as quota     from './assets/views/quota.js?v=4.7';
+import * as projects  from './assets/views/projects.js?v=5.0';
+import * as boq       from './assets/views/boq.js?v=4.7';
+import * as indicators from './assets/views/indicators.js?v=6.0';
+import * as experience from './assets/views/experience.js?v=4.9';
+import * as settings  from './assets/views/settings.js?v=4.7';
 import * as ai        from './assets/views/ai.js?v=4.2';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
@@ -38,13 +38,13 @@ const renderers = {
   dashboard, importer, quota, projects, boq, indicators, experience, settings,
   'boq-library': {
     render: async () => {
-      const module = await import('./assets/views/boqLibrary.js?v=2.0');
+      const module = await import('./assets/views/boqLibrary.js?v=2.1');
       return module.render();
     },
   },
   'ai-import': {
     render: async () => {
-      const module = await import('./assets/views/aiImportWizard.js?v=1.6');
+      const module = await import('./assets/views/aiImportWizard.js?v=1.7');
       return module.render();
     },
   },

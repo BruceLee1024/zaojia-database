@@ -23,7 +23,7 @@ export async function render() {
   const stats = buildDashboardStats({ quota, projects, boq, versions, engine, experience });
 
   document.getElementById('workspace').innerHTML = `
-    <div class="min-h-full flex flex-col gap-3 max-w-[1680px] mx-auto">
+    <div class="page-frame min-h-full flex flex-col gap-3">
       ${dashboardTitle(stats)}
 
       ${personalStartCard(stats)}

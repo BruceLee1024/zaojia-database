@@ -59,7 +59,7 @@ async function paint() {
   const title = state.targetType === 'boq_library' ? 'AI 导入我的清单库' : 'AI 导入项目工程量清单';
   const projectOptions = state.targetType === 'project_boq' ? await projectRepo.all() : [];
   document.getElementById('workspace').innerHTML = `
-    <div class="min-h-full max-w-[1280px] mx-auto p-5">
+    <div class="page-frame min-h-full p-5">
       <div class="mb-5 flex items-start gap-3"><button onclick="window.__aiImport.cancel()" class="mt-0.5 h-9 w-9 border border-slate-300 bg-white text-slate-600" title="返回"><span class="material-symbols-outlined">arrow_back</span></button><div><h1 class="text-xl font-semibold text-slate-900">${title}</h1><p class="mt-1 text-sm text-slate-500">上传任意常见 Excel，AI 只识别字段结构；逐字段确认后才会写入本机数据。</p></div></div>
       <div class="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">发送给已配置 AI 服务的内容仅包括：工作表名称、表头和前 50 行样本；不会发送整份文件或本机项目资料。</div>
       ${stepper()}
