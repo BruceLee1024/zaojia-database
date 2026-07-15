@@ -364,12 +364,25 @@ function isExpiredResourcePrice(line, resourcePriceMap, today) {
 }
 
 function duplicateEquipmentInstallationLines(lines, resourcePriceMap) {
-  const compositeResourceIds = new Set(lines
-    .filter(line => line.resourceItemId && resourcePriceForLine(line, resourcePriceMap)?.priceBasis === 'installed_composite')
-    .map(line => line.resourceItemId));
-  const duplicatedIds = new Set(lines
-    .map(line => line.linkedResourceItemId || line.installationResourceItemId || line.manualInstallationResourceId)
-    .filter(resourceId => resourceId && compositeResourceIds.has(resourceId)));
-  return lines.filter(line => duplicatedIds.has(line.resourceItemId)
-    || duplicatedIds.has(line.linkedResourceItemId || line.installationResourceItemId || line.manualInstallationResourceId));
+  const equipmentLines = lines.filter(line => line.resourceItemId);
+  const equipmentById = new Map(equipmentLines.map(line => [line.id, line]));
+  const equipmentByResource = new Map();
+  equipmentLines.forEach(line => {
+    const group = equipmentByResource.get(line.resourceItemId) || [];
+    group.push(line);
+    equipmentByResource.set(line.resourceItemId, group);
+  });
+  const duplicateLineIds = new Set();
+  lines.forEach(installationLine => {
+    const resourceId = installationLine.linkedResourceItemId || installationLine.installationResourceItemId || installationLine.manualInstallationResourceId;
+    if (!resourceId) return;
+    const candidate = installationLine.linkedEquipmentLineId
+      ? equipmentById.get(installationLine.linkedEquipmentLineId)
+      : ((equipmentByResource.get(resourceId) || []).length === 1 ? equipmentByResource.get(resourceId)[0] : null);
+    if (!candidate || candidate.resourceItemId !== resourceId) return;
+    if (resourcePriceForLine(candidate, resourcePriceMap)?.priceBasis !== 'installed_composite') return;
+    duplicateLineIds.add(candidate.id);
+    duplicateLineIds.add(installationLine.id);
+  });
+  return lines.filter(line => duplicateLineIds.has(line.id));
 }

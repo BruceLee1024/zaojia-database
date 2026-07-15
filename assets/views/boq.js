@@ -1,5 +1,5 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo } from '../data/repository.js?v=1.0';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, resourcePriceRepo } from '../data/repository.js?v=4.1';
 import { boqService, groupForLine } from '../services/boqService.js?v=4.0';
 import { boqLibraryService } from '../services/boqLibraryService.js?v=1.0';
 import { projectService } from '../services/projectService.js?v=4.0';
@@ -12,7 +12,8 @@ import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/exc
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
 import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=1.0';
-import { buildBoqResourceViewModel, renderBoqResourceReference } from './boqResourceReference.js?v=4.2';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=4.2';
+import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=4.2';
 
 const BOQ_PAGE_SIZE = 500;
 const boqState = {
@@ -87,9 +88,15 @@ export async function render() {
   if ((!routeParams.projectId || routeParams.projectId === proj.id) && routeParams.activeId) boqState.activeId = routeParams.activeId;
   boqState.expandedProjectIds.add(proj.id);
 
-  const allProjectBoq = await boqRepo.all();
-  const boq = allProjectBoq.filter(line => line.projectId === proj.id);
-  const versions = await versionService.listByProject(proj.id);
+  const [allProjectBoq, versions, resourcePrices, serviceAudit] = await Promise.all([
+    boqRepo.all(),
+    versionService.listByProject(proj.id),
+    resourcePriceRepo.all(),
+    boqService.audit(proj.id),
+  ]);
+  const priceMap = new Map(resourcePrices.map(price => [price.id, price]));
+  const displayLines = allProjectBoq.filter(line => line.projectId === proj.id).map(line => withBoqResourcePriceMetadata(line, priceMap));
+  const boq = annotateBoqResourceAuditIssues(displayLines, serviceAudit);
   if (boqState.treeGroup && !structureGroups(boq, proj).some(group => group.id === boqState.treeGroup)) {
     boqState.treeGroup = '';
   }
@@ -556,6 +563,7 @@ function boqToolbar(selectedCount) {
         <option value="invalidResourceReference" ${boqState.riskStatus === 'invalidResourceReference' ? 'selected' : ''}>资源引用失效</option>
         <option value="expiredResourcePrice" ${boqState.riskStatus === 'expiredResourcePrice' ? 'selected' : ''}>资源价格过期</option>
         <option value="missingResourcePriceBasis" ${boqState.riskStatus === 'missingResourcePriceBasis' ? 'selected' : ''}>缺价格口径</option>
+        <option value="duplicateEquipmentInstallation" ${boqState.riskStatus === 'duplicateEquipmentInstallation' ? 'selected' : ''}>设备安装重复计取</option>
       </select>
       ${toolbarGroup('数据', [
         ['btnAdd', 'add', '添加清单', 'primary'],
@@ -745,16 +753,19 @@ function lineRisks(line) {
   if (line.quotaReferenceStatus === 'missing') risks.push({ id: 'invalidQuotaReference', label: '定额已删除', cls: 'badge-red' });
   const resourceView = buildBoqResourceViewModel(line);
   resourceView.badges.forEach(label => risks.push({
-    id: label === '引用失效' ? 'invalidResourceReference' : label === '价格过期' ? 'expiredResourcePrice' : 'missingResourcePriceBasis',
+    id: label === '引用失效' ? 'invalidResourceReference'
+      : label === '价格过期' ? 'expiredResourcePrice'
+        : label === '安装重复计取' ? 'duplicateEquipmentInstallation'
+          : 'missingResourcePriceBasis',
     label,
     cls: label === '引用失效' ? 'badge-red' : 'badge-yellow',
   }));
-  return risks;
+  return risks.filter((risk, index) => risks.findIndex(item => item.id === risk.id) === index);
 }
 
 function riskBadges(line) {
   const risks = lineRisks(line);
-  return risks.length ? `<div class="flex flex-wrap gap-1">${risks.slice(0, 4).map(r => `<span class="badge ${r.cls}">${r.label}</span>`).join('')}</div>` : '<span class="badge badge-green">正常</span>';
+  return risks.length ? `<div class="flex flex-wrap gap-1">${risks.map(r => `<span class="badge ${r.cls}">${r.label}</span>`).join('')}</div>` : '<span class="badge badge-green">正常</span>';
 }
 
 function groupByCategory(lines) {
@@ -1446,40 +1457,11 @@ function showVersionDiff(diff, projectId) {
 }
 
 async function showQuoteAudit(projectId) {
-  const audit = await reviewQuote(projectId);
-  const meta = audit.meta || {};
-  const issueBlocks = audit.suggestions || [];
-  openModal('AI 报价审查报告', `
-    <div class="space-y-4 text-sm">
-      <div class="grid grid-cols-4 gap-2">
-        ${versionSummary('审查结论', meta.level || '-')}
-        ${versionSummary('健康分', meta.score ?? '-')}
-        ${versionSummary('清单条数', meta.lineCount || 0)}
-        ${versionSummary('历史版本', meta.versionCount || 0)}
-      </div>
-      <div class="rounded border border-teal-200 bg-teal-50 p-3 text-teal-900">
-        <div class="font-medium">${esc(audit.summary)}</div>
-        <div class="mt-1 text-xs opacity-80">AI 审查只提供风险线索；正式报审前仍需人工复核。</div>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        ${issueBlocks.length ? issueBlocks.map(issue => `
-          <div class="rounded border ${issue.count ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-white'} p-3">
-            <div class="flex items-center justify-between">
-              <div class="font-medium text-slate-800">${esc(issue.title)}</div>
-              <span class="badge ${issue.count ? 'badge-yellow' : 'badge-green'}">${issue.count || 0}</span>
-            </div>
-            <div class="mt-1 text-xs text-slate-500">${esc(issue.action || '')}</div>
-            <div class="mt-2 max-h-24 overflow-auto scroll-thin text-xs text-slate-600">
-              ${(issue.lines || []).slice(0, 6).map(line => `<div class="truncate" title="${esc(line?.name || line?.message || '')}">• ${esc(line?.name || line?.message || '当前项目')}</div>`).join('') || '<div class="text-slate-400">未列出具体清单</div>'}
-            </div>
-          </div>
-        `).join('') : '<div class="col-span-2 rounded border border-slate-200 bg-white p-8 text-center text-slate-400">暂未发现明显风险。</div>'}
-      </div>
-      <div class="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-        ${(audit.warnings || []).map(esc).join('<br>') || '建议动作：先补齐缺单价和工程量，再处理未匹配定额和重复项；提交或导出前保存一个报审版报价版本。'}
-      </div>
-    </div>
-  `, `
+  const auditView = await loadQuoteAuditViewModel(projectId, {
+    audit: id => boqService.audit(id),
+    review: reviewQuote,
+  });
+  openModal('报价审查报告', renderQuoteAuditViewModel(auditView), `
     <button id="auditMissing" class="px-3 py-1.5 text-sm border rounded text-amber-700 border-amber-300">定位缺单价</button>
     <button id="auditReview" class="px-3 py-1.5 text-sm border rounded text-emerald-700 border-emerald-300">沉淀风险判断</button>
     <button id="auditSaveVersion" class="px-3 py-1.5 text-sm border rounded text-teal-700 border-teal-300">保存报审版</button>

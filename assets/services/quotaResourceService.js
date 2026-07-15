@@ -1,7 +1,7 @@
 import { quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
 import { uid } from '../utils/dom.js';
 import { resourcePriceService } from './resourcePriceService.js?v=4.1';
-import { normalizeQuotaBreakdown } from '../utils/quotaBreakdown.js?v=4.2';
+import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=4.2';
 
 export const quotaResourceService = {
   async list(quotaItemId) {
@@ -99,12 +99,13 @@ export const quotaResourceService = {
     return { material, equipment, total: roundCost(material + equipment) };
   },
 
-  async applyComposition(quotaItemId) {
+  async applyComposition(quotaItemId, { baseBreakdown } = {}) {
     const quota = await quotaRepo.findById(quotaItemId);
     if (!quota) throw new Error('定额不存在');
     const composition = await this.calculateComposition(quotaItemId);
+    if (baseBreakdown != null) validateBaseBreakdown(baseBreakdown);
     const breakdown = {
-      ...normalizeQuotaBreakdown(quota.breakdown),
+      ...normalizeQuotaBreakdown(baseBreakdown ?? quota.breakdown),
       材料: composition.material,
       设备: composition.equipment,
     };
@@ -147,9 +148,27 @@ function comparisonReasons(usage, resource, currentPrice) {
   if (!currentPrice) return ['currentPriceMissing'];
   const reasons = [];
   if (usage.selectedPriceId !== currentPrice.id) reasons.push('selectedPriceId');
-  const fields = ['unitPrice', 'priceBasis', 'sourceType', 'priceDate', 'validFrom', 'validTo'];
+  const fields = ['unitPrice', 'priceBasis', 'sourceType', 'supplier', 'priceDate', 'validFrom', 'validTo', 'taxIncluded', 'taxRate', 'installationScope'];
   fields.forEach(field => {
     if (String(usage.priceSnapshot?.[field] ?? '') !== String(currentPrice[field] ?? '')) reasons.push(field);
   });
+  if (JSON.stringify(normalizeRegion(usage.priceSnapshot?.region)) !== JSON.stringify(normalizeRegion(currentPrice.region))) reasons.push('region');
   return reasons;
+}
+
+function normalizeRegion(region = {}) {
+  return {
+    province: String(region?.province || ''),
+    city: String(region?.city || ''),
+    district: String(region?.district || ''),
+  };
+}
+
+function validateBaseBreakdown(breakdown) {
+  if (!breakdown || typeof breakdown !== 'object' || Array.isArray(breakdown)) throw new Error('分项费用格式无效');
+  QUOTA_BREAKDOWN_KEYS.forEach(key => {
+    if (!Object.prototype.hasOwnProperty.call(breakdown, key)) throw new Error(`缺少分项费用「${key}」`);
+    const value = Number(breakdown[key]);
+    if (!Number.isFinite(value) || value < 0) throw new Error(`分项费用「${key}」必须是非负数`);
+  });
 }

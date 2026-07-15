@@ -1,13 +1,36 @@
 const SOURCE_LABELS = { official: '官方信息价', supplier_quote: '供应商报价', transaction: '历史成交价' };
 const BASIS_LABELS = { ex_factory: '出厂价', delivered: '到场价', installed_composite: '安装综合价' };
+const AUDIT_BADGES = {
+  invalidResourceReference: '引用失效',
+  expiredResourcePrice: '价格过期',
+  missingResourcePriceBasis: '缺价格口径',
+  duplicateEquipmentInstallation: '安装重复计取',
+};
 
-export function buildBoqResourceViewModel(line = {}, now = new Date()) {
+export function withBoqResourcePriceMetadata(line, priceMap) {
+  if (line.resourcePriceSnapshot || !line.resourcePriceId) return line;
+  const price = priceMap.get(line.resourcePriceId);
+  return price ? { ...line, resourcePriceSnapshot: price } : line;
+}
+
+export function annotateBoqResourceAuditIssues(lines, audit) {
+  const issueKeys = Object.keys(AUDIT_BADGES);
+  const lineIssues = new Map(lines.map(line => [line.id, []]));
+  issueKeys.forEach(key => (audit?.issues?.[key] || []).forEach(line => lineIssues.get(line.id)?.push(key)));
+  return lines.map(line => ({ ...line, resourceAuditIssueKeys: lineIssues.get(line.id) || [] }));
+}
+
+export function buildBoqResourceViewModel(line = {}, now = new Date(), fallbackPrice = null) {
   const resource = line.resourceSnapshot || line.linkedResourceSnapshot || {};
-  const price = line.resourcePriceSnapshot || {};
+  const matchingFallback = fallbackPrice && (!line.resourcePriceId || fallbackPrice.id === line.resourcePriceId)
+    ? fallbackPrice
+    : null;
+  const price = line.resourcePriceSnapshot || matchingFallback || {};
   const badges = [];
   if (line.resourceReferenceStatus === 'missing' || line.linkedResourceReferenceStatus === 'missing') badges.push('引用失效');
   if (price.validTo && price.validTo < dateText(now)) badges.push('价格过期');
   if ((line.resourceItemId || line.resourcePriceSnapshot) && !price.priceBasis) badges.push('缺价格口径');
+  (line.resourceAuditIssueKeys || []).forEach(key => badges.push(AUDIT_BADGES[key]));
   return {
     hasResource: Boolean(line.resourceItemId || line.linkedResourceItemId || line.resourceSnapshot || line.linkedResourceSnapshot),
     name: resource.name || line.name || '',
@@ -18,7 +41,7 @@ export function buildBoqResourceViewModel(line = {}, now = new Date()) {
     snapshotPrice: Number(price.unitPrice || line.unitPrice || 0),
     priceDate: price.priceDate || '',
     validTo: price.validTo || '',
-    badges,
+    badges: [...new Set(badges)],
   };
 }
 

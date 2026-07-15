@@ -476,7 +476,7 @@ function openQuotaForm(item, mode = 'edit') {
     <button onclick="window.__quota.save()" class="px-3 py-1.5 text-sm brand-bg text-white rounded">保存定额</button>
   `);
   updateBreakdownSum();
-  mountQuotaResourceComposition(draft, { onApplied: syncAppliedCompositionToForm });
+  mountQuotaResourceComposition(draft, { onApplied: syncAppliedCompositionToForm, getBaseBreakdown: captureQuotaFormBreakdown });
 }
 
 function openQuotaCompositionModal(item) {
@@ -499,6 +499,15 @@ function syncAppliedCompositionToForm(updated) {
     if (input) input.value = updated.breakdown?.[key] || 0;
   });
   updateBreakdownSum();
+}
+
+function captureQuotaFormBreakdown() {
+  const breakdown = {};
+  BREAKDOWN_KEYS.forEach(key => {
+    const input = document.querySelector(`#qf_bd input[data-bd="${key}"]`);
+    breakdown[key] = Number(input?.value || 0);
+  });
+  return normalizeBreakdown(breakdown);
 }
 
 function quotaForm(it) {

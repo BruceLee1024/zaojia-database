@@ -74,3 +74,30 @@ Focused coverage is in `tests/quotaBoqIntegration.mjs`; it also runs from the fu
 
 - This repository still has no dedicated browser test harness; the UI verification is a repeatable manual/headless smoke test rather than a committed end-to-end suite.
 - Existing `resourcePriceService.getCurrentPrice()` honors a preferred price even if it is expired. Task 5 reports expiry in BOQ audit/display but does not change that established price-selection policy.
+
+## Review follow-up
+
+All Task 5 review findings were addressed with focused regression tests before implementation:
+
+- Composition application now receives the live, unsaved seven-part quota breakdown and preserves its labor, machinery, management, profit and risk values. Incomplete, negative or non-finite caller-supplied breakdowns are rejected.
+- The visible quote-audit action now calls `boqService.audit()` and renders its health score plus all four resource issue groups alongside the AI review.
+- Duplicate installation detection now pairs installation rows through `linkedEquipmentLineId`. Legacy unscoped rows are evaluated only when the resource maps to exactly one equipment row, preventing delivered-package and multi-instance false positives.
+- Composition rendering, search and selection use latest-request-wins guards. Mutations reject overlapping clicks, expose busy/disabled state and surface current-request failures through the existing toast path.
+- BOQ filters and badges include duplicate installation issues without truncation. Resource display falls back to the live price record when a line has only `resourcePriceId`, using the same audit annotation source as the table.
+- Comparison details now expose price basis, source type, supplier, price date/validity, tax, region and installation scope.
+
+### Follow-up TDD evidence
+
+- RED assertions captured stale unsaved breakdown replacement, over-broad duplicate matching, broken-link fallback, absent visible audit helpers, missing fallback metadata, missing comparison details, out-of-order async commits and overlapping/error mutation behavior.
+- GREEN coverage was added to `tests/quotaBoqIntegration.mjs` for each case, including exact-link multi-instance pairing, ambiguous legacy rows, delivered-package pricing, audit button data loading through a pure helper and current/stale async error semantics.
+
+### Follow-up browser smoke
+
+- Real Chromium at `http://127.0.0.1:8015/app/` loaded three demo projects and a ten-row BOQ with no console errors.
+- Clicking the quote-audit button displayed the health score and the four visible groups: resource reference invalid, resource price expired, missing resource price basis and duplicate equipment installation.
+- The quota edit composition panel rendered all seven breakdown inputs, search controls and idle `aria-busy=false` state with a clean console.
+- At a 1024 px viewport the panel had no horizontal overflow (`scrollWidth = clientWidth = 820`).
+
+### Follow-up concerns
+
+- No new unresolved Task 5 concern was found. The pre-existing preferred-expired-price selection policy remains intentionally unchanged and is now made visible by audit and UI warnings.

@@ -55,6 +55,7 @@ export function buildCompositionPreview(quota = {}, usages = []) {
 
 export function buildUsageComparisonViewModel(comparison = {}) {
   const { usage = {}, resource = {}, currentPrice = null } = comparison;
+  const snapshot = usage.priceSnapshot || {};
   return {
     id: usage.id || '',
     name: resource.name || '已失效资源',
@@ -70,6 +71,7 @@ export function buildUsageComparisonViewModel(comparison = {}) {
     deltaLabel: signedNumber(comparison.priceDelta),
     costDeltaLabel: signedNumber(comparison.costDelta),
     staleReasons: [...(comparison.staleReasons || [])],
+    changeDetails: currentPrice ? priceChangeDetails(snapshot, currentPrice) : ['当前无可用价格'],
   };
 }
 
@@ -111,4 +113,38 @@ function signedNumber(value) {
 function signedMoney(value) {
   const number = finiteNumber(value);
   return `${number > 0 ? '+' : ''}${fmtMoney(number)}`;
+}
+
+function priceChangeDetails(snapshot, current) {
+  const details = [];
+  addChange(details, '口径', basisLabel(snapshot.priceBasis), basisLabel(current.priceBasis));
+  addChange(details, '来源', sourceLabel(snapshot.sourceType), sourceLabel(current.sourceType));
+  addChange(details, '供应商', snapshot.supplier || snapshot.sourceName || '未记录', current.supplier || '未记录');
+  addChange(details, '价格日期', snapshot.priceDate || '未记录', current.priceDate || '未记录');
+  addChange(details, '有效期', validityText(snapshot), validityText(current));
+  addChange(details, '含税状态', snapshot.taxIncluded ? '含税' : '不含税', current.taxIncluded ? '含税' : '不含税');
+  addChange(details, '税率', `${finiteNumber(snapshot.taxRate)}%`, `${finiteNumber(current.taxRate)}%`);
+  addChange(details, '地区', regionText(snapshot.region), regionText(current.region));
+  addChange(details, '安装范围', snapshot.installationScope || '未记录', current.installationScope || '未记录');
+  return details;
+}
+
+function addChange(details, label, before, after) {
+  if (before !== after) details.push(`${label}：${before} → ${after}`);
+}
+
+function basisLabel(value) {
+  return { ex_factory: '出厂价', delivered: '到场价', installed_composite: '安装综合价' }[value] || '未记录';
+}
+
+function sourceLabel(value) {
+  return { official: '官方信息价', supplier_quote: '供应商报价', transaction: '历史成交价' }[value] || '未记录';
+}
+
+function validityText(price) {
+  return `${price.validFrom || '未限定'} ~ ${price.validTo || '长期'}`;
+}
+
+function regionText(region = {}) {
+  return [region?.province, region?.city, region?.district].filter(Boolean).join('/') || '未记录';
 }

@@ -4,7 +4,10 @@ import { quotaResourceService } from '../assets/services/quotaResourceService.js
 import { boqService } from '../assets/services/boqService.js';
 import { versionService } from '../assets/services/versionService.js';
 import { buildCompositionPreview, buildUsageComparisonViewModel, compositionPanelShell, normalizeBreakdown } from '../assets/views/quotaResourceComposition.js';
-import { buildBoqResourceViewModel, renderBoqResourceReference } from '../assets/views/boqResourceReference.js';
+import { applyCompositionFromPanel } from '../assets/views/quotaResourceCompositionPanel.js';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from '../assets/views/boqResourceReference.js';
+import { buildQuoteAuditViewModel, loadQuoteAuditViewModel, renderQuoteAuditViewModel } from '../assets/views/boqAuditViewModel.js';
+import { createBusyActionRunner, createLatestRequestGuard } from '../assets/utils/asyncInteraction.js';
 
 export async function testQuotaBoqIntegration() {
   const originalStorage = globalThis.localStorage;
@@ -16,8 +19,15 @@ export async function testQuotaBoqIntegration() {
     await reset();
     await testUsageComparisonRemovalAndExplicitRefresh();
     await reset();
+    await testApplyCompositionUsesValidatedUnsavedBase();
+    await reset();
     await testResourceAuditAndVersionSnapshots();
+    await reset();
+    await testDuplicateInstallationMatchesExactEquipmentLine();
+    await testPanelApplyCapturesUnsavedBreakdown();
+    await testAsyncInteractionGuards();
     testPureResourceViewModels();
+    await testVisibleQuoteAuditViewModel();
   } finally {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
@@ -46,14 +56,15 @@ async function testUsageComparisonRemovalAndExplicitRefresh() {
   await quotaRepo.replaceAll([{ id: 'q1', name: '泵安装', breakdown: { 人工: 10, 材料: 0, 机械: 5 } }]);
   await resourceRepo.replaceAll([{ id: 'r1', resourceType: 'equipment', name: '泵', unit: '台', status: 'active', preferredPriceId: 'p2' }]);
   await resourcePriceRepo.replaceAll([
-    { id: 'p1', resourceId: 'r1', unitPrice: 100, priceBasis: 'delivered', sourceType: 'official', priceDate: '2025-01-01', validTo: '2025-12-31' },
-    { id: 'p2', resourceId: 'r1', unitPrice: 125, priceBasis: 'installed_composite', sourceType: 'supplier_quote', priceDate: '2026-07-01', validTo: '2026-12-31', supplier: '甲厂' },
+    { id: 'p1', resourceId: 'r1', unitPrice: 100, priceBasis: 'delivered', sourceType: 'official', priceDate: '2025-01-01', validTo: '2025-12-31', supplier: '甲厂', taxIncluded: true, taxRate: 13, region: { province: '四川' } },
+    { id: 'p2', resourceId: 'r1', unitPrice: 125, priceBasis: 'installed_composite', sourceType: 'supplier_quote', priceDate: '2026-07-01', validTo: '2026-12-31', supplier: '乙厂', taxIncluded: false, taxRate: 9, region: { province: '重庆' }, installationScope: '含调试' },
   ]);
   const usage = await quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: 'r1', selectedPriceId: 'p1', quantityPerUnit: 2, lossRate: 10 });
   const before = await quotaResourceService.compareUsage(usage.id);
   assert.equal(before.stale, true);
   assert.equal(before.priceDelta, 25);
   assert.equal(before.currentPrice.id, 'p2');
+  ['supplier', 'taxIncluded', 'taxRate', 'region', 'installationScope'].forEach(reason => assert.equal(before.staleReasons.includes(reason), true));
   assert.equal((await quotaResourceUsageRepo.findById(usage.id)).selectedPriceId, 'p1', '比较不得自动刷新');
 
   const refreshed = await quotaResourceService.refreshUsageSnapshot(usage.id);
@@ -63,6 +74,27 @@ async function testUsageComparisonRemovalAndExplicitRefresh() {
   assert.equal((await quotaResourceService.compareUsage(usage.id)).stale, false);
   assert.deepEqual(await quotaResourceService.removeUsage(usage.id), refreshed);
   assert.equal(await quotaResourceUsageRepo.findById(usage.id), null);
+}
+
+async function testApplyCompositionUsesValidatedUnsavedBase() {
+  await quotaRepo.replaceAll([{ id: 'q-draft', name: '草稿定额', breakdown: { 人工: 10, 材料: 1, 设备: 2, 机械: 3, 管理费: 4, 利润: 5, 风险: 6 } }]);
+  await quotaResourceUsageRepo.replaceAll([
+    { id: 'u-material', quotaItemId: 'q-draft', resourceType: 'material', calculatedCost: 120 },
+    { id: 'u-equipment', quotaItemId: 'q-draft', resourceType: 'equipment', calculatedCost: 500 },
+  ]);
+  const unsaved = { 人工: 88, 材料: 999, 设备: 999, 机械: 33, 管理费: 44, 利润: 55, 风险: 66 };
+  const applied = await quotaResourceService.applyComposition('q-draft', { baseBreakdown: unsaved });
+  assert.deepEqual(applied.breakdown, { 人工: 88, 材料: 120, 设备: 500, 机械: 33, 管理费: 44, 利润: 55, 风险: 66 });
+  assert.equal(applied.priceTotal, 906);
+  assert.equal(applied.useBreakdown, true);
+  await assert.rejects(
+    () => quotaResourceService.applyComposition('q-draft', { baseBreakdown: { ...unsaved, 人工: -1 } }),
+    /分项费用/,
+  );
+  await assert.rejects(
+    () => quotaResourceService.applyComposition('q-draft', { baseBreakdown: { 人工: 1 } }),
+    /缺少分项费用/,
+  );
 }
 
 async function testResourceAuditAndVersionSnapshots() {
@@ -103,28 +135,141 @@ async function testResourceAuditAndVersionSnapshots() {
   assert.equal(restore.restoredCount, 3);
 }
 
+async function testDuplicateInstallationMatchesExactEquipmentLine() {
+  const composite = { id: 'price-composite', resourceId: 'equipment-1', unitPrice: 26000, priceBasis: 'installed_composite' };
+  const delivered = { id: 'price-delivered', resourceId: 'equipment-1', unitPrice: 20000, priceBasis: 'delivered' };
+  const compositeLine = { id: 'equipment-composite', projectId: 'project-dup', resourceItemId: 'equipment-1', resourcePriceId: composite.id, resourcePriceSnapshot: composite, name: '综合价风机', qty: 1, factor: 1, unitPrice: 26000 };
+  const deliveredLine = { id: 'equipment-delivered', projectId: 'project-dup', resourceItemId: 'equipment-1', resourcePriceId: delivered.id, resourcePriceSnapshot: delivered, name: '到场价风机', qty: 1, factor: 1, unitPrice: 20000 };
+  const validDeliveredInstall = { id: 'install-delivered', projectId: 'project-dup', quotaItemId: 'q-install', linkedResourceItemId: 'equipment-1', linkedEquipmentLineId: deliveredLine.id, name: '到场价风机安装', qty: 1, factor: 1, unitPrice: 2000 };
+  const duplicateCompositeInstall = { id: 'install-composite', projectId: 'project-dup', quotaItemId: 'q-install', linkedResourceItemId: 'equipment-1', linkedEquipmentLineId: compositeLine.id, name: '综合价风机安装', qty: 1, factor: 1, unitPrice: 2000 };
+  await setStore(STORES.projects, [{ id: 'project-dup' }]);
+  await setStore(STORES.project_boq, [compositeLine, deliveredLine, validDeliveredInstall, duplicateCompositeInstall]);
+  await quotaRepo.replaceAll([{ id: 'q-install', name: '风机安装' }]);
+  await resourceRepo.replaceAll([{ id: 'equipment-1', resourceType: 'equipment', name: '风机' }]);
+  await resourcePriceRepo.replaceAll([composite, delivered]);
+  const exactAudit = await boqService.audit('project-dup');
+  assert.deepEqual(
+    exactAudit.issues.duplicateEquipmentInstallation.map(line => line.id).sort(),
+    ['equipment-composite', 'install-composite'],
+  );
+
+  await setStore(STORES.project_boq, [compositeLine, deliveredLine, { ...validDeliveredInstall, id: 'install-unscoped', linkedEquipmentLineId: '' }]);
+  const ambiguousAudit = await boqService.audit('project-dup');
+  assert.deepEqual(ambiguousAudit.issues.duplicateEquipmentInstallation, []);
+
+  await setStore(STORES.project_boq, [compositeLine, { ...duplicateCompositeInstall, id: 'install-broken-link', linkedEquipmentLineId: 'missing-equipment-line' }]);
+  const brokenLinkAudit = await boqService.audit('project-dup');
+  assert.deepEqual(brokenLinkAudit.issues.duplicateEquipmentInstallation, []);
+}
+
+async function testPanelApplyCapturesUnsavedBreakdown() {
+  const calls = [];
+  const unsaved = { 人工: 81, 材料: 2, 设备: 3, 机械: 31, 管理费: 4, 利润: 5, 风险: 6 };
+  const quota = { id: 'quota-caller', breakdown: { 人工: 1 } };
+  const result = await applyCompositionFromPanel({
+    quota,
+    getBaseBreakdown: () => unsaved,
+    service: { applyComposition: async (...args) => { calls.push(args); return { id: quota.id, breakdown: { ...unsaved, 材料: 120, 设备: 500 }, priceTotal: 747 }; } },
+  });
+  assert.deepEqual(calls, [['quota-caller', { baseBreakdown: unsaved }]]);
+  assert.equal(result.breakdown.人工, 81);
+  assert.equal(quota.breakdown.机械, 31);
+}
+
+async function testAsyncInteractionGuards() {
+  const latest = createLatestRequestGuard();
+  const applied = [];
+  let resolveFirst;
+  let resolveSecond;
+  const first = latest.run(() => new Promise(resolve => { resolveFirst = resolve; }), value => applied.push(value));
+  const second = latest.run(() => new Promise(resolve => { resolveSecond = resolve; }), value => applied.push(value));
+  resolveSecond('second');
+  await second;
+  resolveFirst('first');
+  const stale = await first;
+  assert.deepEqual(applied, ['second']);
+  assert.equal(stale.stale, true);
+
+  const busyStates = [];
+  const errors = [];
+  let release;
+  const runner = createBusyActionRunner({ onBusy: value => busyStates.push(value), onError: error => errors.push(error.message) });
+  const running = runner.run(() => new Promise(resolve => { release = resolve; }));
+  assert.equal((await runner.run(async () => 'overlap')).skipped, true);
+  release('done');
+  assert.deepEqual(await running, { ok: true, value: 'done' });
+  const failure = await runner.run(async () => { throw new Error('用户可见错误'); });
+  assert.equal(failure.ok, false);
+  assert.equal(failure.error.message, '用户可见错误');
+  assert.deepEqual(busyStates, [true, false, true, false]);
+  assert.deepEqual(errors, ['用户可见错误']);
+}
+
 function testPureResourceViewModels() {
   assert.equal(compositionPanelShell({ id: 'q1' }).includes('搜索并关联材料或设备'), true);
   assert.equal(compositionPanelShell({ id: '' }).includes('保存定额后'), true);
   const usageVm = buildUsageComparisonViewModel({
-    usage: { priceSnapshot: { unitPrice: 100, priceBasis: 'delivered', sourceName: '甲厂' }, calculatedCost: 210 },
-    resource: { name: '钢管', specModel: 'DN100' }, currentPrice: { unitPrice: 120, priceBasis: 'delivered', supplier: '乙厂' },
-    currentCost: 252, priceDelta: 20, costDelta: 42, stale: true, staleReasons: ['unitPrice'],
+    usage: { priceSnapshot: { unitPrice: 100, priceBasis: 'delivered', sourceType: 'official', sourceName: '甲厂', supplier: '甲厂', taxIncluded: true, taxRate: 13, region: { province: '四川' }, validTo: '2026-08-01', installationScope: '' }, calculatedCost: 210 },
+    resource: { name: '钢管', specModel: 'DN100' }, currentPrice: { unitPrice: 120, priceBasis: 'installed_composite', sourceType: 'supplier_quote', supplier: '乙厂', taxIncluded: false, taxRate: 9, region: { province: '重庆' }, validTo: '2026-12-31', installationScope: '含调试' },
+    currentCost: 252, priceDelta: 20, costDelta: 42, stale: true, staleReasons: ['unitPrice', 'priceBasis', 'supplier', 'taxRate', 'region', 'validTo', 'installationScope'],
   });
   assert.equal(usageVm.statusLabel, '已过时');
   assert.equal(usageVm.deltaLabel.includes('+20'), true);
+  assert.equal(usageVm.changeDetails.some(item => item.includes('口径：到场价 → 安装综合价')), true);
+  assert.equal(usageVm.changeDetails.some(item => item.includes('供应商：甲厂 → 乙厂')), true);
+  assert.equal(usageVm.changeDetails.some(item => item.includes('地区：四川 → 重庆')), true);
+  assert.equal(usageVm.changeDetails.some(item => item.includes('安装范围：未记录 → 含调试')), true);
   const boqVm = buildBoqResourceViewModel({
     resourceReferenceStatus: 'missing', resourceSnapshot: { name: '泵', specModel: 'Q=10' },
-    resourcePriceSnapshot: { unitPrice: 10000, sourceType: 'supplier_quote', priceBasis: '', validTo: '2000-01-01' },
-  }, new Date('2026-07-15T00:00:00Z'));
+    resourcePriceId: 'price-live', unitPrice: 10000,
+  }, new Date('2026-07-15T00:00:00Z'), { id: 'price-live', unitPrice: 10000, sourceType: 'supplier_quote', priceBasis: 'installed_composite', validTo: '2000-01-01' });
   assert.equal(boqVm.name, '泵');
   assert.equal(boqVm.badges.includes('引用失效'), true);
   assert.equal(boqVm.badges.includes('价格过期'), true);
-  assert.equal(boqVm.badges.includes('缺价格口径'), true);
+  assert.equal(boqVm.badges.includes('缺价格口径'), false);
+  assert.equal(boqVm.basisLabel, '安装综合价');
+  const normalizedLine = withBoqResourcePriceMetadata({ id: 'line-live', resourcePriceId: 'price-live' }, new Map([['price-live', { id: 'price-live', priceBasis: 'installed_composite' }]]));
+  assert.equal(normalizedLine.resourcePriceSnapshot.priceBasis, 'installed_composite');
+  assert.equal('resourcePriceSnapshot' in withBoqResourcePriceMetadata({ id: 'plain' }, new Map()), false);
+  const annotated = annotateBoqResourceAuditIssues([{ id: 'equipment-composite' }, { id: 'plain' }], { issues: { duplicateEquipmentInstallation: [{ id: 'equipment-composite' }] } });
+  assert.deepEqual(annotated[0].resourceAuditIssueKeys, ['duplicateEquipmentInstallation']);
+  assert.deepEqual(annotated[1].resourceAuditIssueKeys, []);
   const html = renderBoqResourceReference(boqVm);
   assert.equal(html.includes('价格来源'), true);
   assert.equal(html.includes('快照口径'), true);
   assert.equal(html.includes('价格过期'), true);
+}
+
+async function testVisibleQuoteAuditViewModel() {
+  const lines = id => [{ id, name: id }];
+  const serviceAudit = {
+    score: 61,
+    level: '高风险',
+    lines: [...lines('a'), ...lines('b')],
+    versions: [{ id: 'v1' }],
+    issues: {
+      invalidResourceReference: lines('invalid'),
+      expiredResourcePrice: lines('expired'),
+      missingResourcePriceBasis: lines('basis'),
+      duplicateEquipmentInstallation: lines('duplicate-install'),
+    },
+  };
+  const vm = buildQuoteAuditViewModel(serviceAudit, { summary: 'AI 辅助审查', suggestions: [], warnings: [] });
+  assert.equal(vm.score, 61);
+  assert.equal(vm.level, '高风险');
+  assert.deepEqual(vm.issueBlocks.map(item => item.key), ['invalidResourceReference', 'expiredResourcePrice', 'missingResourcePriceBasis', 'duplicateEquipmentInstallation']);
+  assert.equal(vm.issueBlocks.every(item => item.count === 1), true);
+  const html = renderQuoteAuditViewModel(vm);
+  assert.equal(html.includes('健康分'), true);
+  assert.equal(html.includes('资源引用失效'), true);
+  assert.equal(html.includes('设备安装重复计取'), true);
+  const calls = [];
+  const loaded = await loadQuoteAuditViewModel('project-visible', {
+    audit: async projectId => { calls.push(['audit', projectId]); return serviceAudit; },
+    review: async projectId => { calls.push(['review', projectId]); return { summary: 'AI 辅助审查', suggestions: [], warnings: [] }; },
+  });
+  assert.deepEqual(calls.sort(), [['audit', 'project-visible'], ['review', 'project-visible']]);
+  assert.equal(loaded.score, 61);
 }
 
 async function reset() {
