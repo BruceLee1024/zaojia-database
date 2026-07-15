@@ -4,6 +4,8 @@ import { resourceImportService } from '../assets/services/resourceImportService.
 import { resourceService } from '../assets/services/resourceService.js';
 import { searchAll, searchGroups } from '../assets/services/globalSearchService.js';
 import { getResourceTemplateData } from '../assets/data/excel.js';
+import { nextResourceViewState } from '../assets/views/resources.js';
+import { buildImportReportRows } from '../assets/views/resourceImport.js';
 
 export async function testResourceWorkbench() {
   const originalStorage = globalThis.localStorage;
@@ -19,12 +21,64 @@ export async function testResourceWorkbench() {
     await reset();
     await testCommitRollsBackBothStores(storage);
     await reset();
+    await testImportPriceInvariants();
+    await reset();
     await testCopyStatusAndResourceSearchRouting();
+    await reset();
+    await testResourceSearchCapsTypesIndependently();
+    testResourceRouteStateIsolation();
+    testImportReportRows();
     testResourceTemplates();
   } finally {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+async function testImportPriceInvariants() {
+  const preview = await resourceImportService.preview([
+    { 名称: '负税率', 单位: 't', 单价: 10, 价格日期: '2026-07-01', 省: '四川', 税率: -5 },
+    { 名称: '超大税率', 单位: 't', 单价: 10, 价格日期: '2026-07-01', 省: '四川', 税率: 999 },
+    { 名称: '无效价格条件', 单位: 't', 单价: 10, 价格日期: '2026-07-01', 省: '四川', 价格来源: '不明来源', 价格口径: '不明口径', 生效日期: '2026-08-01', 失效日期: '2026-07-01' },
+  ], 'material');
+  assert.equal(preview.rows[0].action, 'invalid');
+  assert.equal(preview.rows[0].errors.includes('税率必须在 0 到 100 之间'), true);
+  assert.equal(preview.rows[1].errors.includes('税率必须在 0 到 100 之间'), true);
+  assert.equal(preview.rows[2].errors.includes('价格来源类型无效'), true);
+  assert.equal(preview.rows[2].errors.includes('价格口径无效'), true);
+  assert.equal(preview.rows[2].errors.includes('失效日期不能早于生效日期'), true);
+  const report = await resourceImportService.commit(preview, {});
+  assert.equal(report.counts.errors, 3);
+  assert.equal((await resourcePriceRepo.all()).length, 0);
+
+  const tampered = await resourceImportService.preview([
+    { 名称: '被篡改预览', 单位: 't', 单价: 10, 价格日期: '2026-07-01', 省: '四川', 税率: 13 },
+  ], 'material');
+  tampered.rows[0].price.taxRate = 999;
+  const guarded = await resourceImportService.commit(tampered, {});
+  assert.equal(guarded.counts.errors, 1);
+  assert.equal((await resourcePriceRepo.all()).length, 0);
+}
+
+function testResourceRouteStateIsolation() {
+  const material = nextResourceViewState({ resourceType: 'material', keyword: '钢管', category: '管材', status: 'inactive', selectedId: 'm1' }, 'materials', {});
+  assert.deepEqual(material, { resourceType: 'material', keyword: '钢管', category: '管材', status: 'inactive', selectedId: 'm1' });
+  const equipment = nextResourceViewState(material, 'equipment', { keyword: '泵', selectedId: 'e1' });
+  assert.deepEqual(equipment, { resourceType: 'equipment', keyword: '泵', category: '', status: '', selectedId: 'e1' });
+  const back = nextResourceViewState(equipment, 'materials', { category: '阀门', status: 'active' });
+  assert.deepEqual(back, { resourceType: 'material', keyword: '', category: '阀门', status: 'active', selectedId: '' });
+}
+
+function testImportReportRows() {
+  const rows = buildImportReportRows({ rows: [
+    { index: 0, status: 'created', priceStatus: 'created', errors: [] },
+    { index: 1, status: 'skipped', priceStatus: 'skipped', errors: [] },
+    { index: 2, status: 'error', errors: ['税率必须在 0 到 100 之间'] },
+  ] });
+  assert.deepEqual(rows.map(row => row.statusLabel), ['已新增', '已跳过', '失败']);
+  assert.equal(rows[0].message.includes('价格快照已新增'), true);
+  assert.equal(rows[1].message.includes('价格已存在'), true);
+  assert.equal(rows[2].message, '税率必须在 0 到 100 之间');
 }
 
 function testResourceTemplates() {
@@ -91,6 +145,13 @@ async function testCommitRollsBackBothStores(storage) {
   await assert.rejects(() => resourceImportService.commit(preview, {}), err => err.code === 'RESOURCE_IMPORT_ROLLED_BACK');
   assert.deepEqual(await resourceRepo.all(), [seed]);
   assert.deepEqual(await resourcePriceRepo.all(), []);
+
+  storage.failSequence(STORES.resource_prices, STORES.resource_items);
+  await assert.rejects(() => resourceImportService.commit(preview, {}), err => (
+    err.code === 'RESOURCE_IMPORT_PARTIAL_RECOVERY'
+      && /未能完全回滚/.test(err.message)
+      && Boolean(err.rollbackCause)
+  ));
 }
 
 async function testCopyStatusAndResourceSearchRouting() {
@@ -107,6 +168,15 @@ async function testCopyStatusAndResourceSearchRouting() {
   assert.equal(searchGroups(results).some(group => group.type === 'material' && group.meta.label === '材料'), true);
 }
 
+async function testResourceSearchCapsTypesIndependently() {
+  const materials = Array.from({ length: 14 }, (_, index) => ({ id: `m${index}`, resourceType: 'material', code: `M-${index}`, name: `污水通用材料 ${index}`, unit: 'm', status: 'active' }));
+  const equipment = Array.from({ length: 3 }, (_, index) => ({ id: `e${index}`, resourceType: 'equipment', code: `E-${index}`, name: `污水通用设备 ${index}`, unit: '台', status: 'active' }));
+  await resourceRepo.replaceAll([...materials, ...equipment]);
+  const results = await searchAll('污水通用');
+  assert.equal(results.filter(item => item.type === 'material').length, 8);
+  assert.equal(results.filter(item => item.type === 'equipment').length, 3);
+}
+
 async function reset() {
   for (const store of Object.values(STORES)) globalThis.localStorage.setItem(store, '[]');
   await resourceRepo.replaceAll([]);
@@ -115,17 +185,18 @@ async function reset() {
 
 function memoryStorage() {
   const values = new Map();
-  let failingKey = '';
+  let failingKeys = [];
   return {
     getItem(key) { return values.has(key) ? values.get(key) : null; },
     setItem(key, value) {
-      if (key === failingKey) {
-        failingKey = '';
+      if (key === failingKeys[0]) {
+        failingKeys.shift();
         throw new Error(`simulated write failure: ${key}`);
       }
       values.set(key, String(value));
     },
     removeItem(key) { values.delete(key); },
-    failNextSet(key) { failingKey = key; },
+    failNextSet(key) { failingKeys = [key]; },
+    failSequence(...keys) { failingKeys = [...keys]; },
   };
 }

@@ -52,7 +52,22 @@ function previewMarkup(preview, label) {
 
 function reportMarkup(report) {
   const c = report.counts;
-  return `<section class="rounded-lg border border-teal-200 bg-teal-50 p-4"><h2 class="font-semibold text-teal-900">导入报告</h2><div class="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">${reportMetric('新增主数据', c.resourcesCreated)}${reportMetric('更新主数据', c.resourcesUpdated)}${reportMetric('跳过主数据', c.resourcesSkipped)}${reportMetric('新增价格', c.pricesCreated)}${reportMetric('跳过价格', c.pricesSkipped)}${reportMetric('错误', c.errors)}</div><button onclick="window.__resourceImport.back()" class="mt-4 h-9 px-4 bg-teal-700 text-white text-sm">返回查看${state.resourceType === 'equipment' ? '设备' : '材料'}库</button></section>`;
+  const rows = buildImportReportRows(report);
+  return `<section class="rounded-lg border border-teal-200 bg-teal-50 p-4"><h2 class="font-semibold text-teal-900">导入报告</h2><div class="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">${reportMetric('新增主数据', c.resourcesCreated)}${reportMetric('更新主数据', c.resourcesUpdated)}${reportMetric('跳过主数据', c.resourcesSkipped)}${reportMetric('新增价格', c.pricesCreated)}${reportMetric('跳过价格', c.pricesSkipped)}${reportMetric('错误', c.errors)}</div><div class="mt-4 overflow-auto max-h-64 border border-teal-200 bg-white"><table class="w-full text-xs"><thead class="sticky top-0 bg-teal-50 text-teal-800"><tr><th class="px-3 py-2 text-left">行</th><th class="px-3 text-left">状态</th><th class="px-3 text-left">处理详情</th></tr></thead><tbody class="divide-y divide-teal-100">${rows.map(row => `<tr><td class="px-3 py-2 tabular-nums">${row.rowNumber}</td><td class="px-3 font-medium ${row.status === 'error' ? 'text-red-600' : 'text-teal-800'}">${esc(row.statusLabel)}</td><td class="px-3 text-slate-600">${esc(row.message)}</td></tr>`).join('')}</tbody></table></div><button onclick="window.__resourceImport.back()" class="mt-4 h-9 px-4 bg-teal-700 text-white text-sm">返回查看${state.resourceType === 'equipment' ? '设备' : '材料'}库</button></section>`;
+}
+
+export function buildImportReportRows(report = {}) {
+  return (report.rows || []).map(row => {
+    const statusLabel = ({ created: '已新增', updated: '已更新', skipped: '已跳过', error: '失败' })[row.status] || '已处理';
+    const priceMessage = row.priceStatus === 'created' ? '价格快照已新增' : row.priceStatus === 'skipped' ? '价格已存在，未重复写入' : '无价格快照';
+    const resourceMessage = row.status === 'created' ? '主数据已新增' : row.status === 'updated' ? '主数据已更新' : row.status === 'skipped' ? '主数据已跳过' : '';
+    return {
+      rowNumber: Number(row.index || 0) + 1,
+      status: row.status,
+      statusLabel,
+      message: row.status === 'error' ? (row.errors || []).join('；') || '未知错误' : `${resourceMessage}；${priceMessage}`,
+    };
+  });
 }
 
 function actionBadge(action) { const map = { create: ['badge-green', '新增'], update: ['badge-blue', '更新'], duplicate: ['badge-gray', '重复'], invalid: ['badge-red', '无效'] }; const [tone, label] = map[action] || map.invalid; return `<span class="badge ${tone}">${label}</span>`; }

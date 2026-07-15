@@ -13,12 +13,26 @@ const LABELS = {
 
 export async function render() {
   const route = window.__app?.state?.currentView;
-  state.resourceType = route === 'equipment' ? 'equipment' : 'material';
   const params = window.__app?.state?.routeParams || {};
-  if (params.keyword != null) state.keyword = params.keyword;
-  if (params.selectedId) state.selectedId = params.selectedId;
+  Object.assign(state, nextResourceViewState(state, route, params));
   exposeActions();
   await refresh();
+}
+
+export function nextResourceViewState(current = {}, route = 'materials', params = {}) {
+  const resourceType = route === 'equipment' ? 'equipment' : 'material';
+  const changedType = current.resourceType !== resourceType;
+  const next = {
+    resourceType,
+    keyword: changedType ? '' : String(current.keyword || ''),
+    category: changedType ? '' : String(current.category || ''),
+    status: changedType ? '' : String(current.status || ''),
+    selectedId: changedType ? '' : String(current.selectedId || ''),
+  };
+  for (const key of ['keyword', 'category', 'status', 'selectedId']) {
+    if (Object.prototype.hasOwnProperty.call(params, key)) next[key] = String(params[key] || '');
+  }
+  return next;
 }
 
 async function refresh() {

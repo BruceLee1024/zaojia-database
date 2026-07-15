@@ -45,9 +45,11 @@ export function searchGroups(results = []) {
 }
 
 function resourceResults(rows, kw) {
-  return rows.filter(item => item.status !== 'inactive')
-    .filter(item => includes(item, kw, ['code', 'category', 'name', 'specModel', 'unit', 'brand', 'manufacturer', 'standard', 'processStage', 'tags']))
-    .slice(0, 12)
+  const matches = rows.filter(item => item.status !== 'inactive')
+    .filter(item => includes(item, kw, ['code', 'category', 'name', 'specModel', 'unit', 'brand', 'manufacturer', 'standard', 'processStage', 'tags']));
+  return ['material', 'equipment'].flatMap(resourceType => matches
+    .filter(item => item.resourceType === resourceType)
+    .slice(0, 8)
     .map(item => result(
       item.resourceType,
       item.id,
@@ -57,7 +59,7 @@ function resourceResults(rows, kw) {
       { keyword: kw, selectedId: item.id },
       scoreText(`${item.code} ${item.name}`, kw) + 21,
       [item.category, item.brand || item.manufacturer, item.processStage].filter(Boolean).join(' / ')
-    ));
+    )));
 }
 
 function boqLibraryResults(rows, kw) {

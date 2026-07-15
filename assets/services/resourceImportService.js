@@ -11,6 +11,8 @@ const PRICE_BASIS_MAP = new Map([
   ['delivered', 'delivered'], ['到场价', 'delivered'], ['落地价', 'delivered'],
   ['installed_composite', 'installed_composite'], ['安装综合价', 'installed_composite'], ['安装价', 'installed_composite'],
 ]);
+const SOURCE_TYPES = new Set(['official', 'supplier_quote', 'transaction']);
+const PRICE_BASES = new Set(['ex_factory', 'delivered', 'installed_composite']);
 
 export const resourceImportService = {
   async parse(file, resourceType) {
@@ -96,9 +98,10 @@ export const resourceImportService = {
     const now = new Date().toISOString();
 
     for (const row of preview.rows) {
-      if (row.action === 'invalid') {
+      const invariantErrors = validateRow(row.resource || {}, row.price || null);
+      if (row.action === 'invalid' || invariantErrors.length) {
         report.counts.errors += 1;
-        report.rows.push({ index: row.index, status: 'error', errors: [...row.errors] });
+        report.rows.push({ index: row.index, status: 'error', errors: [...new Set([...(row.errors || []), ...invariantErrors])] });
         continue;
       }
       let resourceId = row.existingId || resolved.get(row.identity) || resolved.get(row.duplicateIdentity) || '';
@@ -149,15 +152,19 @@ export const resourceImportService = {
       await resourceRepo.replaceAll(resources);
       await resourcePriceRepo.replaceAll(prices);
     } catch (cause) {
+      let rollbackCause = null;
       try {
         await resourceRepo.replaceAll(beforeResources);
         await resourcePriceRepo.replaceAll(beforePrices);
-      } catch (rollbackCause) {
-        cause.rollbackCause = rollbackCause;
+      } catch (error) {
+        rollbackCause = error;
       }
-      const error = new Error('材料设备导入失败，已回滚到导入前状态');
-      error.code = 'RESOURCE_IMPORT_ROLLED_BACK';
+      const error = new Error(rollbackCause
+        ? '材料设备导入失败，且未能完全回滚，请立即检查本地数据'
+        : '材料设备导入失败，已回滚到导入前状态');
+      error.code = rollbackCause ? 'RESOURCE_IMPORT_PARTIAL_RECOVERY' : 'RESOURCE_IMPORT_ROLLED_BACK';
       error.cause = cause;
+      if (rollbackCause) error.rollbackCause = rollbackCause;
       error.report = report;
       throw error;
     }
@@ -207,12 +214,12 @@ function normalizePriceRow(raw) {
   const rawPrice = value('单价', '不含税单价', '含税单价', '价格', 'unitPrice');
   if (rawPrice === '' || rawPrice == null) return null;
   return {
-    sourceType: mapValue(SOURCE_TYPE_MAP, value('价格来源', '来源类型', 'sourceType'), 'official'),
-    priceBasis: mapValue(PRICE_BASIS_MAP, value('价格口径', '口径', 'priceBasis'), 'delivered'),
+    sourceType: mapValue(SOURCE_TYPE_MAP, value('价格来源', '来源类型', 'sourceType'), 'official', true),
+    priceBasis: mapValue(PRICE_BASIS_MAP, value('价格口径', '口径', 'priceBasis'), 'delivered', true),
     unitPrice: Number(rawPrice),
     currency: 'CNY',
     taxIncluded: booleanValue(value('含税', 'taxIncluded')),
-    taxRate: numberOrZero(value('税率', 'taxRate')),
+    taxRate: numericValue(value('税率', 'taxRate')),
     region: { province: text(value('省', '省份', 'province')), city: text(value('市', '城市', 'city')), district: text(value('区县', '区', 'district')) },
     priceDate: normalizeDate(value('价格日期', '日期', 'priceDate')),
     validFrom: normalizeDate(value('生效日期', 'validFrom')),
@@ -230,9 +237,15 @@ function validateRow(resource, price) {
   if (!resource.name) errors.push('名称不能为空');
   if (!resource.unit) errors.push('单位不能为空');
   if (price) {
+    if (!SOURCE_TYPES.has(price.sourceType)) errors.push('价格来源类型无效');
+    if (!PRICE_BASES.has(price.priceBasis)) errors.push('价格口径无效');
     if (!(price.unitPrice > 0)) errors.push('单价必须大于 0');
+    if (!Number.isFinite(price.taxRate) || price.taxRate < 0 || price.taxRate > 100) errors.push('税率必须在 0 到 100 之间');
     if (!isDate(price.priceDate)) errors.push('价格日期不能为空且必须有效');
     if (!price.region.province && !price.region.city && !price.region.district) errors.push('价格地区至少填写一项');
+    if (price.validFrom && !isDate(price.validFrom)) errors.push('生效日期无效');
+    if (price.validTo && !isDate(price.validTo)) errors.push('失效日期无效');
+    if (price.validFrom && price.validTo && price.validFrom > price.validTo) errors.push('失效日期不能早于生效日期');
     if (price.priceBasis === 'installed_composite' && !price.installationScope) errors.push('安装综合价必须填写安装范围');
   }
   return errors;
@@ -277,9 +290,13 @@ function dedupeHeaders(row) {
 function text(value) { return String(value ?? '').trim().replace(/\s+/g, ' '); }
 function splitList(value) { return text(value).split(/[,，;；]/).map(item => item.trim()).filter(Boolean); }
 function normalizeStatus(value) { return ['inactive', '停用', '禁用'].includes(text(value).toLowerCase()) ? 'inactive' : 'active'; }
-function mapValue(map, value, fallback) { return map.get(text(value).toLowerCase()) || fallback; }
+function mapValue(map, value, fallback, preserveInvalid = false) {
+  const normalized = text(value).toLowerCase();
+  if (!normalized) return fallback;
+  return map.get(normalized) || (preserveInvalid ? normalized : fallback);
+}
 function booleanValue(value) { return ['1', 'true', 'yes', '是', '含税'].includes(text(value).toLowerCase()); }
-function numberOrZero(value) { const number = Number(value || 0); return Number.isFinite(number) ? number : 0; }
+function numericValue(value) { return value === '' || value == null ? 0 : Number(value); }
 function normalizeDate(value) {
   if (value instanceof Date && !Number.isNaN(value.valueOf())) return value.toISOString().slice(0, 10);
   if (typeof value === 'number' && value > 20000) {
