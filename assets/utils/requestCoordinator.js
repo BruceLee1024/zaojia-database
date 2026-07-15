@@ -35,23 +35,35 @@ export function createSerializedKeyCoordinator() {
 
 export function createWorkspaceRoot(stagingNode) {
   let queryRoot = stagingNode;
+  let invalidated = false;
   return {
     get innerHTML() { return queryRoot.innerHTML; },
     set innerHTML(value) { queryRoot.innerHTML = value; },
     get childNodes() { return stagingNode.childNodes; },
+    get isInvalidated() { return invalidated; },
     querySelector(selector) { return queryRoot.querySelector(selector); },
     querySelectorAll(selector) { return queryRoot.querySelectorAll(selector); },
-    activate(root) { queryRoot = root; },
+    activate(root) {
+      if (!invalidated) queryRoot = root;
+    },
+    deactivate() {
+      invalidated = true;
+      queryRoot = stagingNode;
+    },
+    invalidate() { this.deactivate(); },
     remove() { stagingNode.remove(); },
   };
 }
 
 export function createLatestWorkspaceCoordinator({ createRoot, commit, dispose = () => {} }) {
   let generation = 0;
+  let currentRoot = null;
   return {
     async run(render) {
       const request = ++generation;
+      currentRoot?.invalidate?.();
       const root = createRoot();
+      currentRoot = root;
       try {
         await render(root);
       } catch (error) {
@@ -59,6 +71,8 @@ export function createLatestWorkspaceCoordinator({ createRoot, commit, dispose =
           dispose(root);
           return false;
         }
+        root.invalidate?.();
+        if (currentRoot === root) currentRoot = null;
         dispose(root);
         throw error;
       }

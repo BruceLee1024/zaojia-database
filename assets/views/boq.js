@@ -70,6 +70,7 @@ function startBoqResize(e) {
 export async function render(workspace = document.getElementById('workspace')) {
   const document = scopedDom(workspace);
   const projects = await projectRepo.all();
+  if (workspace.isInvalidated) return;
   const proj = projects.find(p => p.id === window.__app.state.currentProjectId) || projects[0];
   if (!proj) {
     workspace.innerHTML = `<div class="page-frame"><div class="card p-10 text-center text-gray-400">还没有项目，先去 <a class="text-teal-700 underline" onclick="window.__app.go('projects')">新建项目</a></div></div>`;

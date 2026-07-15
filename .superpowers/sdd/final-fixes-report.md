@@ -94,3 +94,17 @@
 - `resourceImport` and `aiImportWizard` explicitly `await paint(workspace)` and bind their exposed async actions to that workspace.
 - The duplicate-ID integration contract creates two independent workspace roots, binds the newer root first and the older root late, and verifies neither handler nor query crosses roots. Per-view static contracts cover all 12 initial DOM chains.
 - Final verification after this review: `node tests/run.mjs` -> `All tests passed`; changed-file `node --check` and `git diff --check` passed.
+
+## Fifth final review fix: active-root invalidation
+
+### RED
+
+- The focused lifecycle test committed and activated an old root, started a new pending request, then performed a delayed old paint. The live workspace changed from `old` to `old-pending-pollution`, proving the previously committed wrapper still targeted live DOM until the replacement committed.
+
+### GREEN
+
+- Workspace roots now support permanent `deactivate()` / `invalidate()`. Invalidation retargets all later reads and writes to the root's private discarded staging node, and a stale root cannot be activated again.
+- The latest-workspace coordinator invalidates the previous current root immediately when a higher generation starts, whether that root is already committed or still rendering. A newly committed root becomes the only live wrapper.
+- The focused test covers old writes while the replacement is pending and again after the replacement commits; live DOM remains old during the pending interval and remains new after commit. It also verifies the invalidation guard preserves the current view state.
+- BOQ guards its post-load shared project-state mutation, and the AI import completion path guards its project-state/navigation mutation when its workspace has been invalidated. A static contract confirms `go()` remains the sole writer of `state.currentView`.
+- Final verification after this review: `node tests/run.mjs` -> `All tests passed`; changed-file `node --check` and `git diff --check` passed.

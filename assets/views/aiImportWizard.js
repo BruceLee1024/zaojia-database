@@ -279,6 +279,7 @@ async function importConfirmed(workspace) {
     if (!lines.length) throw new Error('没有可导入的有效清单行');
     const result = await boqService.importLines(state.projectId, lines, { mode: state.importMode });
     await dataEngineService.ingestBOQ(state.projectId, { sourceType: 'ai_excel_import', sourceId: state.fileName });
+    if (workspace.isInvalidated) return;
     window.__app.state.currentProjectId = state.projectId;
     toast(`项目清单导入完成：成功 ${result.success} 条，缺单价 ${result.missingPrice} 条`, 'success');
     window.__app.go('boq', { projectId: state.projectId, imported: true });

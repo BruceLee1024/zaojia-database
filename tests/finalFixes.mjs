@@ -11,6 +11,7 @@ export async function testFinalFixes() {
   await testSerializedCoordinator();
   await testLatestWorkspaceCoordinator();
   testWorkspaceRootIsolation();
+  await testActiveWorkspaceInvalidation();
   await testRouteRenderersAcceptWorkspace();
   await testCoherentModuleVersionGraph();
   await testNoInlineUntrustedIdInterpolation();
@@ -85,6 +86,64 @@ function testWorkspaceRootIsolation() {
   oldRoot.remove();
   assert.equal(oldNode.removed, true);
   assert.equal(newNode.removed, false);
+
+  const revokedNode = element('revoked');
+  const firstLive = element('first-live');
+  const secondLive = element('second-live');
+  const revokedRoot = createWorkspaceRoot(revokedNode);
+  revokedRoot.activate(firstLive);
+  revokedRoot.invalidate();
+  revokedRoot.activate(secondLive);
+  revokedRoot.innerHTML = 'stale-only';
+  assert.equal(revokedNode.innerHTML, 'stale-only');
+  assert.equal(firstLive.innerHTML, '');
+  assert.equal(secondLive.innerHTML, '');
+}
+
+async function testActiveWorkspaceInvalidation() {
+  const node = () => ({
+    innerHTML: '',
+    childNodes: [],
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    remove() {},
+  });
+  const live = node();
+  const roots = [];
+  const coordinator = createLatestWorkspaceCoordinator({
+    createRoot: () => {
+      const root = createWorkspaceRoot(node());
+      roots.push(root);
+      return root;
+    },
+    commit: root => {
+      live.innerHTML = root.innerHTML;
+      root.activate(live);
+    },
+  });
+
+  await coordinator.run(async root => { root.innerHTML = 'old'; });
+  assert.equal(live.innerHTML, 'old');
+
+  let releaseNew;
+  const next = coordinator.run(async root => {
+    root.innerHTML = 'new-shell';
+    await new Promise(resolve => { releaseNew = resolve; });
+    root.innerHTML = 'new-final';
+  });
+  await Promise.resolve();
+  assert.equal(roots[0].isInvalidated, true);
+  let currentView = 'new-view';
+  if (!roots[0].isInvalidated) currentView = 'old-view';
+  assert.equal(currentView, 'new-view');
+  roots[0].innerHTML = 'old-pending-pollution';
+  assert.equal(live.innerHTML, 'old');
+
+  releaseNew();
+  assert.equal(await next, true);
+  assert.equal(live.innerHTML, 'new-final');
+  roots[0].innerHTML = 'old-after-commit-pollution';
+  assert.equal(live.innerHTML, 'new-final');
 }
 
 async function testRouteRenderersAcceptWorkspace() {
@@ -116,6 +175,7 @@ async function testRouteRenderersAcceptWorkspace() {
   assert.equal(app.includes('snapshotWorkspace'), false);
   assert.equal(app.includes('restoreWorkspace'), false);
   assert.match(app, /await r\.render\(workspace\)/);
+  assert.equal((app.match(/state\.currentView\s*=(?!=)/g) || []).length, 1, 'only go() may mutate currentView');
 
   const resourceImport = await readFile(join(root, 'assets/views/resourceImport.js'), 'utf8');
   assert.match(resourceImport, /exposeActions\(workspace\);[\s\S]*await paint\(workspace\);/);
