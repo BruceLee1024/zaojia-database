@@ -4,7 +4,7 @@ import { resourceService } from '../services/resourceService.js?v=1.0';
 import { projectRepo, quotaRepo } from '../data/repository.js?v=4.1';
 import { exportResourceTemplate } from '../data/excel.js?v=4.1';
 import { closeModal, esc, fmtMoney, openModal, toast } from '../utils/dom.js';
-import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.0';
+import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.1';
 
 const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], healthLabel: '', rows: [], prices: new Map(), usage: null };
 let attachmentRenderGeneration = 0;

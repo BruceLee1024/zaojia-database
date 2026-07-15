@@ -55,7 +55,8 @@ export function buildResourceHealth({ resources = [], prices = [], attachments =
 }
 
 export function selectResourcePriceForHealth(resource, prices = [], today = localDateKey()) {
-  return selectResourcePrice(resource, prices, today, { latestRegardlessOfValidity: true });
+  return selectCurrentResourcePrice(resource, prices, today)
+    || selectResourcePrice(resource, prices, today, { latestRegardlessOfValidity: true });
 }
 
 function summarize(items) {

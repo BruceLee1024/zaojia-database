@@ -120,3 +120,26 @@ Served `/app/` at an isolated localhost port and reran Chromium `140.0.7339.16` 
 ### Follow-up concerns
 
 - No new unresolved concern was found. Historical supplier-quote evidence policy remains the documented product-policy question from the original report.
+
+## Final review follow-up
+
+- Corrected health price classification to a strict two-stage policy:
+  1. use the exact record returned by the operational current-price selector, including its preferred-price behavior;
+  2. only when operational selection returns no record, fall back to the newest historical record regardless of expiry.
+- Consequently, a newer expired record does not override an older still-valid operational current price; a resource with only expired history is classified as expired; an expired preferred record remains classified as expired. Missing price is reserved for resources with no price record at all.
+- Completed the `v6.1` cache chain for the two stale parent edges found in final review: `resources -> resourceAttachments` and `quota -> quotaResourceComposition`.
+- Added a focused static import-graph assertion covering app parents, dashboard health, resource attachments/pricing, quota composition panel and health/quota service dependencies. Any reintroduction of the stale versions now fails the automated suite.
+
+### Final RED/GREEN evidence
+
+- RED: the newer-expired/older-valid test failed with `latest !== older`, proving health bypassed the operational selector.
+- GREEN: health now calls `selectCurrentResourcePrice()` first and only invokes the unrestricted latest-record option after a null result.
+- The cache graph assertion would fail on the reviewed `v6.0` and `v4.2` parent edges; both now resolve to `v6.1`.
+- `node tests/run.mjs` -> `All tests passed`; syntax checks and `git diff --check` passed.
+
+### Warm-cache Chromium evidence
+
+- Chromium `140.0.7339.16`, one persistent isolated browser context.
+- Warmed Materials and Quota once, reloaded `/app/`, then exercised both routes again.
+- Performance resource entries contained all nine expected `v6.1` URLs for app/resource/quota/health dependencies; missing URLs: 0, stale-version URLs: 0.
+- Console errors/warnings, page errors, failed requests and HTTP responses >= 400: all zero.

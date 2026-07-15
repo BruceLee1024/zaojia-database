@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 export async function testResourceHealth() {
   const { selectCurrentResourcePrice } = await import('../assets/services/resourcePriceService.js?v=test-health');
@@ -48,10 +49,18 @@ export async function testResourceHealth() {
     { id: 'latest', resourceId: ordinaryExpired.id, priceDate: '2026-07-01', validTo: '2026-07-14' },
   ];
   assert.equal(selectCurrentResourcePrice(ordinaryExpired, ordinaryExpiredPrices, localToday).id, 'older', 'operational policy still selects a valid price');
-  assert.equal(selectResourcePriceForHealth(ordinaryExpired, ordinaryExpiredPrices).id, 'latest', 'health classification uses latest record when preferred reference is invalid');
+  assert.equal(selectResourcePriceForHealth(ordinaryExpired, ordinaryExpiredPrices, localToday).id, 'older', 'health classification first uses the operational current price');
   const expiredHealth = buildResourceHealth({ resources: [ordinaryExpired], prices: ordinaryExpiredPrices, today: localToday });
   assert.equal(expiredHealth.missingCurrentPrice.total, 0);
-  assert.deepEqual(expiredHealth.expiredCurrentPrice.resourceIds, [ordinaryExpired.id]);
+  assert.deepEqual(expiredHealth.expiredCurrentPrice.resourceIds, []);
+  const onlyExpired = { id: 'only-expired', resourceType: 'equipment', status: 'active' };
+  const onlyExpiredHealth = buildResourceHealth({
+    resources: [onlyExpired],
+    prices: [{ id: 'only-expired-price', resourceId: onlyExpired.id, priceDate: '2026-07-01', validTo: '2026-07-14' }],
+    today: localToday,
+  });
+  assert.equal(onlyExpiredHealth.missingCurrentPrice.total, 0);
+  assert.deepEqual(onlyExpiredHealth.expiredCurrentPrice.resourceIds, [onlyExpired.id]);
 
   const health = buildResourceHealth({ resources, prices, attachments, usages, today: localToday });
   assert.deepEqual(health.missingCurrentPrice, {
@@ -129,4 +138,23 @@ export async function testResourceHealth() {
   assert.equal(activeNav.includes('title="我的材料库"'), true);
   assert.equal(activeNav.includes('aria-current="page"'), true);
   assert.equal(navigationItemHtml({ id: 'equipment', label: '我的设备库', desc: '设备选型与价格', icon: 'build' }, false).includes('aria-current'), false);
+
+  assertCacheGraph();
+}
+
+function assertCacheGraph() {
+  const expectations = [
+    ['../app.js', "./assets/views/dashboard.js?v=6.1", "./assets/views/quota.js?v=6.1", "./assets/views/resources.js?v=6.1", "./assets/views/navigation.js?v=6.1"],
+    ['../assets/views/dashboard.js', "../services/resourceHealthService.js?v=6.1"],
+    ['../assets/views/resources.js', "../services/resourcePriceService.js?v=6.1", "./resourceAttachments.js?v=6.1"],
+    ['../assets/views/quota.js', "./quotaResourceComposition.js?v=6.1", "./quotaResourceCompositionPanel.js?v=6.1"],
+    ['../assets/views/quotaResourceCompositionPanel.js', "../services/quotaResourceService.js?v=6.1", "../services/resourcePriceService.js?v=6.1", "./quotaResourceComposition.js?v=6.1"],
+    ['../assets/views/resourceAttachments.js', "../services/resourcePriceService.js?v=6.1"],
+    ['../assets/services/resourceHealthService.js', "./quotaResourceService.js?v=6.1", "./resourcePriceService.js?v=6.1"],
+    ['../assets/services/quotaResourceService.js', "./resourcePriceService.js?v=6.1"],
+  ];
+  expectations.forEach(([file, ...imports]) => {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    imports.forEach(specifier => assert.equal(source.includes(specifier), true, `${file} must import ${specifier}`));
+  });
 }
