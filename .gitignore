@@ -4,6 +4,7 @@ node_modules/
 dist/
 build/
 .cache/
+.worktrees/
 *.log
 data/*.json
 .vercel
