@@ -1,6 +1,6 @@
 # 个人造价工作台 · 本地工程造价资料库
 
-![version](https://img.shields.io/badge/version-v5.13.0-0f766e)
+![version](https://img.shields.io/badge/version-v6.2-0f766e)
 ![frontend](https://img.shields.io/badge/frontend-ES%20Modules-0f766e)
 ![storage](https://img.shields.io/badge/storage-IndexedDB%20%2B%20Local%20JSON-0284c7)
 ![backend](https://img.shields.io/badge/backend-none-64748b)
@@ -10,7 +10,7 @@
 
 一个面向个人造价从业者的本地工程造价工作台。你可以导入自己的历史清单和常用定额，建立项目、编制报价、保存版本、收录案例，并用造价参考和 AI 辅助下一次判断。资料默认保存在浏览器 IndexedDB，也可切换为用户授权的本地文件夹 JSON 存储；AI Key 仅保存在本机 `localStorage`。
 
-当前版本：`v5.13`，重点完善资料导入、个人定额库、项目清单、报价版本、案例参考、复盘笔记、本地备份和 AI 辅助。
+当前版本：`v6.2`，重点完善材料设备主数据、不可变价格历史、附件证据、资源组成、完整备份和并发安全。
 
 ## 快速开始
 

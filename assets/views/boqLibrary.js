@@ -1,10 +1,10 @@
 // 视图：独立清单库
-import { boqLibraryService } from '../services/boqLibraryService.js?v=1.0';
-import { suggestLibraryItem } from '../services/aiAssistService.js?v=1.0';
-import { projectRepo, quotaRepo } from '../data/repository.js?v=1.0';
-import { exportBoqLibraryTemplate } from '../data/excel.js?v=1.0';
-import { esc, openModal, closeModal, toast } from '../utils/dom.js';
-import { ICONS } from '../utils/icons.js?v=1.0';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.2';
+import { suggestLibraryItem } from '../services/aiAssistService.js?v=6.2';
+import { projectRepo, quotaRepo } from '../data/repository.js?v=6.2';
+import { exportBoqLibraryTemplate } from '../data/excel.js?v=6.2';
+import { esc, openModal, closeModal, toast } from '../utils/dom.js?v=6.2';
+import { ICONS } from '../utils/icons.js?v=6.2';
 
 const state = { keyword: '', selectedId: '' };
 let items = [];

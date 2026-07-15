@@ -1,5 +1,5 @@
 // 存储适配层：默认 IndexedDB，用户授权后可镜像并读写本地文件夹 JSON。
-import { idb } from './idb-bridge.js?v=3.9';
+import { idb } from './idb-bridge.js?v=6.2';
 
 const STORAGE_MODE_KEY = '__costdb_storage_mode';
 const DIRECTORY_HANDLE_KEY = '__costdb_directory_handle';

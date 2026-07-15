@@ -1,10 +1,10 @@
-import { boqService } from '../services/boqService.js?v=4.1';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.1';
-import { resourceService } from '../services/resourceService.js?v=1.0';
-import { projectRepo, quotaRepo } from '../data/repository.js?v=4.1';
-import { exportResourceTemplate } from '../data/excel.js?v=4.1';
-import { closeModal, esc, fmtMoney, openModal, toast } from '../utils/dom.js';
-import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.1';
+import { boqService } from '../services/boqService.js?v=6.2';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.2';
+import { resourceService } from '../services/resourceService.js?v=6.2';
+import { projectRepo, quotaRepo } from '../data/repository.js?v=6.2';
+import { exportResourceTemplate } from '../data/excel.js?v=6.2';
+import { closeModal, esc, fmtMoney, openModal, toast } from '../utils/dom.js?v=6.2';
+import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.2';
 
 const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], healthLabel: '', rows: [], prices: new Map(), usage: null };
 let attachmentRenderGeneration = 0;
@@ -114,7 +114,8 @@ function paint() {
         ${resourceTable(meta)}
         ${selected ? detailPanel(selected, meta, generation) : emptyDetail(meta)}
       </div>
-    </div>`;
+      </div>`;
+  bindResourceIdActions(document.getElementById('workspace'));
   return generation;
 }
 
@@ -122,26 +123,26 @@ function resourceTable(meta) {
   return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden min-h-[420px]">
     <div class="border-b border-slate-200 px-4 py-3 flex items-center"><h2 class="font-semibold text-slate-900">${meta.plural}清单</h2><span class="ml-2 text-xs text-slate-500">${state.rows.length} 条</span></div>
     <div class="overflow-auto"><table class="w-full text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-3 py-2 text-left">编码 / 名称</th><th class="px-3 text-left">规格型号</th><th class="px-3 text-left">分类</th><th class="px-3 text-right">当前价</th><th class="px-3 text-left">状态</th><th class="px-3 w-28"></th></tr></thead>
-    <tbody class="divide-y divide-slate-100">${state.rows.length ? state.rows.map(item => {
-      const price = state.prices.get(item.id);
-      const active = item.id === state.selectedId;
-      return `<tr class="${active ? 'bg-teal-50/70' : 'hover:bg-slate-50'}"><td class="px-3 py-3"><button onclick="window.__resources.select('${item.id}')" class="block text-left"><span class="block font-medium text-slate-900">${esc(item.name)}</span><span class="mt-0.5 block text-xs font-data text-slate-500">${esc(item.code || '未编码')} · ${esc(item.unit)}</span></button></td><td class="px-3 text-slate-600">${esc(item.specModel || '-')}</td><td class="px-3 text-slate-600">${esc(item.category || '未分类')}</td><td class="px-3 text-right tabular-nums">${price ? fmtMoney(price.unitPrice) : '<span class="text-amber-600">待询价</span>'}</td><td class="px-3"><span class="badge ${item.status === 'inactive' ? 'badge-gray' : 'badge-green'}">${item.status === 'inactive' ? '停用' : '启用'}</span></td><td class="px-3"><div class="flex justify-end gap-1"><button aria-label="编辑" title="编辑" onclick="window.__resources.edit('${item.id}')" class="h-8 w-8 text-slate-500 hover:bg-slate-100"><span class="material-symbols-outlined text-[17px]">edit</span></button><button aria-label="复制" title="复制" onclick="window.__resources.copy('${item.id}')" class="h-8 w-8 text-slate-500 hover:bg-slate-100"><span class="material-symbols-outlined text-[17px]">content_copy</span></button></div></td></tr>`;
-    }).join('') : `<tr><td colspan="6" class="py-16 text-center text-slate-400">暂无符合条件的${meta.singular}。</td></tr>`}</tbody></table></div></section>`;
+    <tbody class="divide-y divide-slate-100">${state.rows.length ? state.rows.map(item => resourceRowHtml(item, state.prices.get(item.id), item.id === state.selectedId)).join('') : `<tr><td colspan="6" class="py-16 text-center text-slate-400">暂无符合条件的${meta.singular}。</td></tr>`}</tbody></table></div></section>`;
+}
+
+export function resourceRowHtml(item, price, active) {
+  return `<tr class="${active ? 'bg-teal-50/70' : 'hover:bg-slate-50'}"><td class="px-3 py-3"><button data-resource-action="select" data-resource-id="${esc(item.id)}" class="block text-left"><span class="block font-medium text-slate-900">${esc(item.name)}</span><span class="mt-0.5 block text-xs font-data text-slate-500">${esc(item.code || '未编码')} · ${esc(item.unit)}</span></button></td><td class="px-3 text-slate-600">${esc(item.specModel || '-')}</td><td class="px-3 text-slate-600">${esc(item.category || '未分类')}</td><td class="px-3 text-right tabular-nums">${price ? fmtMoney(price.unitPrice) : '<span class="text-amber-600">待询价</span>'}</td><td class="px-3"><span class="badge ${item.status === 'inactive' ? 'badge-gray' : 'badge-green'}">${item.status === 'inactive' ? '停用' : '启用'}</span></td><td class="px-3"><div class="flex justify-end gap-1"><button aria-label="编辑" title="编辑" data-resource-action="edit" data-resource-id="${esc(item.id)}" class="h-8 w-8 text-slate-500 hover:bg-slate-100"><span class="material-symbols-outlined text-[17px]">edit</span></button><button aria-label="复制" title="复制" data-resource-action="copy" data-resource-id="${esc(item.id)}" class="h-8 w-8 text-slate-500 hover:bg-slate-100"><span class="material-symbols-outlined text-[17px]">content_copy</span></button></div></td></tr>`;
 }
 
 function detailPanel(item, meta, generation) {
   const current = state.prices.get(item.id);
   const usage = state.usage || {};
   return `<aside class="rounded-lg border border-slate-200 bg-white overflow-auto">
-    <div class="p-4 border-b border-slate-200"><div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div class="text-xs text-slate-500">${esc(item.code || '未编码')}</div><h2 class="mt-1 text-lg font-semibold text-slate-900">${esc(item.name)}</h2><p class="mt-1 text-sm text-slate-500">${esc(item.specModel || '未填规格')} · ${esc(item.unit)}</p></div><button onclick="window.__resources.toggleStatus('${item.id}')" class="h-8 px-2 border border-slate-300 bg-white text-xs">${item.status === 'inactive' ? '恢复启用' : '停用'}</button></div>
+    <div class="p-4 border-b border-slate-200"><div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div class="text-xs text-slate-500">${esc(item.code || '未编码')}</div><h2 class="mt-1 text-lg font-semibold text-slate-900">${esc(item.name)}</h2><p class="mt-1 text-sm text-slate-500">${esc(item.specModel || '未填规格')} · ${esc(item.unit)}</p></div><button data-resource-action="toggleStatus" data-resource-id="${esc(item.id)}" class="h-8 px-2 border border-slate-300 bg-white text-xs">${item.status === 'inactive' ? '恢复启用' : '停用'}</button></div>
       <div class="mt-4 grid grid-cols-2 gap-2 text-xs">${field('分类', item.category)}${field('品牌 / 厂家', item.brand || item.manufacturer)}${field('执行标准', item.standard)}${field('工艺段', item.processStage)}</div>
       ${item.tags?.length ? `<div class="mt-3 flex flex-wrap gap-1">${item.tags.map(tag => `<span class="badge badge-blue">${esc(tag)}</span>`).join('')}</div>` : ''}
       ${item.note ? `<p class="mt-3 text-xs leading-5 text-slate-500">${esc(item.note)}</p>` : ''}
     </div>
-    <section class="p-4 border-b border-slate-200"><div class="flex items-center"><div><h3 class="font-semibold text-slate-900">价格历史</h3><p class="mt-1 text-xs text-slate-500">${current ? `当前价 ${fmtMoney(current.unitPrice)} · ${esc(current.priceDate)}` : '还没有价格快照'}</p></div><div class="flex-1"></div><button onclick="window.__resources.addPrice('${item.id}')" class="h-8 px-3 border border-teal-300 bg-white text-xs text-teal-700">新增价格</button></div><div id="resourcePriceHistory" class="mt-3 text-xs text-slate-400">正在读取价格历史…</div></section>
+    <section class="p-4 border-b border-slate-200"><div class="flex items-center"><div><h3 class="font-semibold text-slate-900">价格历史</h3><p class="mt-1 text-xs text-slate-500">${current ? `当前价 ${fmtMoney(current.unitPrice)} · ${esc(current.priceDate)}` : '还没有价格快照'}</p></div><div class="flex-1"></div><button data-resource-action="addPrice" data-resource-id="${esc(item.id)}" class="h-8 px-3 border border-teal-300 bg-white text-xs text-teal-700">新增价格</button></div><div id="resourcePriceHistory" class="mt-3 text-xs text-slate-400">正在读取价格历史…</div></section>
     <section class="p-4 border-b border-slate-200"><h3 class="font-semibold text-slate-900">使用位置</h3><div class="mt-3 grid grid-cols-2 gap-2">${metric('定额引用', usage.quotaUsageCount || 0)}${metric('项目清单', usage.projectLineCount || 0)}</div>${usage.total ? `<p class="mt-3 text-xs leading-5 text-slate-500">定额 ID：${esc((usage.quotaItemIds || []).join('、') || '-')}<br>项目 ID：${esc((usage.projectIds || []).join('、') || '-')}</p>` : '<p class="mt-3 text-xs text-slate-400">尚未被定额或项目清单引用。</p>'}</section>
     ${attachmentPanelShell(item.id, generation)}
-    <div class="p-4 flex flex-wrap gap-2">${state.resourceType === 'equipment' ? `<button onclick="window.__resources.addToProject('${item.id}')" ${current ? '' : 'disabled'} class="h-9 flex-1 brand-bg px-3 text-sm text-white disabled:opacity-40">加入项目</button>` : ''}<button onclick="window.__resources.edit('${item.id}')" class="h-9 px-3 border border-slate-300 bg-white text-sm">编辑</button><button onclick="window.__resources.remove('${item.id}')" class="h-9 px-3 border border-red-200 bg-white text-sm text-red-600">删除</button></div>
+    <div class="p-4 flex flex-wrap gap-2">${state.resourceType === 'equipment' ? `<button data-resource-action="addToProject" data-resource-id="${esc(item.id)}" ${current ? '' : 'disabled'} class="h-9 flex-1 brand-bg px-3 text-sm text-white disabled:opacity-40">加入项目</button>` : ''}<button data-resource-action="edit" data-resource-id="${esc(item.id)}" class="h-9 px-3 border border-slate-300 bg-white text-sm">编辑</button><button data-resource-action="remove" data-resource-id="${esc(item.id)}" class="h-9 px-3 border border-red-200 bg-white text-sm text-red-600">停用 / 移除</button></div>
   </aside>`;
 }
 
@@ -161,7 +162,7 @@ function exposeActions() {
     remove: removeResource,
     addPrice: showPriceEditor,
     preferPrice: async (resourceId, priceId) => { await resourceService.setPreferredPrice(resourceId, priceId); toast('已设为首选价格', 'success'); await refresh(); await loadPriceHistory(resourceId); },
-    removePrice: async (resourceId, priceId) => { if (!confirm('删除这条价格快照？')) return; await resourcePriceService.remove(priceId); await refresh(); await loadPriceHistory(resourceId); },
+    removePrice: async (resourceId, priceId) => { if (!confirm('撤回这条价格快照？历史记录和附件仍保留。')) return; await resourcePriceService.remove(priceId); await refresh(); await loadPriceHistory(resourceId); },
     addToProject: showAddToProject,
     importExcel: () => window.__app.go('resource-import', { resourceType: state.resourceType }),
     downloadTemplate: () => exportResourceTemplate(state.resourceType),
@@ -172,7 +173,17 @@ async function loadPriceHistory(resourceId) {
   const host = document.getElementById('resourcePriceHistory');
   if (!host || state.selectedId !== resourceId) return;
   const [resource, prices] = await Promise.all([resourceService.get(resourceId), resourcePriceService.listByResource(resourceId)]);
-  host.innerHTML = prices.length ? `<div class="space-y-2">${prices.map(price => `<div class="border ${price.id === resource.preferredPriceId ? 'border-teal-300 bg-teal-50/50' : 'border-slate-200'} p-2"><div class="flex items-center gap-2"><span class="font-semibold text-slate-900">${fmtMoney(price.unitPrice)}</span>${price.id === resource.preferredPriceId ? '<span class="badge badge-green">首选</span>' : ''}<span class="ml-auto text-slate-500">${esc(price.priceDate)}</span></div><div class="mt-1 text-slate-500">${esc(price.region?.province || '')}${esc(price.region?.city || '')} · ${sourceLabel(price.sourceType)} · ${basisLabel(price.priceBasis)}${price.supplier ? ` · ${esc(price.supplier)}` : ''}</div><div class="mt-2 flex gap-3"><button onclick="window.__resources.preferPrice('${resourceId}','${price.id}')" class="text-teal-700">设为首选</button><button onclick="window.__resources.removePrice('${resourceId}','${price.id}')" class="text-red-600">删除</button></div></div>`).join('')}</div>` : '<div class="border border-dashed border-slate-200 p-4 text-center">暂无价格历史。</div>';
+  host.innerHTML = prices.length ? `<div class="space-y-2">${prices.map(price => `<div class="border ${price.id === resource.preferredPriceId ? 'border-teal-300 bg-teal-50/50' : 'border-slate-200'} p-2"><div class="flex items-center gap-2"><span class="font-semibold text-slate-900">${fmtMoney(price.unitPrice)}</span>${price.id === resource.preferredPriceId ? '<span class="badge badge-green">首选</span>' : ''}${price.status === 'withdrawn' ? '<span class="badge badge-gray">已撤回</span>' : ''}<span class="ml-auto text-slate-500">${esc(price.priceDate)}</span></div><div class="mt-1 text-slate-500">${esc(price.region?.province || '')}${esc(price.region?.city || '')} · ${sourceLabel(price.sourceType)} · ${basisLabel(price.priceBasis)}${price.supplier ? ` · ${esc(price.supplier)}` : ''}</div><div class="mt-2 flex gap-3">${price.status === 'withdrawn' ? '' : `<button data-price-action="prefer" data-resource-id="${esc(resourceId)}" data-price-id="${esc(price.id)}" class="text-teal-700">设为首选</button><button data-price-action="withdraw" data-resource-id="${esc(resourceId)}" data-price-id="${esc(price.id)}" class="text-red-600">撤回</button>`}</div></div>`).join('')}</div>` : '<div class="border border-dashed border-slate-200 p-4 text-center">暂无价格历史。</div>';
+  host.querySelectorAll('[data-price-action]').forEach(button => button.addEventListener('click', () => {
+    const action = button.dataset.priceAction === 'prefer' ? 'preferPrice' : 'removePrice';
+    window.__resources[action](button.dataset.resourceId, button.dataset.priceId);
+  }));
+}
+
+function bindResourceIdActions(root) {
+  root?.querySelectorAll('[data-resource-action]').forEach(button => button.addEventListener('click', () => {
+    window.__resources[button.dataset.resourceAction]?.(button.dataset.resourceId);
+  }));
 }
 
 async function showResourceEditor(id = '') {
@@ -203,9 +214,9 @@ async function showPriceEditor(resourceId) {
 }
 
 async function removeResource(id) {
-  if (!confirm('删除这条主数据？已引用的资源将被保护。')) return;
-  try { await resourceService.remove(id); state.selectedId = ''; toast('已删除', 'success'); await refresh(); }
-  catch (error) { if (error.code !== 'RESOURCE_IN_USE' || !confirm(`该资源有 ${error.usage.total} 处引用。强制删除将保留历史快照，继续？`)) throw error; await resourceService.remove(id, { force: true }); state.selectedId = ''; toast('已强制删除，历史快照已保留', 'success'); await refresh(); }
+  if (!confirm('停用或移除这条主数据？有历史记录时将保留为停用档案。')) return;
+  try { await resourceService.remove(id); state.selectedId = ''; toast('已移除未使用资源', 'success'); await refresh(); }
+  catch (error) { if (error.code !== 'RESOURCE_IN_USE' || !confirm(`该资源有 ${error.usage.total} 条历史或引用。继续将只停用主数据，不删除价格、附件和引用，是否继续？`)) throw error; await resourceService.remove(id, { force: true }); state.selectedId = ''; toast('已停用，历史与引用完整保留', 'success'); await refresh(); }
 }
 
 async function showAddToProject(resourceId) {

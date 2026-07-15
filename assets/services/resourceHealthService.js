@@ -1,7 +1,7 @@
-import { quotaResourceUsageRepo, resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
-import { localDateKey } from '../utils/localDate.js?v=4.2';
-import { getUsageComparisonReasons } from './quotaResourceService.js?v=6.1';
-import { selectCurrentResourcePrice, selectResourcePrice } from './resourcePriceService.js?v=6.1';
+import { quotaResourceUsageRepo, resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.2';
+import { localDateKey } from '../utils/localDate.js?v=6.2';
+import { getUsageComparisonReasons } from './quotaResourceService.js?v=6.2';
+import { selectCurrentResourcePrice, selectResourcePrice } from './resourcePriceService.js?v=6.2';
 
 export const resourceHealthService = {
   async getHealth({ today = localDateKey() } = {}) {
@@ -33,7 +33,7 @@ export function buildResourceHealth({ resources = [], prices = [], attachments =
     .map(resource => ({ resource, price: currentByResource.get(resource.id) }))
     .filter(({ price }) => price?.validTo && price.validTo < today));
   const missingQuoteEvidence = summarize(prices
-    .filter(price => price.sourceType === 'supplier_quote' && activeById.has(price.resourceId) && !availableEvidence.has(price.id))
+    .filter(price => price.status !== 'withdrawn' && price.sourceType === 'supplier_quote' && activeById.has(price.resourceId) && !availableEvidence.has(price.id))
     .map(price => ({ resource: activeById.get(price.resourceId), price })));
   const pendingQuotaUpdates = summarizeQuotaUpdates(usages
     .map(usage => {

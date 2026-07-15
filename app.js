@@ -1,21 +1,22 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=6.1';
-import * as importer  from './assets/views/importer.js?v=1.8';
-import * as quota     from './assets/views/quota.js?v=6.1';
-import * as projects  from './assets/views/projects.js?v=5.0';
-import * as boq       from './assets/views/boq.js?v=4.7';
-import * as indicators from './assets/views/indicators.js?v=6.0';
-import * as experience from './assets/views/experience.js?v=4.9';
-import * as settings  from './assets/views/settings.js?v=4.7';
-import * as ai        from './assets/views/ai.js?v=4.2';
-import * as resources from './assets/views/resources.js?v=6.1';
-import { ensureDemoData } from './assets/data/demo.js?v=3.9';
-import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
-import { smartSearch } from './assets/services/aiAssistService.js?v=1.2';
-import { getStorageStatus } from './assets/data/storage.js?v=1.0';
-import { openModal, closeModal, esc } from './assets/utils/dom.js';
-import { ICONS } from './assets/utils/icons.js?v=1.0';
-import { navigationItemHtml } from './assets/views/navigation.js?v=6.1';
+import * as dashboard from './assets/views/dashboard.js?v=6.2';
+import * as importer  from './assets/views/importer.js?v=6.2';
+import * as quota     from './assets/views/quota.js?v=6.2';
+import * as projects  from './assets/views/projects.js?v=6.2';
+import * as boq       from './assets/views/boq.js?v=6.2';
+import * as indicators from './assets/views/indicators.js?v=6.2';
+import * as experience from './assets/views/experience.js?v=6.2';
+import * as settings  from './assets/views/settings.js?v=6.2';
+import * as ai        from './assets/views/ai.js?v=6.2';
+import * as resources from './assets/views/resources.js?v=6.2';
+import { ensureDemoData } from './assets/data/demo.js?v=6.2';
+import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=6.2';
+import { smartSearch } from './assets/services/aiAssistService.js?v=6.2';
+import { getStorageStatus } from './assets/data/storage.js?v=6.2';
+import { openModal, closeModal, esc } from './assets/utils/dom.js?v=6.2';
+import { ICONS } from './assets/utils/icons.js?v=6.2';
+import { navigationItemHtml } from './assets/views/navigation.js?v=6.2';
+import { createLatestCoordinator, createSerializedKeyCoordinator } from './assets/utils/requestCoordinator.js?v=6.2';
 
 const VIEWS = [
   { id: 'dashboard',  label: '我的概览',   icon: ICONS.navigation.overview, group: '我的工作台', desc: '继续最近工作' },
@@ -45,24 +46,27 @@ const renderers = {
   equipment: resources,
   'resource-import': {
     render: async () => {
-      const module = await import('./assets/views/resourceImport.js?v=6.0');
+      const module = await import('./assets/views/resourceImport.js?v=6.2');
       return module.render();
     },
   },
   'boq-library': {
     render: async () => {
-      const module = await import('./assets/views/boqLibrary.js?v=2.1');
+      const module = await import('./assets/views/boqLibrary.js?v=6.2');
       return module.render();
     },
   },
   'ai-import': {
     render: async () => {
-      const module = await import('./assets/views/aiImportWizard.js?v=1.7');
+      const module = await import('./assets/views/aiImportWizard.js?v=6.2');
       return module.render();
     },
   },
 };
 let lastSearchResults = [];
+let routeGeneration = 0;
+const routeCoordinator = createSerializedKeyCoordinator();
+const searchCoordinator = createLatestCoordinator();
 
 function renderNav() {
   const groups = [...new Set(VIEWS.map(v => v.group))];
@@ -80,29 +84,35 @@ async function go(view, params = {}) {
   state.routeParams = params || {};
   if (view === 'boq' && params.projectId) state.currentProjectId = params.projectId;
   renderNav();
-  return renderWorkspace();
+  const generation = ++routeGeneration;
+  return renderWorkspace(generation);
 }
 
-async function renderWorkspace() {
-  const current = VIEWS.find(x => x.id === state.currentView) || VIEWS[0];
-  document.getElementById('crumb').textContent = current.label || '';
-  const crumbIcon = document.getElementById('crumbIcon');
-  const crumbGroup = document.getElementById('crumbGroup');
-  const crumbDesc = document.getElementById('crumbDesc');
-  if (crumbIcon) crumbIcon.textContent = current.icon || 'dashboard';
-  if (crumbGroup) crumbGroup.textContent = current.group || '';
-  if (crumbDesc) crumbDesc.textContent = current.desc || '';
-  const v = state.currentView;
-  if (v === 'ai') return ai.open();
-  ai.close();
-  const r = renderers[v];
-  if (!r || !r.render) return;
-  try {
-    await r.render();
-  } catch (err) {
-    console.error(`[render:${v}]`, err);
-    renderErrorState(current, err);
-  }
+async function renderWorkspace(generation = ++routeGeneration) {
+  return routeCoordinator.run('workspace', async () => {
+    if (generation !== routeGeneration) return false;
+    const current = VIEWS.find(x => x.id === state.currentView) || VIEWS[0];
+    document.getElementById('crumb').textContent = current.label || '';
+    const crumbIcon = document.getElementById('crumbIcon');
+    const crumbGroup = document.getElementById('crumbGroup');
+    const crumbDesc = document.getElementById('crumbDesc');
+    if (crumbIcon) crumbIcon.textContent = current.icon || 'dashboard';
+    if (crumbGroup) crumbGroup.textContent = current.group || '';
+    if (crumbDesc) crumbDesc.textContent = current.desc || '';
+    const v = state.currentView;
+    if (v === 'ai') return ai.open();
+    ai.close();
+    const r = renderers[v];
+    if (!r || !r.render) return;
+    try {
+      await r.render();
+    } catch (err) {
+      if (generation !== routeGeneration) return false;
+      console.error(`[render:${v}]`, err);
+      renderErrorState(current, err);
+    }
+    return generation === routeGeneration;
+  });
 }
 
 function renderErrorState(current, err) {
@@ -132,7 +142,7 @@ function escapeHtml(value) {
 }
 
 function exportAll() {
-  import('./assets/views/settings.js?v=4.6').then(m => m.triggerExportBackup());
+  import('./assets/views/settings.js?v=6.2').then(m => m.triggerExportBackup());
   go('settings');
 }
 
@@ -155,12 +165,14 @@ async function renderStorageBadge() {
 async function runGlobalSearch(keyword, { openFirst = false } = {}) {
   const kw = String(keyword || '').trim();
   if (!kw) return;
-  const aiSearch = await smartSearch(kw);
-  lastSearchResults = aiSearch.suggestions?.length ? aiSearch.suggestions : await searchAll(kw);
-  if (openFirst && lastSearchResults[0]) {
-    return openSearchResult(0);
-  }
-  showSearchResults(kw, lastSearchResults);
+  return searchCoordinator.run(async () => {
+    const aiSearch = await smartSearch(kw);
+    return aiSearch.suggestions?.length ? aiSearch.suggestions : await searchAll(kw);
+  }, async results => {
+    lastSearchResults = results;
+    if (openFirst && results[0]) return openSearchResult(0);
+    showSearchResults(kw, results);
+  });
 }
 
 async function openSearchResult(index) {
@@ -236,7 +248,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   ai.close();
   renderStorageBadge();
-  await renderWorkspace();
+  await renderWorkspace(++routeGeneration);
 
   document.getElementById('aiInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') window.__app.sendAI();

@@ -1,9 +1,9 @@
 // 视图：造价参考
-import { indicatorService } from '../services/indicatorService.js?v=3.9';
-import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
-import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=1.1';
-import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=3.9';
-import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js';
+import { indicatorService } from '../services/indicatorService.js?v=6.2';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
+import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=6.2';
+import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=6.2';
+import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js?v=6.2';
 
 const state = {
   tab: 'overview',

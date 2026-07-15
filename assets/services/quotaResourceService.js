@@ -1,7 +1,7 @@
-import { quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
-import { uid } from '../utils/dom.js';
-import { resourcePriceService } from './resourcePriceService.js?v=6.1';
-import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=4.2';
+import { quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
+import { resourcePriceService } from './resourcePriceService.js?v=6.2';
+import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=6.2';
 
 export const quotaResourceService = {
   async list(quotaItemId) {
@@ -74,6 +74,7 @@ export const quotaResourceService = {
       ? await resourcePriceRepo.findById(payload.selectedPriceId)
       : await resourcePriceService.getCurrentPrice(payload.resourceId);
     if (!price || price.resourceId !== payload.resourceId) throw new Error('所选价格不存在或不属于当前材料/设备');
+    if (price.status === 'withdrawn') throw new Error('已撤回价格不能用于定额资源快照');
     const priceSnapshot = snapshotPrice(price);
     const usage = {
       id: payload.id || uid(),

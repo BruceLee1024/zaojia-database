@@ -1,6 +1,6 @@
 // 视图：AI 抽屉
-import { tryLocalCommand } from '../ai/localCommands.js?v=3.9';
-import { callLLM } from '../ai/remoteLLM.js?v=4.0';
+import { tryLocalCommand } from '../ai/localCommands.js?v=6.2';
+import { callLLM } from '../ai/remoteLLM.js?v=6.2';
 
 const history = [];
 let aiReturnFocus = null;

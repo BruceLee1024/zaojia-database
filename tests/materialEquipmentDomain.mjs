@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { STORES, resourceRepo, resourcePriceRepo, quotaResourceUsageRepo, resourceAttachmentRepo } from '../assets/data/repository.js';
-import { resourceService, resourceIdentity } from '../assets/services/resourceService.js';
-import { resourcePriceService } from '../assets/services/resourcePriceService.js';
-import { quotaResourceService } from '../assets/services/quotaResourceService.js';
-import { boqService } from '../assets/services/boqService.js';
+import { STORES, resourceRepo, resourcePriceRepo, quotaResourceUsageRepo, resourceAttachmentRepo } from '../assets/data/repository.js?v=6.2';
+import { resourceService, resourceIdentity } from '../assets/services/resourceService.js?v=6.2';
+import { resourcePriceService } from '../assets/services/resourcePriceService.js?v=6.2';
+import { quotaResourceService } from '../assets/services/quotaResourceService.js?v=6.2';
+import { boqService } from '../assets/services/boqService.js?v=6.2';
 
 export async function testMaterialEquipmentDomain() {
   const originalStorage = globalThis.localStorage;
@@ -54,16 +54,30 @@ async function testResourceIdentityAndReferenceProtection() {
   assert.equal((await resourceService.list({ keyword: '钢管', resourceType: 'material' })).length, 1);
 
   await quotaResourceUsageRepo.upsert({ id: 'u-ref', quotaItemId: 'q-ref', resourceId: material.id });
-  await globalStoreSet(STORES.project_boq, [{ id: 'b-ref', projectId: 'project-ref', resourceItemId: material.id, resourceSnapshot: { name: material.name } }]);
+  await resourcePriceRepo.upsert({ id: 'p-ref', resourceId: material.id, unitPrice: 1 });
+  await resourceAttachmentRepo.upsert({ id: 'a-ref', resourceId: material.id, priceId: 'p-ref' });
+  await globalStoreSet(STORES.project_boq, [
+    { id: 'b-ref', projectId: 'project-ref', resourceItemId: material.id, resourceSnapshot: { name: material.name } },
+    { id: 'b-manual-ref', projectId: 'project-ref', manualInstallationResourceId: material.id, linkedResourceSnapshot: { name: material.name } },
+  ]);
   const usage = await resourceService.usage(material.id);
-  assert.equal(usage.total, 2);
+  assert.equal(usage.total, 5);
+  assert.equal(usage.projectLineCount, 2);
+  assert.equal(usage.priceCount, 1);
+  assert.equal(usage.attachmentCount, 1);
   await assert.rejects(() => resourceService.remove(material.id), err => err.code === 'RESOURCE_IN_USE');
   await resourceService.remove(material.id, { force: true });
-  assert.equal(await resourceService.get(material.id), null);
-  assert.equal((await quotaResourceUsageRepo.byResource(material.id)).length, 0);
+  assert.equal((await resourceService.get(material.id)).status, 'inactive');
+  assert.equal((await quotaResourceUsageRepo.byResource(material.id)).length, 1);
+  assert.equal((await resourcePriceRepo.byResource(material.id)).length, 1);
+  assert.equal((await resourceAttachmentRepo.byResource(material.id)).length, 1);
   const preserved = (await globalStoreGet(STORES.project_boq))[0];
   assert.equal(preserved.resourceSnapshot.name, '钢管');
-  assert.equal(preserved.resourceReferenceStatus, 'missing');
+  assert.equal(preserved.resourceReferenceStatus, undefined);
+
+  const unused = await resourceService.save({ resourceType: 'material', name: '未使用材料', unit: 'kg' });
+  await resourceService.remove(unused.id);
+  assert.equal(await resourceService.get(unused.id), null);
 }
 
 async function testAppendOnlyPricesAndCurrentSelection() {
@@ -76,8 +90,16 @@ async function testAppendOnlyPricesAndCurrentSelection() {
   await resourceService.setPreferredPrice(equipment.id, oldPrice.id);
   assert.equal((await resourcePriceService.getCurrentPrice(equipment.id)).id, oldPrice.id);
   await assert.rejects(() => resourcePriceService.save({ ...latest, unitPrice: 1 }), err => err.code === 'PRICE_IMMUTABLE');
+  await resourceAttachmentRepo.upsert({ id: 'price-evidence', resourceId: equipment.id, priceId: oldPrice.id, status: 'available' });
   await resourcePriceService.remove(oldPrice.id);
   assert.equal((await resourceService.get(equipment.id)).preferredPriceId, '');
+  const withdrawn = await resourcePriceRepo.findById(oldPrice.id);
+  assert.equal(withdrawn.status, 'withdrawn');
+  assert.equal(withdrawn.unitPrice, oldPrice.unitPrice);
+  assert.equal((await resourceAttachmentRepo.findById('price-evidence')).priceId, oldPrice.id);
+  assert.equal((await resourcePriceService.listByResource(equipment.id)).some(price => price.id === oldPrice.id), true);
+  assert.equal((await resourcePriceService.getCurrentPrice(equipment.id)).id, latest.id);
+  await assert.rejects(() => resourceService.setPreferredPrice(equipment.id, oldPrice.id), /已撤回/);
   const other = await resourceService.save({ resourceType: 'equipment', name: '另一台泵', unit: '台' });
   await assert.rejects(() => resourceService.save({ ...other, preferredPriceId: latest.id }), /不属于/);
   await assert.rejects(() => resourcePriceService.save({ resourceId: equipment.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 100, region: { city: '成都' }, priceDate: '2026-02-30' }), /价格日期/);
@@ -89,8 +111,11 @@ async function testQuotaCompositionAndLegacyBreakdown() {
   const material = await resourceService.save({ resourceType: 'material', name: '钢管', specModel: 'DN100', unit: 'm' });
   const equipment = await resourceService.save({ resourceType: 'equipment', name: '阀门', specModel: 'DN100', unit: '个' });
   const materialPrice = await resourcePriceService.save({ resourceId: material.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 100, region: { province: '四川' }, priceDate: '2026-07-01' });
+  const withdrawnMaterialPrice = await resourcePriceService.save({ resourceId: material.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 90, region: { province: '四川' }, priceDate: '2025-07-01' });
+  await resourcePriceService.remove(withdrawnMaterialPrice.id);
   const equipmentPrice = await resourcePriceService.save({ resourceId: equipment.id, sourceType: 'transaction', priceBasis: 'ex_factory', unitPrice: 500, region: { city: '成都' }, priceDate: '2026-07-02' });
   await globalStoreSet(STORES.quota_items, [{ id: 'q1', name: '管道安装', breakdown: { 人工: 30, 材料: 5, 机械: 10, 管理费: 2, 利润: 1, 风险: 1 } }]);
+  await assert.rejects(() => quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: material.id, quantityPerUnit: 1, selectedPriceId: withdrawnMaterialPrice.id }), /已撤回/);
   const materialUsage = await quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: material.id, resourceType: 'equipment', quantityPerUnit: 2, lossRate: 5, selectedPriceId: materialPrice.id });
   assert.equal(materialUsage.calculatedCost, 210);
   assert.equal(materialUsage.resourceType, 'material');
@@ -121,22 +146,40 @@ async function testEquipmentPackageAndRollback(storage) {
   assert.equal((await globalStoreGet(STORES.projects))[0].totalCost, 46000);
   const packageUsage = await resourceService.usage(equipment.id);
   assert.equal(packageUsage.projectLineCount, 2);
-  assert.equal(packageUsage.total, 2);
+  assert.equal(packageUsage.total, 4);
+  assert.equal(packageUsage.priceCount, 2);
   await assert.rejects(() => resourceService.remove(equipment.id), err => err.code === 'RESOURCE_IN_USE');
   await assert.rejects(() => boqService.addEquipmentPackage('project-1', equipment.id, composite.id, 1, { installQuotaId: 'install-q' }), /重复计取安装/);
+  const obsolete = await resourcePriceService.save({ resourceId: equipment.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 18000, region: { city: '成都' }, priceDate: '2025-01-01' });
+  await resourcePriceService.remove(obsolete.id);
+  await assert.rejects(() => boqService.addEquipmentPackage('project-1', equipment.id, obsolete.id, 1), /已撤回/);
+
+  await Promise.all([
+    boqService.addEquipmentPackage('project-1', equipment.id, delivered.id, 1, { installQuotaId: 'install-q' }),
+    boqService.addEquipmentPackage('project-1', equipment.id, delivered.id, 1, { installQuotaId: 'install-q' }),
+  ]);
+  assert.equal((await globalStoreGet(STORES.project_boq)).length, 6);
 
   const beforeLines = structuredClone(await globalStoreGet(STORES.project_boq));
   const beforeProject = structuredClone(await globalStoreGet(STORES.projects));
   storage.failNextSet(STORES.projects);
-  await assert.rejects(() => boqService.addEquipmentPackage('project-1', equipment.id, delivered.id, 1));
+  await assert.rejects(() => boqService.addEquipmentPackage('project-1', equipment.id, delivered.id, 1), error => error.code === 'EQUIPMENT_PACKAGE_ROLLED_BACK' && Boolean(error.cause));
   assert.deepEqual(await globalStoreGet(STORES.project_boq), beforeLines);
   assert.deepEqual(await globalStoreGet(STORES.projects), beforeProject);
 
+  storage.failAfterSets(STORES.projects, 1);
+  storage.failAfterSets(STORES.project_boq, 2);
+  await assert.rejects(
+    () => boqService.addEquipmentPackage('project-1', equipment.id, delivered.id, 1),
+    error => error.code === 'EQUIPMENT_PACKAGE_PARTIAL_RECOVERY' && Boolean(error.cause) && error.rollbackCauses.length === 1,
+  );
+
   await resourceService.remove(equipment.id, { force: true });
   const removedLines = await globalStoreGet(STORES.project_boq);
-  assert.equal(removedLines.find(line => line.resourceItemId === equipment.id).resourceReferenceStatus, 'missing');
+  assert.equal((await resourceService.get(equipment.id)).status, 'inactive');
+  assert.equal(removedLines.find(line => line.resourceItemId === equipment.id).resourceReferenceStatus, undefined);
   const linkedLine = removedLines.find(line => line.linkedResourceItemId === equipment.id);
-  assert.equal(linkedLine.linkedResourceReferenceStatus, 'missing');
+  assert.equal(linkedLine.linkedResourceReferenceStatus, undefined);
   assert.equal(linkedLine.linkedResourceSnapshot.name, '鼓风机');
 }
 
@@ -155,9 +198,17 @@ async function globalStoreSet(store, value) {
 function memoryStorage() {
   const values = new Map();
   let failingKey = '';
+  const setCounts = new Map();
+  const failAt = new Map();
   return {
     getItem(key) { return values.has(key) ? values.get(key) : null; },
     setItem(key, value) {
+      const call = (setCounts.get(key) || 0) + 1;
+      setCounts.set(key, call);
+      if (failAt.get(key) === call) {
+        failAt.delete(key);
+        throw new Error(`simulated scheduled write failure: ${key}`);
+      }
       if (key === failingKey) {
         failingKey = '';
         throw new Error(`simulated write failure: ${key}`);
@@ -166,5 +217,6 @@ function memoryStorage() {
     },
     removeItem(key) { values.delete(key); },
     failNextSet(key) { failingKey = key; },
+    failAfterSets(key, offset) { failAt.set(key, (setCounts.get(key) || 0) + offset); },
   };
 }

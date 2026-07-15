@@ -1,9 +1,9 @@
-import { quotaResourceService } from '../services/quotaResourceService.js?v=6.1';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.1';
-import { resourceService } from '../services/resourceService.js?v=4.1';
-import { esc, fmtMoney, toast } from '../utils/dom.js';
-import { buildCompositionPreview, buildUsageComparisonViewModel, renderCompositionPreview } from './quotaResourceComposition.js?v=6.1';
-import { createBusyActionRunner, createLatestRequestGuard } from '../utils/asyncInteraction.js?v=4.2';
+import { quotaResourceService } from '../services/quotaResourceService.js?v=6.2';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.2';
+import { resourceService } from '../services/resourceService.js?v=6.2';
+import { esc, fmtMoney, toast } from '../utils/dom.js?v=6.2';
+import { buildCompositionPreview, buildUsageComparisonViewModel, renderCompositionPreview } from './quotaResourceComposition.js?v=6.2';
+import { createBusyActionRunner, createLatestRequestGuard } from '../utils/asyncInteraction.js?v=6.2';
 
 export async function applyCompositionFromPanel({ quota, getBaseBreakdown, service = quotaResourceService }) {
   const baseBreakdown = getBaseBreakdown?.();
@@ -96,11 +96,7 @@ function panelHtml({ comparisons, resources, selected, prices, preview, keyword 
         <input id="quotaResourceSearch" type="search" value="${esc(keyword)}" placeholder="输入名称、编码、规格或品牌" class="h-9 min-w-0 flex-1 rounded border border-slate-300 px-3 text-sm" />
         <button id="quotaResourceSearchBtn" type="button" class="h-9 rounded border border-slate-300 bg-white px-3 text-sm hover:bg-slate-50">搜索</button>
       </div>
-      <div class="flex flex-wrap gap-2">${resources.length ? resources.map(item => `
-        <button type="button" data-select-resource="${item.id}" class="rounded border px-3 py-2 text-left text-xs ${selected?.id === item.id ? 'border-teal-400 bg-teal-50' : 'border-slate-200 bg-white hover:border-slate-300'}">
-          <span class="font-medium text-slate-800">${esc(item.name)}</span><span class="ml-1 text-slate-500">${esc(item.specModel || item.code || '')}</span>
-          <span class="ml-2 text-slate-400">${item.resourceType === 'equipment' ? '设备' : '材料'}</span>
-        </button>`).join('') : '<div class="w-full rounded border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">未找到可关联资源</div>'}</div>
+      <div class="flex flex-wrap gap-2">${resources.length ? resources.map(item => quotaResourceChoiceHtml(item, selected?.id === item.id)).join('') : '<div class="w-full rounded border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">未找到可关联资源</div>'}</div>
       ${selected ? linkForm(selected, prices) : ''}
       <div class="space-y-2">${comparisons.length ? comparisons.map(comparisonRow).join('') : '<div class="rounded border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">尚未关联材料或设备</div>'}</div>
     </div>
@@ -108,15 +104,23 @@ function panelHtml({ comparisons, resources, selected, prices, preview, keyword 
   </div>`;
 }
 
+export function quotaResourceChoiceHtml(item, selected = false) {
+  return `<button type="button" data-select-resource="${esc(item.id)}" class="rounded border px-3 py-2 text-left text-xs ${selected ? 'border-teal-400 bg-teal-50' : 'border-slate-200 bg-white hover:border-slate-300'}">
+    <span class="font-medium text-slate-800">${esc(item.name)}</span><span class="ml-1 text-slate-500">${esc(item.specModel || item.code || '')}</span>
+    <span class="ml-2 text-slate-400">${item.resourceType === 'equipment' ? '设备' : '材料'}</span>
+  </button>`;
+}
+
 function linkForm(resource, prices) {
+  const availablePrices = prices.filter(price => price.status !== 'withdrawn');
   return `<div class="rounded border border-teal-200 bg-teal-50 p-3">
     <div class="mb-2 text-sm font-medium text-teal-950">关联 ${esc(resource.name)}</div>
     <div class="grid grid-cols-2 gap-2 xl:grid-cols-[1fr_110px_90px_auto]">
-      <label class="col-span-2 text-xs text-slate-600 xl:col-span-1">价格快照<select id="quotaResourcePrice" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${prices.map(price => `<option value="${price.id}">${fmtMoney(price.unitPrice)} · ${basisLabel(price.priceBasis)} · ${esc(price.priceDate || '')}</option>`).join('')}</select></label>
+      <label class="col-span-2 text-xs text-slate-600 xl:col-span-1">价格快照<select id="quotaResourcePrice" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${availablePrices.map(price => `<option value="${esc(price.id)}">${fmtMoney(price.unitPrice)} · ${basisLabel(price.priceBasis)} · ${esc(price.priceDate || '')}</option>`).join('')}</select></label>
       <label class="text-xs text-slate-600">单位用量<input id="quotaResourceQty" type="number" min="0" step="0.0001" value="1" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-right text-sm" /></label>
       <label class="text-xs text-slate-600">损耗率 %<input id="quotaResourceLoss" type="number" min="0" step="0.01" value="0" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-right text-sm" /></label>
-      <button id="quotaResourceLink" data-panel-mutation data-no-price="${prices.length ? 'false' : 'true'}" type="button" ${prices.length ? '' : 'disabled'} class="mt-5 h-9 rounded bg-teal-700 px-3 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-300">关联</button>
-    </div>${prices.length ? '' : '<div class="mt-2 text-xs text-amber-700">该资源尚无可用价格，请先在材料/设备库建立价格记录。</div>'}
+      <button id="quotaResourceLink" data-panel-mutation data-no-price="${availablePrices.length ? 'false' : 'true'}" type="button" ${availablePrices.length ? '' : 'disabled'} class="mt-5 h-9 rounded bg-teal-700 px-3 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-300">关联</button>
+    </div>${availablePrices.length ? '' : '<div class="mt-2 text-xs text-amber-700">该资源尚无可用价格，请先在材料/设备库建立价格记录。</div>'}
   </div>`;
 }
 
@@ -126,7 +130,7 @@ function comparisonRow(comparison) {
     <div class="flex items-start justify-between gap-3"><div><span class="font-medium text-slate-800">${esc(vm.name)}</span><span class="ml-2 text-xs text-slate-500">${esc(vm.specification)}</span></div><span class="badge ${comparison.stale ? 'badge-yellow' : 'badge-green'}">${vm.statusLabel}</span></div>
     <div class="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600"><span>快照 ${fmtMoney(vm.snapshotPrice)}</span><span>当前 ${comparison.currentPrice ? fmtMoney(vm.currentPrice) : '无可用价'}</span><span>单价差 ${vm.deltaLabel}</span><span>用量 ${comparison.usage.quantityPerUnit}</span><span>损耗 ${comparison.usage.lossRate}%</span><span>成本差 ${vm.costDeltaLabel}</span></div>
     ${vm.changeDetails.length ? `<div class="mt-2 rounded border border-amber-100 bg-amber-50/60 px-2 py-1.5 text-xs leading-5 text-amber-900">${vm.changeDetails.map(detail => `<div>${esc(detail)}</div>`).join('')}</div>` : ''}
-    <div class="mt-2 flex justify-end gap-2">${comparison.stale ? `<button type="button" data-panel-mutation data-refresh-usage="${vm.id}" class="rounded border border-amber-300 px-2 py-1 text-xs text-amber-800 hover:bg-amber-50 disabled:cursor-wait disabled:opacity-50">刷新快照</button>` : ''}<button type="button" data-panel-mutation data-remove-usage="${vm.id}" class="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-50">移除</button></div>
+    <div class="mt-2 flex justify-end gap-2">${comparison.stale ? `<button type="button" data-panel-mutation data-refresh-usage="${esc(vm.id)}" class="rounded border border-amber-300 px-2 py-1 text-xs text-amber-800 hover:bg-amber-50 disabled:cursor-wait disabled:opacity-50">刷新快照</button>` : ''}<button type="button" data-panel-mutation data-remove-usage="${esc(vm.id)}" class="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-50">移除</button></div>
   </div>`;
 }
 

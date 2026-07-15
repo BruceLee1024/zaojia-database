@@ -1,5 +1,5 @@
-import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
-import { resourceIdentity } from './resourceService.js?v=1.0';
+import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.2';
+import { resourceIdentity } from './resourceService.js?v=6.2';
 
 const SOURCE_TYPE_MAP = new Map([
   ['official', 'official'], ['官方信息价', 'official'], ['信息价', 'official'],

@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import { STORES, quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js';
-import { quotaResourceService } from '../assets/services/quotaResourceService.js';
-import { boqService } from '../assets/services/boqService.js';
-import { versionService } from '../assets/services/versionService.js';
-import { BREAKDOWN_KEYS, buildCompositionPreview, buildUsageComparisonViewModel, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from '../assets/views/quotaResourceComposition.js';
-import { applyCompositionFromPanel, isCurrentQuotaResourcePanel } from '../assets/views/quotaResourceCompositionPanel.js';
-import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from '../assets/views/boqResourceReference.js';
-import { buildQuoteAuditViewModel, loadQuoteAuditViewModel, renderQuoteAuditViewModel } from '../assets/views/boqAuditViewModel.js';
-import { createBusyActionRunner, createLatestRequestGuard } from '../assets/utils/asyncInteraction.js';
-import { localDateKey } from '../assets/utils/localDate.js';
+import { STORES, quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.2';
+import { quotaResourceService } from '../assets/services/quotaResourceService.js?v=6.2';
+import { boqService } from '../assets/services/boqService.js?v=6.2';
+import { versionService } from '../assets/services/versionService.js?v=6.2';
+import { BREAKDOWN_KEYS, buildCompositionPreview, buildUsageComparisonViewModel, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from '../assets/views/quotaResourceComposition.js?v=6.2';
+import { applyCompositionFromPanel, isCurrentQuotaResourcePanel } from '../assets/views/quotaResourceCompositionPanel.js?v=6.2';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from '../assets/views/boqResourceReference.js?v=6.2';
+import { buildQuoteAuditViewModel, loadQuoteAuditViewModel, renderQuoteAuditViewModel } from '../assets/views/boqAuditViewModel.js?v=6.2';
+import { createBusyActionRunner, createLatestRequestGuard } from '../assets/utils/asyncInteraction.js?v=6.2';
+import { localDateKey } from '../assets/utils/localDate.js?v=6.2';
 
 export async function testQuotaBoqIntegration() {
   const originalStorage = globalThis.localStorage;
@@ -109,6 +109,7 @@ async function testResourceAuditAndVersionSnapshots() {
   };
   const installLine = {
     id: 'line-install', projectId: 'project-1', quotaItemId: 'quota-install', linkedResourceItemId: 'equipment-1',
+    installationResourceItemId: 'equipment-1', manualInstallationResourceId: 'equipment-1',
     linkedResourceSnapshot: { id: 'equipment-1', name: '鼓风机' }, name: '鼓风机安装', unit: '台', qty: 1, factor: 1, unitPrice: 1000, amount: 1000,
   };
   const missingBasisLine = {
@@ -132,10 +133,16 @@ async function testResourceAuditAndVersionSnapshots() {
   assert.equal(snap.resourceItemId, 'equipment-1');
   assert.deepEqual(snap.resourceSnapshot, equipmentLine.resourceSnapshot);
   assert.deepEqual(snap.resourcePriceSnapshot, expired);
+  const installSnap = version.lines.find(line => line.id === 'line-install');
+  assert.equal(installSnap.installationResourceItemId, 'equipment-1');
+  assert.equal(installSnap.manualInstallationResourceId, 'equipment-1');
   const restore = await versionService.restore(version.id);
   const restored = (await setStoreGet(STORES.project_boq)).find(line => line.resourceItemId === 'equipment-1');
   assert.deepEqual(restored.resourcePriceSnapshot, expired);
   assert.equal(restore.restoredCount, 3);
+  const restoredInstall = (await setStoreGet(STORES.project_boq)).find(line => line.quotaItemId === 'quota-install');
+  assert.equal(restoredInstall.installationResourceItemId, 'equipment-1');
+  assert.equal(restoredInstall.manualInstallationResourceId, 'equipment-1');
 }
 
 async function testDuplicateInstallationMatchesExactEquipmentLine() {

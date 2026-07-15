@@ -1,6 +1,6 @@
-import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
-import { uid } from '../utils/dom.js';
-import { localDateKey } from '../utils/localDate.js?v=4.2';
+import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
+import { localDateKey } from '../utils/localDate.js?v=6.2';
 
 const SOURCE_TYPES = new Set(['official', 'supplier_quote', 'transaction']);
 const PRICE_BASES = new Set(['ex_factory', 'delivered', 'installed_composite']);
@@ -40,6 +40,7 @@ export const resourcePriceService = {
       components,
       installationScope: String(payload.installationScope || '').trim(),
       note: String(payload.note || '').trim(),
+      status: 'active',
       createdAt: payload.createdAt || new Date().toISOString(),
     };
     await resourcePriceRepo.upsert(price);
@@ -49,12 +50,17 @@ export const resourcePriceService = {
   async remove(id) {
     const price = await resourcePriceRepo.findById(id);
     if (!price) return null;
-    await resourcePriceRepo.remove(id);
+    const withdrawn = {
+      ...price,
+      status: 'withdrawn',
+      withdrawnAt: price.withdrawnAt || new Date().toISOString(),
+    };
+    await resourcePriceRepo.upsert(withdrawn);
     const resource = await resourceRepo.findById(price.resourceId);
     if (resource?.preferredPriceId === id) {
       await resourceRepo.update(resource.id, { preferredPriceId: '', updatedAt: new Date().toISOString() });
     }
-    return price;
+    return withdrawn;
   },
 
   async getCurrentPrice(resourceId) {
@@ -69,7 +75,7 @@ export function selectCurrentResourcePrice(resource, prices = [], today = localD
 
 export function selectResourcePrice(resource, prices = [], today = localDateKey(), { latestRegardlessOfValidity = false } = {}) {
   if (!resource) return null;
-  const resourcePrices = prices.filter(price => price.resourceId === resource.id);
+  const resourcePrices = prices.filter(price => price.resourceId === resource.id && price.status !== 'withdrawn');
   const preferred = resourcePrices.find(price => price.id === resource.preferredPriceId);
   if (preferred) return preferred;
   if (latestRegardlessOfValidity) return resourcePrices.sort((a, b) => comparePriceDate(b, a))[0] || null;

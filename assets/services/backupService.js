@@ -1,5 +1,5 @@
-import { STORES } from '../data/repository.js?v=1.0';
-import { restoreBackupSafeAIConfig, toBackupSafeAIConfig } from './aiService.js?v=4.1';
+import { STORES } from '../data/repository.js?v=6.2';
+import { restoreBackupSafeAIConfig, toBackupSafeAIConfig } from './aiService.js?v=6.2';
 
 export const BACKUP_STORES = Object.freeze(Object.values(STORES));
 export const MAX_BACKUP_SIZE = 500 * 1024 * 1024;
@@ -266,6 +266,22 @@ function validateBusinessSemantics(stores) {
       throw backupError('BACKUP_SEMANTIC_INVALID', `数据表 ${store} 包含缺少 ID 的记录。`);
     }
   }
+  for (const record of stores.resource_items) validateCanonicalId(record.id, '资源 ID');
+  for (const price of stores.resource_prices) {
+    validateCanonicalId(price.id, '价格 ID');
+    validateCanonicalId(price.resourceId, '价格资源引用');
+  }
+  for (const usage of stores.quota_resource_usages) {
+    validateCanonicalId(usage.id, '用量 ID');
+    validateCanonicalId(usage.resourceId, '用量资源引用');
+    validateCanonicalId(usage.quotaItemId, '用量定额引用');
+    if (usage.selectedPriceId) validateCanonicalId(usage.selectedPriceId, '用量价格引用');
+  }
+  for (const meta of stores.resource_attachments) {
+    validateCanonicalId(meta.id, '附件 ID');
+    validateCanonicalId(meta.resourceId, '附件资源引用');
+    if (meta.priceId) validateCanonicalId(meta.priceId, '附件价格引用');
+  }
   const resourceIds = new Set(stores.resource_items.map(record => record.id));
   const quotaIds = new Set(stores.quota_items.map(record => record.id));
   const prices = new Map(stores.resource_prices.map(record => [record.id, record]));
@@ -275,6 +291,12 @@ function validateBusinessSemantics(stores) {
   for (const usage of stores.quota_resource_usages) {
     if (!resourceIds.has(usage.resourceId) || !quotaIds.has(usage.quotaItemId)) {
       throw backupError('BACKUP_SEMANTIC_INVALID', `定额资源用量 ${usage.id} 存在无效引用。`);
+    }
+    if (usage.selectedPriceId) {
+      const price = prices.get(usage.selectedPriceId);
+      if (!price || price.resourceId !== usage.resourceId) {
+        throw backupError('BACKUP_SEMANTIC_INVALID', `定额资源用量 ${usage.id} 的价格引用无效。`);
+      }
     }
   }
   const attachmentPaths = new Set();
@@ -348,6 +370,11 @@ function validateArchiveDirectory(bytes) {
 }
 
 function attachmentPath(meta) { return `attachments/${meta.resourceId}/${meta.id}-${meta.safeFileName}`; }
+function validateCanonicalId(value, label) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(String(value || ''))) {
+    throw backupError('BACKUP_SEMANTIC_INVALID', `${label}包含不安全字符或长度超限。`);
+  }
+}
 function safeSegment(value) { return /^[a-zA-Z0-9_-]+$/.test(String(value || '')); }
 function safeFileName(value) { const text = String(value || ''); return Boolean(text) && !/[\\/]/.test(text) && !text.includes('..'); }
 function isSafeEntry(name) { return !name.startsWith('/') && !name.includes('\\') && !name.split('/').some(part => part === '..' || part === '.'); }

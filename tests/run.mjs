@@ -1,21 +1,22 @@
 import assert from 'node:assert/strict';
 import { testResourceHealth } from './resourceHealth.mjs';
-import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js';
-import { detectCombinedNameFeatureMeta, detectRowKind, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js';
-import { applyMappingTemplate, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js';
-import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js';
-import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js';
-import { createRecognitionRequest, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js';
-import { getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js';
-import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js';
-import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js';
-import { AI_SYSTEM_PROMPT_PRESETS, DEFAULT_AI_SYSTEM_PROMPT, getAIConfig, getAISystemPromptPreset, restoreBackupSafeAIConfig, toBackupSafeAIConfig } from '../assets/services/aiService.js';
-import { buildSystemPromptGenerationMessages, parseSystemPromptDraft } from '../assets/services/aiPromptService.js';
+import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.2';
+import { detectCombinedNameFeatureMeta, detectRowKind, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.2';
+import { applyMappingTemplate, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.2';
+import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js?v=6.2';
+import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.2';
+import { createRecognitionRequest, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.2';
+import { getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js?v=6.2';
+import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js?v=6.2';
+import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js?v=6.2';
+import { AI_SYSTEM_PROMPT_PRESETS, DEFAULT_AI_SYSTEM_PROMPT, getAIConfig, getAISystemPromptPreset, restoreBackupSafeAIConfig, toBackupSafeAIConfig } from '../assets/services/aiService.js?v=6.2';
+import { buildSystemPromptGenerationMessages, parseSystemPromptDraft } from '../assets/services/aiPromptService.js?v=6.2';
 import { testMaterialEquipmentDomain } from './materialEquipmentDomain.mjs';
 import { testResourceWorkbench } from './resourceWorkbench.mjs';
 import { testResourceAttachments } from './resourceAttachments.mjs';
 import { testBackupService } from './backupService.mjs';
 import { testQuotaBoqIntegration } from './quotaBoqIntegration.mjs';
+import { testFinalFixes } from './finalFixes.mjs';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -514,6 +515,7 @@ await testResourceAttachments();
 await testBackupService();
 await testQuotaBoqIntegration();
 await testResourceHealth();
+await testFinalFixes();
 console.log('All tests passed');
 
 async function testLocalFolderJsonStorage() {
@@ -1106,7 +1108,7 @@ async function testBoqLibraryService() {
   const memory = new Map();
   globalThis.localStorage = { getItem: () => null, setItem: () => {} };
   globalThis.window = { idbKeyval: { get: async key => memory.get(key), set: async (key, value) => memory.set(key, value) } };
-  const repo = await import('../assets/data/repository.js?v=1.0');
+  const repo = await import('../assets/data/repository.js?v=6.2');
   const { boqLibraryService } = await import('../assets/services/boqLibraryService.js');
   await repo.projectRepo.replaceAll([{ id: 'library-project', name: '清单库测试项目', totalCost: 0 }]);
   await repo.quotaRepo.replaceAll([{ id: 'library-quota', name: '池壁定额', unit: 'm³', priceTotal: 680, useBreakdown: false }]);

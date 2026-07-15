@@ -1,11 +1,11 @@
 // 视图：仪表盘
-import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.9';
-import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
-import { experienceService } from '../services/experienceService.js?v=3.9';
-import { resourceHealthService } from '../services/resourceHealthService.js?v=6.1';
-import { fmt, fmtMoney, esc } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { categoryGuess } from '../utils/stats.js';
+import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=6.2';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
+import { experienceService } from '../services/experienceService.js?v=6.2';
+import { resourceHealthService } from '../services/resourceHealthService.js?v=6.2';
+import { fmt, fmtMoney, esc } from '../utils/dom.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { categoryGuess } from '../utils/stats.js?v=6.2';
 
 const chartState = {
   trend: null,

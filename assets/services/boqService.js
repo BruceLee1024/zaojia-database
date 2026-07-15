@@ -1,10 +1,13 @@
 // 工程量清单服务
-import { boqRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=4.1';
-import { uid } from '../utils/dom.js';
-import { pickBestQuota, categoryGuess } from '../utils/stats.js';
-import { calculateAmount } from '../utils/costing.js?v=3.9';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { localDateKey } from '../utils/localDate.js?v=4.2';
+import { boqRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
+import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.2';
+import { calculateAmount } from '../utils/costing.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { localDateKey } from '../utils/localDate.js?v=6.2';
+import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.2';
+
+const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 
 export const boqService = {
   async listByProject(projectId) {
@@ -47,6 +50,7 @@ export const boqService = {
   },
 
   async addEquipmentPackage(projectId, resourceId, priceId, qty, { installQuotaId } = {}) {
+    return equipmentPackageCoordinator.run(projectId, async () => {
     const [project, resource, price, installQuota] = await Promise.all([
       projectRepo.findById(projectId),
       resourceRepo.findById(resourceId),
@@ -56,6 +60,7 @@ export const boqService = {
     if (!project) throw new Error('项目不存在');
     if (!resource || resource.resourceType !== 'equipment') throw new Error('只能将设备加入项目');
     if (!price || price.resourceId !== resourceId) throw new Error('设备价格不存在或不属于当前设备');
+    if (price.status === 'withdrawn') throw new Error('已撤回价格不能加入项目');
     const quantity = Number(qty);
     if (!Number.isFinite(quantity) || quantity < 0) throw new Error('设备数量不能为负数');
     if (installQuotaId && !installQuota) throw new Error('安装定额不存在');
@@ -110,12 +115,21 @@ export const boqService = {
       await recomputeProjectCost(projectId);
       return created;
     } catch (error) {
-      await Promise.allSettled([
+      const rollback = await Promise.allSettled([
         boqRepo.replaceAll(originalLines),
         projectRepo.replaceAll(originalProjects),
       ]);
-      throw error;
+      const rollbackCauses = rollback.filter(result => result.status === 'rejected').map(result => result.reason);
+      if (rollbackCauses.length) {
+        throw Object.assign(new Error('设备包写入失败，且原数据未能完全恢复。'), {
+          code: 'EQUIPMENT_PACKAGE_PARTIAL_RECOVERY', cause: error, rollbackCauses,
+        });
+      }
+      throw Object.assign(new Error('设备包写入失败，原数据已恢复。'), {
+        code: 'EQUIPMENT_PACKAGE_ROLLED_BACK', cause: error,
+      });
     }
+    });
   },
 
   /** 修改一条 */

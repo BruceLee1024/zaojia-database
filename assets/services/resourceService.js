@@ -1,5 +1,5 @@
-import { boqRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
-import { uid } from '../utils/dom.js';
+import { boqRepo, quotaResourceUsageRepo, resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
 
 const RESOURCE_TYPES = new Set(['material', 'equipment']);
 const RESOURCE_STATUSES = new Set(['active', 'inactive']);
@@ -66,6 +66,7 @@ export const resourceService = {
     if (payload.preferredPriceId) {
       const preferredPrice = await resourcePriceRepo.findById(payload.preferredPriceId);
       if (!preferredPrice) throw new Error('首选价格不存在');
+      if (preferredPrice.status === 'withdrawn') throw new Error('已撤回价格不能设为首选价格');
       if (!existing || preferredPrice.resourceId !== existing.id) throw new Error('首选价格不属于当前材料或设备');
     }
     const now = new Date().toISOString();
@@ -101,17 +102,27 @@ export const resourceService = {
   },
 
   async usage(id) {
-    const [quotaUsages, projectLines] = await Promise.all([
+    const [quotaUsages, projectLines, prices, attachments] = await Promise.all([
       quotaResourceUsageRepo.byResource(id),
       boqRepo.all(),
+      resourcePriceRepo.byResource(id),
+      resourceAttachmentRepo.byResource(id),
     ]);
-    const lines = projectLines.filter(line => line.resourceItemId === id || line.linkedResourceItemId === id);
+    const lines = projectLines.filter(line => [
+      line.resourceItemId,
+      line.linkedResourceItemId,
+      line.installationResourceItemId,
+      line.manualInstallationResourceId,
+    ].includes(id));
     return {
       quotaUsageCount: quotaUsages.length,
       quotaItemIds: [...new Set(quotaUsages.map(item => item.quotaItemId).filter(Boolean))],
       projectLineCount: lines.length,
       projectIds: [...new Set(lines.map(line => line.projectId).filter(Boolean))],
-      total: quotaUsages.length + lines.length,
+      priceCount: prices.length,
+      attachmentCount: attachments.length,
+      activeReferenceTotal: quotaUsages.length + lines.length,
+      total: quotaUsages.length + lines.length + prices.length + attachments.length,
     };
   },
 
@@ -123,29 +134,16 @@ export const resourceService = {
       error.usage = usage;
       throw error;
     }
-    if (force && usage.total) {
-      const [usages, lines] = await Promise.all([quotaResourceUsageRepo.all(), boqRepo.all()]);
-      await Promise.all([
-        quotaResourceUsageRepo.replaceAll(usages.filter(item => item.resourceId !== id)),
-        boqRepo.replaceAll(lines.map(line => {
-          let next = line;
-          if (line.resourceItemId === id) {
-            next = {
-              ...next,
-              resourceReferenceStatus: 'missing',
-              resourceReferenceNote: '关联材料或设备已删除，当前价格快照仍保留。',
-            };
-          }
-          if (line.linkedResourceItemId === id) {
-            next = {
-              ...next,
-              linkedResourceReferenceStatus: 'missing',
-              linkedResourceReferenceNote: '关联设备已删除，安装定额与设备快照仍保留。',
-            };
-          }
-          return next;
-        })),
-      ]);
+    if (usage.total) {
+      const resource = await resourceRepo.findById(id);
+      if (!resource) return usage;
+      await resourceRepo.update(id, {
+        status: 'inactive',
+        preferredPriceId: '',
+        withdrawnAt: resource.withdrawnAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      return { ...usage, tombstoned: true };
     }
     await resourceRepo.remove(id);
     return usage;
@@ -157,6 +155,7 @@ export const resourceService = {
     if (priceId) {
       const price = await resourcePriceRepo.findById(priceId);
       if (!price || price.resourceId !== resourceId) throw new Error('价格记录不存在或不属于当前材料/设备');
+      if (price.status === 'withdrawn') throw new Error('已撤回价格不能设为首选价格');
     }
     return await resourceRepo.update(resourceId, { preferredPriceId: priceId || '', updatedAt: new Date().toISOString() });
   },

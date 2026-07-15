@@ -185,11 +185,34 @@ export async function testBackupService() {
     { ...semanticBase, resource_attachments: [{ ...attachment(), status: 'missing', priceId: 'missing' }] },
     { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'missing', resourceId: 'r1' }] },
     { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'q1', resourceId: 'missing' }] },
+    { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'q1', resourceId: 'r1', selectedPriceId: 'missing' }] },
   ];
   for (const invalid of invalidSemanticBackups) {
     await assert.rejects(() => restoreLegacyJsonBackup(invalid, semanticTarget), error => error.code === 'BACKUP_SEMANTIC_INVALID');
     assert.deepEqual(await semanticTarget.getStore('quota_items'), [{ id: 'untouched' }]);
   }
+  for (const hostileId of ['x\" onclick=alert(1)', '<script>alert(1)</script>', '../escape', 'x'.repeat(129)]) {
+    const hostile = { ...semanticBase, resource_items: [{ id: hostileId }] };
+    await assert.rejects(() => restoreLegacyJsonBackup(hostile, semanticTarget), error => error.code === 'BACKUP_SEMANTIC_INVALID');
+    assert.deepEqual(await semanticTarget.getStore('quota_items'), [{ id: 'untouched' }]);
+    await assert.rejects(() => createLegacyJsonBackup(memoryAdapter(hostile)), error => error.code === 'BACKUP_SEMANTIC_INVALID');
+  }
+
+  const lifecycleAdapter = memoryAdapter({
+    resource_items: [{ id: 'r-life', status: 'inactive' }],
+    resource_prices: [{ id: 'p-life', resourceId: 'r-life', status: 'withdrawn', unitPrice: 88 }],
+    resource_attachments: [],
+  });
+  const lifecycleJson = await createLegacyJsonBackup(lifecycleAdapter);
+  const lifecycleTarget = memoryAdapter();
+  await restoreLegacyJsonBackup(lifecycleJson, lifecycleTarget);
+  assert.equal((await lifecycleTarget.getStore('resource_prices'))[0].status, 'withdrawn');
+  assert.equal((await lifecycleTarget.getStore('resource_items'))[0].status, 'inactive');
+  const lifecycleArchive = await createZipBackup(lifecycleAdapter, {}, { zip });
+  const lifecycleZipTarget = memoryAdapter();
+  await restoreZipBackup(lifecycleArchive, lifecycleZipTarget, { zip });
+  assert.equal((await lifecycleZipTarget.getStore('resource_prices'))[0].status, 'withdrawn');
+  assert.equal((await lifecycleZipTarget.getStore('resource_items'))[0].status, 'inactive');
 
   const missingEntries = cloneEntries(entries);
   delete missingEntries['attachments/r1/a1-quote.pdf'];
