@@ -11,6 +11,7 @@ import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js';
 import { AI_SYSTEM_PROMPT_PRESETS, DEFAULT_AI_SYSTEM_PROMPT, getAIConfig, getAISystemPromptPreset, restoreBackupSafeAIConfig, toBackupSafeAIConfig } from '../assets/services/aiService.js';
 import { buildSystemPromptGenerationMessages, parseSystemPromptDraft } from '../assets/services/aiPromptService.js';
 import { testMaterialEquipmentDomain } from './materialEquipmentDomain.mjs';
+import { testResourceWorkbench } from './resourceWorkbench.mjs';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -504,6 +505,7 @@ await testExperienceService();
 await testBoqLibraryService();
 await testBuiltinDemoData();
 await testMaterialEquipmentDomain();
+await testResourceWorkbench();
 console.log('All tests passed');
 
 async function testLocalFolderJsonStorage() {

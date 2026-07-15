@@ -8,6 +8,7 @@ import * as indicators from './assets/views/indicators.js?v=6.0';
 import * as experience from './assets/views/experience.js?v=4.9';
 import * as settings  from './assets/views/settings.js?v=4.7';
 import * as ai        from './assets/views/ai.js?v=4.2';
+import * as resources from './assets/views/resources.js?v=1.0';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
 import { smartSearch } from './assets/services/aiAssistService.js?v=1.2';
@@ -20,6 +21,9 @@ const VIEWS = [
   { id: 'importer',   label: '导入资料',   icon: ICONS.navigation.import, group: '我的工作台', desc: '清单、定额与备份' },
   { id: 'ai-import',  label: 'AI 导入',    icon: ICONS.resource.ai, group: '我的工作台', desc: '自由格式清单识别', hidden: true },
   { id: 'quota',      label: '我的定额库', icon: ICONS.navigation.quota, group: '我的工作台', desc: '常用价格参考' },
+  { id: 'materials',  label: '我的材料库', icon: ICONS.navigation.materials, group: '我的工作台', desc: '材料主数据与价格' },
+  { id: 'equipment',  label: '我的设备库', icon: ICONS.navigation.equipment, group: '我的工作台', desc: '设备选型与价格' },
+  { id: 'resource-import', label: '导入材料设备', icon: ICONS.navigation.import, group: '我的工作台', desc: '预览并写入资源库', hidden: true },
   { id: 'boq-library', label: '我的清单库', icon: ICONS.navigation.boqLibrary, group: '我的工作台', desc: '通用清单复用' },
   { id: 'projects',   label: '我的项目',   icon: ICONS.navigation.projects, group: '我的工作台', desc: '项目资料与案例' },
   { id: 'boq',        label: '工程量清单', icon: ICONS.navigation.boq, group: '工作台', desc: '报价编制' },
@@ -36,6 +40,14 @@ const state = {
 
 const renderers = {
   dashboard, importer, quota, projects, boq, indicators, experience, settings,
+  materials: resources,
+  equipment: resources,
+  'resource-import': {
+    render: async () => {
+      const module = await import('./assets/views/resourceImport.js?v=1.0');
+      return module.render();
+    },
+  },
   'boq-library': {
     render: async () => {
       const module = await import('./assets/views/boqLibrary.js?v=2.1');

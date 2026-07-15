@@ -303,3 +303,32 @@ export function exportBoqLibraryTemplate() {
   XLSX.utils.book_append_sheet(wb, ws, '清单库模板');
   XLSX.writeFile(wb, '清单库模板.xlsx');
 }
+
+export function getResourceTemplateData(resourceType) {
+  const equipment = resourceType === 'equipment';
+  const nameHeader = equipment ? '设备名称' : '材料名称';
+  const headers = [
+    '编码', '分类', nameHeader, '规格型号', '单位', '品牌', '生产厂家', '执行标准', '工艺段', '标签', '状态', '备注',
+    '单价', '价格日期', '省', '市', '区县', '价格来源', '价格口径', '含税', '税率', '供应商', '安装范围', '价格备注',
+  ];
+  const sample = equipment
+    ? ['E-001', '泵类', '潜水排污泵', 'Q=25m³/h H=15m', '台', '示例品牌', '示例厂家', 'GB/T 24674', '污泥泵房', '泵,污泥', 'active', '', 12800, '2026-07-01', '四川', '成都', '', '供应商报价', '到场价', '是', 13, '示例供应商', '', '']
+    : ['M-001', '管材', 'UPVC 管', 'DN200 PN1.0', 'm', '示例品牌', '示例厂家', 'GB/T 10002.1', '生化池', '管材,UPVC', 'active', '', 126, '2026-07-01', '四川', '成都', '', '官方信息价', '到场价', '否', 13, '', '', ''];
+  return {
+    rows: [headers, sample],
+    sheetName: equipment ? '设备库模板' : '材料库模板',
+    fileName: equipment ? '设备库导入模板.xlsx' : '材料库导入模板.xlsx',
+  };
+}
+
+export function exportResourceTemplate(resourceType) {
+  const template = getResourceTemplateData(resourceType);
+  const ws = XLSX.utils.aoa_to_sheet(template.rows);
+  ws['!cols'] = template.rows[0].map((header, index) => ({ wch: index === 2 ? 24 : Math.max(10, String(header).length * 2 + 2) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, template.sheetName);
+  XLSX.writeFile(wb, template.fileName);
+}
+
+export const exportMaterialTemplate = () => exportResourceTemplate('material');
+export const exportEquipmentTemplate = () => exportResourceTemplate('equipment');

@@ -33,6 +33,32 @@ export const resourceService = {
     return await resourceRepo.findById(id);
   },
 
+  async copy(id) {
+    const source = await resourceRepo.findById(id);
+    if (!source) throw new Error('材料或设备不存在');
+    const existing = await resourceRepo.all();
+    let suffix = 1;
+    let code = source.code ? `${source.code}-COPY` : '';
+    while (code && existing.some(item => normalizeIdentityPart(item.code) === normalizeIdentityPart(code))) {
+      suffix += 1;
+      code = `${source.code}-COPY-${suffix}`;
+    }
+    let name = `${source.name} - 副本`;
+    while (!code && existing.some(item => resourceIdentity(item) === resourceIdentity({ ...source, id: '', code, name }))) {
+      suffix += 1;
+      name = `${source.name} - 副本 ${suffix}`;
+    }
+    const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...payload } = source;
+    return await this.save({ ...payload, code, name, preferredPriceId: '' });
+  },
+
+  async setStatus(id, status) {
+    if (!RESOURCE_STATUSES.has(status)) throw new Error('状态必须为 active 或 inactive');
+    const resource = await resourceRepo.findById(id);
+    if (!resource) throw new Error('材料或设备不存在');
+    return await resourceRepo.update(id, { status, updatedAt: new Date().toISOString() });
+  },
+
   async save(payload = {}) {
     validateResource(payload);
     const existing = payload.id ? await resourceRepo.findById(payload.id) : null;

@@ -110,6 +110,8 @@ function exposeImporterActions() {
       if (state.projectId) window.__app.go('boq', { projectId: state.projectId });
       else window.__app.go('boq');
     },
+    importMaterials: () => window.__app.go('resource-import', { resourceType: 'material' }),
+    importEquipment: () => window.__app.go('resource-import', { resourceType: 'equipment' }),
     pickFile,
     handleFile,
     setProject: id => {
@@ -288,7 +290,7 @@ function renderHub() {
         </div>
       </section>
 
-      <section class="grid grid-cols-1 xl:grid-cols-4 gap-3">
+      <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         ${hubCard({
           icon: 'list_alt',
           tone: 'teal',
@@ -306,6 +308,24 @@ function renderHub() {
           action: '选择定额 Excel',
           handler: 'importQuotaExcel',
           note: '支持清单名称、项目特征、单位、综合单价等字段',
+        })}
+        ${hubCard({
+          icon: 'category',
+          tone: 'blue',
+          title: '导入材料库',
+          desc: '批量识别材料编码、规格、品牌和价格快照，预览后写入。',
+          action: '选择材料 Excel',
+          handler: 'importMaterials',
+          note: '按编码优先匹配，无编码时按名称、规格、单位和品牌匹配',
+        })}
+        ${hubCard({
+          icon: 'precision_manufacturing',
+          tone: 'teal',
+          title: '导入设备库',
+          desc: '批量导入设备选型参数、厂家报价和安装价口径。',
+          action: '选择设备 Excel',
+          handler: 'importEquipment',
+          note: '到场价可后续组合安装定额加入项目',
         })}
         ${hubCard({
           icon: 'backup',
