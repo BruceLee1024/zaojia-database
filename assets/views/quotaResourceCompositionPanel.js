@@ -1,8 +1,8 @@
-import { quotaResourceService } from '../services/quotaResourceService.js?v=6.0';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.0';
+import { quotaResourceService } from '../services/quotaResourceService.js?v=6.1';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.1';
 import { resourceService } from '../services/resourceService.js?v=4.1';
 import { esc, fmtMoney, toast } from '../utils/dom.js';
-import { buildCompositionPreview, buildUsageComparisonViewModel, renderCompositionPreview } from './quotaResourceComposition.js?v=4.2';
+import { buildCompositionPreview, buildUsageComparisonViewModel, renderCompositionPreview } from './quotaResourceComposition.js?v=6.1';
 import { createBusyActionRunner, createLatestRequestGuard } from '../utils/asyncInteraction.js?v=4.2';
 
 export async function applyCompositionFromPanel({ quota, getBaseBreakdown, service = quotaResourceService }) {

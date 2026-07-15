@@ -2,7 +2,7 @@
 import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.9';
 import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { experienceService } from '../services/experienceService.js?v=3.9';
-import { resourceHealthService } from '../services/resourceHealthService.js?v=6.0';
+import { resourceHealthService } from '../services/resourceHealthService.js?v=6.1';
 import { fmt, fmtMoney, esc } from '../utils/dom.js';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
@@ -169,12 +169,21 @@ function bindResourceHealthActions(health) {
           affectedCount: issue.total,
         });
       }
-      return window.__app.go(type === 'equipment' ? 'equipment' : 'materials', {
-        resourceIds: type === 'equipment' ? issue.equipmentResourceIds : issue.materialResourceIds,
-        healthLabel: button.dataset.healthIssue,
-      });
+      return window.__app.go(type === 'equipment' ? 'equipment' : 'materials', healthResourceRouteParams(button.dataset.healthIssue, issue, type));
     };
   });
+}
+
+export function healthResourceRouteParams(issueKey, issue = {}, type = 'material') {
+  const labels = {
+    missingCurrentPrice: '缺参考价',
+    expiredCurrentPrice: '价格已过期',
+    missingQuoteEvidence: '询价缺附件',
+  };
+  return {
+    resourceIds: type === 'equipment' ? (issue.equipmentResourceIds || []) : (issue.materialResourceIds || []),
+    healthLabel: labels[issueKey] || '资源健康',
+  };
 }
 
 function emptyResourceHealth() {

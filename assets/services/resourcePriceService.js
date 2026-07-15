@@ -64,13 +64,19 @@ export const resourcePriceService = {
 };
 
 export function selectCurrentResourcePrice(resource, prices = [], today = localDateKey()) {
+  return selectResourcePrice(resource, prices, today);
+}
+
+export function selectResourcePrice(resource, prices = [], today = localDateKey(), { latestRegardlessOfValidity = false } = {}) {
   if (!resource) return null;
   const resourcePrices = prices.filter(price => price.resourceId === resource.id);
   const preferred = resourcePrices.find(price => price.id === resource.preferredPriceId);
   if (preferred) return preferred;
-  return resourcePrices
+  if (latestRegardlessOfValidity) return resourcePrices.sort((a, b) => comparePriceDate(b, a))[0] || null;
+  const latestValid = resourcePrices
     .filter(price => !price.validTo || price.validTo >= today)
     .sort((a, b) => comparePriceDate(b, a))[0] || null;
+  return latestValid;
 }
 
 function validatePrice(payload) {

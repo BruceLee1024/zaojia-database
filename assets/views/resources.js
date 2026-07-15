@@ -1,5 +1,5 @@
 import { boqService } from '../services/boqService.js?v=4.1';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.0';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.1';
 import { resourceService } from '../services/resourceService.js?v=1.0';
 import { projectRepo, quotaRepo } from '../data/repository.js?v=4.1';
 import { exportResourceTemplate } from '../data/excel.js?v=4.1';
@@ -35,10 +35,10 @@ export function nextResourceViewState(current = {}, route = 'materials', params 
     if (Object.prototype.hasOwnProperty.call(params, key)) next[key] = String(params[key] || '');
   }
   if (Object.prototype.hasOwnProperty.call(current, 'resourceIds') || Object.prototype.hasOwnProperty.call(params, 'resourceIds')) {
-    next.resourceIds = changedType ? [] : normalizeResourceIds(current.resourceIds);
+    next.resourceIds = [];
   }
   if (Object.prototype.hasOwnProperty.call(current, 'healthLabel') || Object.prototype.hasOwnProperty.call(params, 'healthLabel')) {
-    next.healthLabel = changedType ? '' : String(current.healthLabel || '');
+    next.healthLabel = '';
   }
   if (Object.prototype.hasOwnProperty.call(params, 'resourceIds')) next.resourceIds = normalizeResourceIds(params.resourceIds);
   if (Object.prototype.hasOwnProperty.call(params, 'healthLabel')) next.healthLabel = String(params.healthLabel || '');
@@ -102,7 +102,7 @@ function paint() {
           <button onclick="window.__resources.importExcel()" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button>
           <button onclick="window.__resources.edit()" class="h-9 px-4 brand-bg text-white text-sm">新增${meta.singular}</button>
         </div>
-        ${state.resourceIds.length ? `<div role="status" class="mt-3 flex flex-wrap items-center justify-between gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><span>已按仪表盘资源健康项筛选，共 ${state.resourceIds.length} 条。</span><button onclick="window.__resources.clearHealthFilter()" class="font-medium underline">查看全部${meta.singular}</button></div>` : ''}
+        ${state.resourceIds.length ? `<div role="status" class="mt-3 flex flex-wrap items-center justify-between gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><span>已按仪表盘“${esc(state.healthLabel || '资源健康')}”筛选，共 ${state.resourceIds.length} 条。</span><button onclick="window.__resources.clearHealthFilter()" class="font-medium underline">查看全部${meta.singular}</button></div>` : ''}
         <div class="mt-4 grid grid-cols-1 md:grid-cols-[minmax(240px,1fr)_180px_150px_auto] gap-2">
           <label class="relative"><span class="sr-only">搜索${meta.singular}</span><input value="${esc(state.keyword)}" oninput="window.__resources.filter('keyword',this.value)" type="search" placeholder="搜索编码、名称、规格、品牌…" class="h-9 w-full border border-slate-300 bg-white pl-9 pr-3 text-sm"><span class="material-symbols-outlined absolute left-3 top-2.5 text-[17px] text-slate-400">search</span></label>
           <select onchange="window.__resources.filter('category',this.value)" class="h-9 border border-slate-300 bg-white px-2 text-sm"><option value="">全部分类</option>${categories.map(value => `<option ${value === state.category ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>

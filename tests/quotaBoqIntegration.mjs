@@ -262,6 +262,12 @@ function testPureResourceViewModels() {
   assert.equal(usageVm.changeDetails.some(item => item.includes('供应商：甲厂 → 乙厂')), true);
   assert.equal(usageVm.changeDetails.some(item => item.includes('地区：四川 → 重庆')), true);
   assert.equal(usageVm.changeDetails.some(item => item.includes('安装范围：未记录 → 含调试')), true);
+  const inactiveVm = buildUsageComparisonViewModel({
+    usage: { id: 'inactive', resourceType: 'equipment', priceSnapshot: { unitPrice: 1 } },
+    resource: { id: 'r-inactive', resourceType: 'equipment', status: 'inactive', name: '停用设备' },
+    currentPrice: { id: 'p-inactive', unitPrice: 1 }, stale: true, staleReasons: ['resourceInactive'],
+  });
+  assert.equal(inactiveVm.changeDetails.includes('资源已停用，请替换或确认处理'), true);
   const boqVm = buildBoqResourceViewModel({
     resourceReferenceStatus: 'missing', resourceSnapshot: { name: '泵', specModel: 'Q=10' },
     resourcePriceId: 'price-live', unitPrice: 10000,

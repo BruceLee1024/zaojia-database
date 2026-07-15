@@ -82,8 +82,16 @@ export function buildUsageComparisonViewModel(comparison = {}) {
     deltaLabel: signedNumber(comparison.priceDelta),
     costDeltaLabel: signedNumber(comparison.costDelta),
     staleReasons: [...(comparison.staleReasons || [])],
-    changeDetails: currentPrice ? priceChangeDetails(snapshot, currentPrice) : ['当前无可用价格'],
+    changeDetails: comparisonDetails(comparison.staleReasons, snapshot, currentPrice),
   };
+}
+
+function comparisonDetails(reasons = [], snapshot, currentPrice) {
+  const details = [];
+  if (reasons.includes('resourceInactive')) details.push('资源已停用，请替换或确认处理');
+  if (!currentPrice) details.push('当前无可用价格');
+  else details.push(...priceChangeDetails(snapshot, currentPrice));
+  return details;
 }
 
 export function renderCompositionPreview(preview) {

@@ -1,7 +1,7 @@
 import { quotaResourceUsageRepo, resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
 import { localDateKey } from '../utils/localDate.js?v=4.2';
-import { getUsageComparisonReasons } from './quotaResourceService.js?v=6.0';
-import { selectCurrentResourcePrice } from './resourcePriceService.js?v=6.0';
+import { getUsageComparisonReasons } from './quotaResourceService.js?v=6.1';
+import { selectCurrentResourcePrice, selectResourcePrice } from './resourcePriceService.js?v=6.1';
 
 export const resourceHealthService = {
   async getHealth({ today = localDateKey() } = {}) {
@@ -20,7 +20,7 @@ export function buildResourceHealth({ resources = [], prices = [], attachments =
   const activeById = new Map(activeResources.map(resource => [resource.id, resource]));
   const currentByResource = new Map(activeResources.map(resource => [
     resource.id,
-    selectCurrentResourcePrice(resource, prices, today),
+    selectResourcePriceForHealth(resource, prices, today),
   ]));
   const availableEvidence = new Set(attachments
     .filter(attachment => attachment.status === 'available' && attachment.priceId)
@@ -35,7 +35,7 @@ export function buildResourceHealth({ resources = [], prices = [], attachments =
   const missingQuoteEvidence = summarize(prices
     .filter(price => price.sourceType === 'supplier_quote' && activeById.has(price.resourceId) && !availableEvidence.has(price.id))
     .map(price => ({ resource: activeById.get(price.resourceId), price })));
-  const pendingQuotaUpdates = summarize(usages
+  const pendingQuotaUpdates = summarizeQuotaUpdates(usages
     .map(usage => {
       const resource = activeById.get(usage.resourceId) || resources.find(item => item.id === usage.resourceId) || null;
       const currentPrice = resource ? selectCurrentResourcePrice(resource, prices, today) : null;
@@ -54,6 +54,10 @@ export function buildResourceHealth({ resources = [], prices = [], attachments =
   };
 }
 
+export function selectResourcePriceForHealth(resource, prices = [], today = localDateKey()) {
+  return selectResourcePrice(resource, prices, today, { latestRegardlessOfValidity: true });
+}
+
 function summarize(items) {
   return {
     total: items.length,
@@ -66,6 +70,14 @@ function summarize(items) {
     usageIds: unique(items.map(item => item.usage?.id)),
     quotaItemIds: unique(items.map(item => item.usage?.quotaItemId)),
   };
+}
+
+function summarizeQuotaUpdates(items) {
+  const summary = summarize(items);
+  const quotas = unique(items.map(item => item.usage?.quotaItemId));
+  const materialQuotas = unique(items.filter(item => resourceType(item) === 'material').map(item => item.usage?.quotaItemId));
+  const equipmentQuotas = unique(items.filter(item => resourceType(item) === 'equipment').map(item => item.usage?.quotaItemId));
+  return { ...summary, total: quotas.length, material: materialQuotas.length, equipment: equipmentQuotas.length };
 }
 
 function resourceType(item) {

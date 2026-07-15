@@ -80,3 +80,43 @@ Screenshots were not captured because DOM, interaction, console/network and exac
 
 - “Missing quote evidence” intentionally evaluates every supplier-quote snapshot for active resources, including historical snapshots, because each supplier quote is an immutable evidence-bearing record. If the product later wants only the current quote governed, that should be an explicit policy change with a migration/test update.
 - The repository still has no committed end-to-end browser harness; this task used a reproducible isolated Chromium smoke run without adding package-manager files to the pure frontend project.
+
+## Review follow-up
+
+All Task 6 review findings were addressed with focused RED/GREEN tests before implementation.
+
+### Fixes
+
+- Split health classification price selection from the operational current-price policy without duplicating ordering logic.
+  - Operational selection still prefers a valid preferred reference, then the latest non-expired price.
+  - Health classification prefers a valid preferred reference, otherwise the latest price record regardless of expiry.
+  - A newer expired ordinary price is therefore classified as expired even when an older price remains operationally valid.
+- Added `resourceInactive` to the shared quota usage comparison helper. Inactive referenced resources now enter pending health and the composition UI explains: “资源已停用，请替换或确认处理”.
+- Pending quota updates now count unique affected quota IDs for total/material/equipment. Multiple stale usages in one quota retain every usage/resource/price ID but contribute one quota to the total; a mixed material/equipment quota contributes once to each applicable type breakdown.
+- Replaced click-only navigation `<div>` elements with native buttons. Every visible navigation control has an accessible name, title and native keyboard behavior; the selected page exposes `aria-current="page"`.
+- Health route state is now transient. Explicit health navigation applies affected IDs and the actual labels “缺参考价”, “价格已过期” or “询价缺附件”; ordinary same-library navigation clears only health IDs/label while retaining keyword/category/status/selection filters.
+- Advanced the complete modified module chain to cache version `v6.1`.
+
+### Follow-up TDD evidence
+
+1. RED: inactive comparison view-model assertion failed because no visible inactive-resource explanation existed.
+2. GREEN: shared comparison emits `resourceInactive`; composition details render the explicit explanation.
+3. RED: health helper/module/navigation contracts were absent and route lifecycle retained stale health state.
+4. GREEN: added classification option, unique-quota summarizer, route parameter helper/lifecycle and pure native navigation renderer.
+5. RED: stricter price case failed with `older !== latest` when an older valid price and newer expired price coexisted.
+6. GREEN: `latestRegardlessOfValidity` now selects the newer record for health only while operational selection remains on the older valid price.
+7. `node tests/run.mjs` -> `All tests passed`.
+
+### Follow-up Chromium evidence
+
+Served `/app/` at an isolated localhost port and reran Chromium `140.0.7339.16` with fresh storage:
+
+- At 320px the first Tab focused the native “我的概览：继续最近工作” button; Enter navigated to Dashboard and updated `aria-current="page"`.
+- All 11 visible navigation entries were native buttons with non-empty `aria-label` and `title`; no click-only `[data-go]` element remained.
+- At 320px and 1024px, `documentScrollWidth === documentClientWidth`.
+- A real supplier-quote health item navigated to Materials with visible “询价缺附件”; clicking the normal Materials navigation cleared the health status/filter.
+- Console errors/warnings, page errors, failed requests and HTTP responses >= 400: all zero.
+
+### Follow-up concerns
+
+- No new unresolved concern was found. Historical supplier-quote evidence policy remains the documented product-policy question from the original report.

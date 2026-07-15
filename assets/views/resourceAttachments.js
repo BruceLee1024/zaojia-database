@@ -1,4 +1,4 @@
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.0';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.1';
 import { resourceAttachmentService } from '../services/resourceAttachmentService.js?v=1.0';
 import { esc, toast } from '../utils/dom.js';
 

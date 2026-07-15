@@ -5,7 +5,7 @@ import { fmtMoney, esc, $, openModal, closeModal, toast } from '../utils/dom.js'
 import { exportQuotaTemplate } from '../data/excel.js?v=4.0';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=4.2';
-import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.0';
+import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.1';
 
 const BREAKDOWN_COLORS = ['bg-blue-600', 'bg-emerald-500', 'bg-cyan-600', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-rose-400'];
 const filterState = { keyword: '', category: '', unit: '', priceStatus: '' };
