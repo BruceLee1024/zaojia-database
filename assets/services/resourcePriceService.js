@@ -1,5 +1,6 @@
 import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
 import { uid } from '../utils/dom.js';
+import { localDateKey } from '../utils/localDate.js?v=4.2';
 
 const SOURCE_TYPES = new Set(['official', 'supplier_quote', 'transaction']);
 const PRICE_BASES = new Set(['ex_factory', 'delivered', 'installed_composite']);
@@ -58,15 +59,19 @@ export const resourcePriceService = {
 
   async getCurrentPrice(resourceId) {
     const [resource, prices] = await Promise.all([resourceRepo.findById(resourceId), resourcePriceRepo.byResource(resourceId)]);
-    if (!resource) return null;
-    const preferred = prices.find(price => price.id === resource.preferredPriceId);
-    if (preferred) return preferred;
-    const today = new Date().toISOString().slice(0, 10);
-    return prices
-      .filter(price => !price.validTo || price.validTo >= today)
-      .sort((a, b) => comparePriceDate(b, a))[0] || null;
+    return selectCurrentResourcePrice(resource, prices, localDateKey());
   },
 };
+
+export function selectCurrentResourcePrice(resource, prices = [], today = localDateKey()) {
+  if (!resource) return null;
+  const resourcePrices = prices.filter(price => price.resourceId === resource.id);
+  const preferred = resourcePrices.find(price => price.id === resource.preferredPriceId);
+  if (preferred) return preferred;
+  return resourcePrices
+    .filter(price => !price.validTo || price.validTo >= today)
+    .sort((a, b) => comparePriceDate(b, a))[0] || null;
+}
 
 function validatePrice(payload) {
   if (!SOURCE_TYPES.has(payload.sourceType)) throw new Error('价格来源类型无效');

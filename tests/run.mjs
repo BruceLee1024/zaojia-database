@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { testResourceHealth } from './resourceHealth.mjs';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js';
 import { detectCombinedNameFeatureMeta, detectRowKind, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js';
 import { applyMappingTemplate, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js';
@@ -512,6 +513,7 @@ await testResourceWorkbench();
 await testResourceAttachments();
 await testBackupService();
 await testQuotaBoqIntegration();
+await testResourceHealth();
 console.log('All tests passed');
 
 async function testLocalFolderJsonStorage() {

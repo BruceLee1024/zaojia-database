@@ -5,7 +5,7 @@ import { resourceService } from '../assets/services/resourceService.js';
 import { searchAll, searchGroups } from '../assets/services/globalSearchService.js';
 import { getResourceTemplateData } from '../assets/data/excel.js';
 import { createLatestResourceSelection, nextResourceViewState } from '../assets/views/resources.js';
-import { buildImportReportRows, buildImportReportViewModel } from '../assets/views/resourceImport.js';
+import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js';
 
 export async function testResourceWorkbench() {
   const originalStorage = globalThis.localStorage;
@@ -29,11 +29,18 @@ export async function testResourceWorkbench() {
     await testLatestResourceSelectionWins();
     testResourceRouteStateIsolation();
     testImportReportRows();
+    testFailureReportMetricTone();
     testResourceTemplates();
   } finally {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+function testFailureReportMetricTone() {
+  assert.equal(renderImportReportMetric('尝试新增', 2, 'warning').includes('border-amber-200'), true);
+  assert.equal(renderImportReportMetric('尝试新增', 2, 'danger').includes('text-red-700'), true);
+  assert.equal(renderImportReportMetric('新增', 2, 'success').includes('text-teal-700'), true);
 }
 
 async function testLatestResourceSelectionWins() {

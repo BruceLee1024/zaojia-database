@@ -58,7 +58,7 @@ function reportMarkup(report) {
     : view.tone === 'warning'
       ? { shell: 'border-amber-300 bg-amber-50', title: 'text-amber-900', notice: 'border-amber-200 bg-white text-amber-800', table: 'border-amber-200', head: 'bg-amber-50 text-amber-800', divide: 'divide-amber-100', status: 'text-amber-700', button: 'bg-amber-700' }
       : { shell: 'border-teal-200 bg-teal-50', title: 'text-teal-900', notice: 'border-teal-200 bg-white text-teal-800', table: 'border-teal-200', head: 'bg-teal-50 text-teal-800', divide: 'divide-teal-100', status: 'text-teal-800', button: 'bg-teal-700' };
-  return `<section class="rounded-lg border ${tones.shell} p-4"><h2 class="font-semibold ${tones.title}">${esc(view.title)}</h2>${view.notice ? `<div role="alert" class="mt-3 border ${tones.notice} px-3 py-2 text-sm">${esc(view.notice)}</div>` : ''}<div class="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">${view.metrics.map(metric => reportMetric(metric.label, metric.value)).join('')}</div><div class="mt-4 overflow-auto max-h-64 border ${tones.table} bg-white"><table class="w-full text-xs"><thead class="sticky top-0 ${tones.head}"><tr><th class="px-3 py-2 text-left">行</th><th class="px-3 text-left">状态</th><th class="px-3 text-left">处理详情</th></tr></thead><tbody class="divide-y ${tones.divide}">${rows.map(row => `<tr><td class="px-3 py-2 tabular-nums">${row.rowNumber}</td><td class="px-3 font-medium ${row.status === 'error' || row.status === 'uncertain' ? 'text-red-600' : tones.status}">${esc(row.statusLabel)}</td><td class="px-3 text-slate-600">${esc(row.message)}</td></tr>`).join('')}</tbody></table></div><button onclick="window.__resourceImport.back()" class="mt-4 h-9 px-4 ${tones.button} text-white text-sm">返回查看${state.resourceType === 'equipment' ? '设备' : '材料'}库</button></section>`;
+  return `<section class="rounded-lg border ${tones.shell} p-4"><h2 class="font-semibold ${tones.title}">${esc(view.title)}</h2>${view.notice ? `<div role="alert" class="mt-3 border ${tones.notice} px-3 py-2 text-sm">${esc(view.notice)}</div>` : ''}<div class="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">${view.metrics.map(metric => renderImportReportMetric(metric.label, metric.value, view.tone)).join('')}</div><div class="mt-4 overflow-auto max-h-64 border ${tones.table} bg-white"><table class="w-full text-xs"><thead class="sticky top-0 ${tones.head}"><tr><th class="px-3 py-2 text-left">行</th><th class="px-3 text-left">状态</th><th class="px-3 text-left">处理详情</th></tr></thead><tbody class="divide-y ${tones.divide}">${rows.map(row => `<tr><td class="px-3 py-2 tabular-nums">${row.rowNumber}</td><td class="px-3 font-medium ${row.status === 'error' || row.status === 'uncertain' ? 'text-red-600' : tones.status}">${esc(row.statusLabel)}</td><td class="px-3 text-slate-600">${esc(row.message)}</td></tr>`).join('')}</tbody></table></div><button onclick="window.__resourceImport.back()" class="mt-4 h-9 px-4 ${tones.button} text-white text-sm">返回查看${state.resourceType === 'equipment' ? '设备' : '材料'}库</button></section>`;
 }
 
 export function buildImportReportRows(report = {}) {
@@ -105,4 +105,16 @@ export function buildImportReportViewModel(report = {}) {
 }
 
 function actionBadge(action) { const map = { create: ['badge-green', '新增'], update: ['badge-blue', '更新'], duplicate: ['badge-gray', '重复'], invalid: ['badge-red', '无效'] }; const [tone, label] = map[action] || map.invalid; return `<span class="badge ${tone}">${label}</span>`; }
-function reportMetric(label, value) { return `<div class="border border-teal-200 bg-white px-3 py-2"><div class="text-teal-700">${label}</div><div class="mt-1 text-lg font-semibold tabular-nums text-teal-950">${value}</div></div>`; }
+export function renderImportReportMetric(label, value, tone = 'success') {
+  const classes = tone === 'danger'
+    ? ['border-red-200', 'text-red-700', 'text-red-950']
+    : tone === 'warning'
+      ? ['border-amber-200', 'text-amber-700', 'text-amber-950']
+      : ['border-teal-200', 'text-teal-700', 'text-teal-950'];
+  return `<div class="border ${classes[0]} bg-white px-3 py-2"><div class="${classes[1]}">${esc(label)}</div><div class="mt-1 text-lg font-semibold tabular-nums ${classes[2]}">${fmtMetric(value)}</div></div>`;
+}
+
+function fmtMetric(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}

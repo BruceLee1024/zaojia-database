@@ -1,14 +1,14 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=5.1';
+import * as dashboard from './assets/views/dashboard.js?v=6.0';
 import * as importer  from './assets/views/importer.js?v=1.8';
-import * as quota     from './assets/views/quota.js?v=4.7';
+import * as quota     from './assets/views/quota.js?v=6.0';
 import * as projects  from './assets/views/projects.js?v=5.0';
 import * as boq       from './assets/views/boq.js?v=4.7';
 import * as indicators from './assets/views/indicators.js?v=6.0';
 import * as experience from './assets/views/experience.js?v=4.9';
 import * as settings  from './assets/views/settings.js?v=4.7';
 import * as ai        from './assets/views/ai.js?v=4.2';
-import * as resources from './assets/views/resources.js?v=1.0';
+import * as resources from './assets/views/resources.js?v=6.0';
 import { ensureDemoData } from './assets/data/demo.js?v=3.9';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=1.0';
 import { smartSearch } from './assets/services/aiAssistService.js?v=1.2';
@@ -44,7 +44,7 @@ const renderers = {
   equipment: resources,
   'resource-import': {
     render: async () => {
-      const module = await import('./assets/views/resourceImport.js?v=1.0');
+      const module = await import('./assets/views/resourceImport.js?v=6.0');
       return module.render();
     },
   },

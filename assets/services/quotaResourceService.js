@@ -1,6 +1,6 @@
 import { quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=4.1';
 import { uid } from '../utils/dom.js';
-import { resourcePriceService } from './resourcePriceService.js?v=4.1';
+import { resourcePriceService } from './resourcePriceService.js?v=6.0';
 import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=4.2';
 
 export const quotaResourceService = {
@@ -22,7 +22,7 @@ export const quotaResourceService = {
       resourceRepo.findById(usage.resourceId),
       resourcePriceService.getCurrentPrice(usage.resourceId),
     ]);
-    const staleReasons = comparisonReasons(usage, resource, currentPrice);
+    const staleReasons = getUsageComparisonReasons(usage, resource, currentPrice);
     const currentCost = currentPrice
       ? calculateUsageCost(usage.quantityPerUnit, usage.lossRate, currentPrice.unitPrice)
       : 0;
@@ -143,10 +143,11 @@ function snapshotPrice(price = {}) {
   };
 }
 
-function comparisonReasons(usage, resource, currentPrice) {
+export function getUsageComparisonReasons(usage, resource, currentPrice) {
   if (!resource) return ['resourceMissing'];
   if (!currentPrice) return ['currentPriceMissing'];
   const reasons = [];
+  if (usage.resourceType !== resource.resourceType) reasons.push('resourceType');
   if (usage.selectedPriceId !== currentPrice.id) reasons.push('selectedPriceId');
   const fields = ['unitPrice', 'priceBasis', 'sourceType', 'supplier', 'priceDate', 'validFrom', 'validTo', 'taxIncluded', 'taxRate', 'installationScope'];
   fields.forEach(field => {

@@ -5,7 +5,7 @@ import { fmtMoney, esc, $, openModal, closeModal, toast } from '../utils/dom.js'
 import { exportQuotaTemplate } from '../data/excel.js?v=4.0';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=4.2';
-import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=4.2';
+import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.0';
 
 const BREAKDOWN_COLORS = ['bg-blue-600', 'bg-emerald-500', 'bg-cyan-600', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-rose-400'];
 const filterState = { keyword: '', category: '', unit: '', priceStatus: '' };
@@ -67,6 +67,8 @@ export async function render() {
   if (params.keyword != null) filterState.keyword = params.keyword;
   if (params.priceStatus != null) filterState.priceStatus = params.priceStatus;
   if (params.selectedId) editorState.selectedId = params.selectedId;
+  if (!params.selectedId && Array.isArray(params.quotaItemIds) && params.quotaItemIds[0]) editorState.selectedId = params.quotaItemIds[0];
+  const routeNotice = quotaRouteNotice(params);
   const [cats, units, allRows] = await Promise.all([
     quotaService.categories(),
     quotaService.units(),
@@ -96,6 +98,8 @@ export async function render() {
             <span class="material-symbols-outlined text-[18px]">download</span>下载模板
           </button>
         </div>
+
+        ${routeNotice ? `<div role="status" class="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">${esc(routeNotice)}</div>` : ''}
 
         <div class="mt-4 flex items-center gap-2">
           <div class="relative flex-1 min-w-[320px]">
@@ -165,6 +169,12 @@ export async function render() {
   $('#btnImport').onclick = importExcel;
   $('#btnTpl').onclick = exportQuotaTemplate;
   await renderList();
+}
+
+export function quotaRouteNotice(params = {}) {
+  if (params.healthReason !== 'pending-resource-updates') return '';
+  const count = Math.max(0, Number(params.affectedCount) || 0);
+  return `来自“资源健康”：${count} 条定额的材料/设备价格或元数据已变更，请打开人材机组成对比并确认刷新快照。`;
 }
 
 async function renderList() {

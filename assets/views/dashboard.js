@@ -2,6 +2,7 @@
 import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.9';
 import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { experienceService } from '../services/experienceService.js?v=3.9';
+import { resourceHealthService } from '../services/resourceHealthService.js?v=6.0';
 import { fmt, fmtMoney, esc } from '../utils/dom.js';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
@@ -12,15 +13,16 @@ const chartState = {
 };
 
 export async function render() {
-  const [quota, projects, boq, versions, engine, experience] = await Promise.all([
+  const [quota, projects, boq, versions, engine, experience, resourceHealth] = await Promise.all([
     quotaRepo.all(),
     projectRepo.all(),
     boqRepo.all(),
     versionRepo.all(),
     dataEngineService.dashboard(),
     experienceService.dashboard(),
+    resourceHealthService.getHealth(),
   ]);
-  const stats = buildDashboardStats({ quota, projects, boq, versions, engine, experience });
+  const stats = buildDashboardStats({ quota, projects, boq, versions, engine, experience, resourceHealth });
 
   document.getElementById('workspace').innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-3">
@@ -29,6 +31,8 @@ export async function render() {
       ${personalStartCard(stats)}
 
       ${executiveSummary(stats)}
+
+      ${resourceHealthSection(stats.resourceHealth)}
 
       <section class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,.95fr)] gap-3">
         ${trendPanel(stats)}
@@ -48,10 +52,11 @@ export async function render() {
     </div>
   `;
 
+  bindResourceHealthActions(stats.resourceHealth);
   drawCharts(stats);
 }
 
-function buildDashboardStats({ quota, projects, boq, versions, engine, experience }) {
+function buildDashboardStats({ quota, projects, boq, versions, engine, experience, resourceHealth }) {
   const archived = projects.filter(p => p.status === 'archived');
   const doing = projects.filter(p => p.status !== 'archived');
   const monthKey = new Date().toISOString().slice(0, 7);
@@ -115,7 +120,66 @@ function buildDashboardStats({ quota, projects, boq, versions, engine, experienc
     nextActions,
     engine,
     experience,
+    resourceHealth,
   };
+}
+
+export function resourceHealthSection(health = emptyResourceHealth()) {
+  const rows = [
+    ['missingCurrentPrice', '缺少当前价', '启用中但没有可用当前价', 'price_check'],
+    ['expiredCurrentPrice', '当前价已过期', '当前价或手动首选价超过有效期', 'event_busy'],
+    ['missingQuoteEvidence', '报价依据缺失', '供应商报价未关联可用附件', 'attach_file_off'],
+    ['pendingQuotaUpdates', '定额快照待更新', '已保存快照与当前价格或元数据不同', 'sync_problem'],
+  ];
+  return `<section class="card p-0 overflow-hidden" aria-labelledby="resourceHealthTitle">
+    <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+      <div><h2 id="resourceHealthTitle" class="font-semibold text-slate-900">资源健康</h2><p class="mt-1 text-xs text-slate-500">材料、设备价格证据与定额快照的待处理项。</p></div>
+      <div class="flex items-center gap-2 text-xs"><span class="badge ${health.summary.total ? 'badge-yellow' : 'badge-green'}">${fmt(health.summary.total)} 项</span><span class="text-slate-500">材料 ${fmt(health.summary.material)} · 设备 ${fmt(health.summary.equipment)}</span></div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:[&>*:nth-child(n+3)]:border-t divide-slate-200">
+      ${rows.map(([key, title, desc, icon]) => resourceHealthRow(key, health[key], title, desc, icon)).join('')}
+    </div>
+  </section>`;
+}
+
+function resourceHealthRow(key, issue, title, desc, icon) {
+  const pendingQuota = key === 'pendingQuotaUpdates';
+  return `<div class="p-4 lg:odd:border-r border-slate-200 flex items-start gap-3 min-w-0">
+    <span class="material-symbols-outlined icon-surface ${issue.total ? 'icon-surface-amber' : 'icon-surface-teal'}">${icon}</span>
+    <div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-2"><h3 class="font-medium text-slate-900">${title}</h3><span class="font-semibold tabular-nums ${issue.total ? 'text-amber-700' : 'text-teal-700'}">${fmt(issue.total)}</span></div><p class="mt-1 text-xs leading-5 text-slate-500">${desc}</p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        ${pendingQuota ? `<button type="button" data-health-issue="${key}" data-health-type="quota" class="h-8 px-3 border border-amber-300 bg-amber-50 text-xs text-amber-800 disabled:opacity-50" ${issue.total ? '' : 'disabled'}>查看待更新定额（${fmt(issue.total)}）</button>` : `
+          <button type="button" data-health-issue="${key}" data-health-type="material" class="h-8 px-3 border border-slate-300 bg-white text-xs text-slate-700 disabled:opacity-50" ${issue.material ? '' : 'disabled'}>材料 ${fmt(issue.material)}</button>
+          <button type="button" data-health-issue="${key}" data-health-type="equipment" class="h-8 px-3 border border-slate-300 bg-white text-xs text-slate-700 disabled:opacity-50" ${issue.equipment ? '' : 'disabled'}>设备 ${fmt(issue.equipment)}</button>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindResourceHealthActions(health) {
+  document.querySelectorAll('[data-health-issue]').forEach(button => {
+    button.onclick = () => {
+      const issue = health[button.dataset.healthIssue];
+      const type = button.dataset.healthType;
+      if (type === 'quota') {
+        return window.__app.go('quota', {
+          selectedId: issue.quotaItemIds[0] || '',
+          quotaItemIds: issue.quotaItemIds,
+          healthReason: 'pending-resource-updates',
+          affectedCount: issue.total,
+        });
+      }
+      return window.__app.go(type === 'equipment' ? 'equipment' : 'materials', {
+        resourceIds: type === 'equipment' ? issue.equipmentResourceIds : issue.materialResourceIds,
+        healthLabel: button.dataset.healthIssue,
+      });
+    };
+  });
+}
+
+function emptyResourceHealth() {
+  const empty = { total: 0, material: 0, equipment: 0, resourceIds: [], materialResourceIds: [], equipmentResourceIds: [], priceIds: [], usageIds: [], quotaItemIds: [] };
+  return { summary: { total: 0, material: 0, equipment: 0 }, missingCurrentPrice: empty, expiredCurrentPrice: empty, missingQuoteEvidence: empty, pendingQuotaUpdates: empty };
 }
 
 function buildNextActions({ missingQuota, missingBoq, noVersionProjects, archived, engine, experience, projects }) {

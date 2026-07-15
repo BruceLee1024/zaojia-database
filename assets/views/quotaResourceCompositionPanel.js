@@ -1,5 +1,5 @@
-import { quotaResourceService } from '../services/quotaResourceService.js?v=4.2';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=4.1';
+import { quotaResourceService } from '../services/quotaResourceService.js?v=6.0';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.0';
 import { resourceService } from '../services/resourceService.js?v=4.1';
 import { esc, fmtMoney, toast } from '../utils/dom.js';
 import { buildCompositionPreview, buildUsageComparisonViewModel, renderCompositionPreview } from './quotaResourceComposition.js?v=4.2';
