@@ -6,6 +6,17 @@ export const fmt = n => (n == null || isNaN(n)) ? '-' : Number(n).toLocaleString
 export const fmtMoney = n => '¥' + fmt(n);
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
+export function scopedDom(root) {
+  return {
+    getElementById(id) {
+      const value = String(id).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      return root?.querySelector(`[id="${value}"]`) || null;
+    },
+    querySelector: selector => root?.querySelector(selector) || null,
+    querySelectorAll: selector => root?.querySelectorAll(selector) || [],
+  };
+}
+
 export const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 }[c]));

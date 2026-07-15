@@ -3,7 +3,7 @@ import { resourcePriceService } from '../services/resourcePriceService.js?v=6.2'
 import { resourceService } from '../services/resourceService.js?v=6.2';
 import { projectRepo, quotaRepo } from '../data/repository.js?v=6.2';
 import { exportResourceTemplate } from '../data/excel.js?v=6.2';
-import { closeModal, esc, fmtMoney, openModal, toast } from '../utils/dom.js?v=6.2';
+import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
 import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.2';
 
 const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], healthLabel: '', rows: [], prices: new Map(), usage: null };
@@ -17,7 +17,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   const route = window.__app?.state?.currentView;
   const params = window.__app?.state?.routeParams || {};
   Object.assign(state, nextResourceViewState(state, route, params));
-  exposeActions();
+  exposeActions(workspace);
   await refresh(workspace);
 }
 
@@ -51,13 +51,13 @@ function normalizeResourceIds(value) {
 
 export function createLatestResourceSelection({ setSelectedId, getSelectedId, loadUsage, commit }) {
   let requestGeneration = 0;
-  return async id => {
+  return async (id, context) => {
     const resourceId = String(id || '');
     const request = ++requestGeneration;
     setSelectedId(resourceId);
     const usage = await loadUsage(resourceId);
     if (request !== requestGeneration || getSelectedId() !== resourceId) return false;
-    await commit({ id: resourceId, usage, request });
+    await commit({ id: resourceId, usage, request, context });
     return true;
   };
 }
@@ -66,10 +66,10 @@ const selectResource = createLatestResourceSelection({
   setSelectedId: id => { state.selectedId = id; },
   getSelectedId: () => state.selectedId,
   loadUsage: id => resourceService.usage(id),
-  commit: async ({ id, usage }) => {
+  commit: async ({ id, usage, context: workspace = document.getElementById('workspace') }) => {
     state.usage = usage;
-    const generation = paint();
-    await Promise.all([loadPriceHistory(id), loadAttachmentPanel(id, generation)]);
+    const generation = paint(workspace);
+    await Promise.all([loadPriceHistory(id, workspace), loadAttachmentPanel(id, generation, { document: scopedDom(workspace) })]);
   },
 });
 
@@ -81,7 +81,10 @@ async function refresh(workspace = document.getElementById('workspace')) {
   state.prices = new Map(await Promise.all(state.rows.map(async item => [item.id, await resourcePriceService.getCurrentPrice(item.id)])));
   state.usage = state.selectedId ? await resourceService.usage(state.selectedId) : null;
   const generation = paint(workspace);
-  if (state.selectedId) await Promise.all([loadPriceHistory(state.selectedId), loadAttachmentPanel(state.selectedId, generation)]);
+  if (state.selectedId) await Promise.all([
+    loadPriceHistory(state.selectedId, workspace),
+    loadAttachmentPanel(state.selectedId, generation, { document: scopedDom(workspace) }),
+  ]);
 }
 
 function paint(workspace = document.getElementById('workspace')) {
@@ -150,27 +153,27 @@ function emptyDetail(meta) { return `<aside class="rounded-lg border border-slat
 function field(label, value) { return `<div class="border border-slate-100 bg-slate-50 px-2 py-2"><div class="text-slate-400">${label}</div><div class="mt-1 text-slate-700">${esc(value || '-')}</div></div>`; }
 function metric(label, value) { return `<div class="border border-slate-200 bg-slate-50 px-3 py-2"><div class="text-xs text-slate-500">${label}</div><div class="mt-1 text-lg font-semibold tabular-nums text-slate-900">${value}</div></div>`; }
 
-function exposeActions() {
+function exposeActions(workspace) {
   window.__resources = {
-    select: selectResource,
-    filter: (key, value) => { state[key] = value; clearTimeout(window.__resourceFilterTimer); window.__resourceFilterTimer = setTimeout(refresh, 150); },
-    clearFilters: () => { state.keyword = ''; state.category = ''; state.status = ''; refresh(); },
-    clearHealthFilter: () => { state.resourceIds = []; state.healthLabel = ''; refresh(); },
-    edit: showResourceEditor,
-    copy: async id => { const copy = await resourceService.copy(id); state.selectedId = copy.id; toast('已创建副本', 'success'); await refresh(); },
-    toggleStatus: async id => { const item = await resourceService.get(id); await resourceService.setStatus(id, item.status === 'inactive' ? 'active' : 'inactive'); toast('状态已更新', 'success'); await refresh(); },
-    remove: removeResource,
-    addPrice: showPriceEditor,
-    preferPrice: async (resourceId, priceId) => { await resourceService.setPreferredPrice(resourceId, priceId); toast('已设为首选价格', 'success'); await refresh(); await loadPriceHistory(resourceId); },
-    withdrawPrice: async (resourceId, priceId) => { if (!confirm('撤回这条价格快照？历史记录和附件仍保留。')) return; await resourcePriceService.withdraw(priceId); await refresh(); await loadPriceHistory(resourceId); },
+    select: id => selectResource(id, workspace),
+    filter: (key, value) => { state[key] = value; clearTimeout(window.__resourceFilterTimer); window.__resourceFilterTimer = setTimeout(() => refresh(workspace), 150); },
+    clearFilters: () => { state.keyword = ''; state.category = ''; state.status = ''; refresh(workspace); },
+    clearHealthFilter: () => { state.resourceIds = []; state.healthLabel = ''; refresh(workspace); },
+    edit: id => showResourceEditor(id, workspace),
+    copy: async id => { const copy = await resourceService.copy(id); state.selectedId = copy.id; toast('已创建副本', 'success'); await refresh(workspace); },
+    toggleStatus: async id => { const item = await resourceService.get(id); await resourceService.setStatus(id, item.status === 'inactive' ? 'active' : 'inactive'); toast('状态已更新', 'success'); await refresh(workspace); },
+    remove: id => removeResource(id, workspace),
+    addPrice: id => showPriceEditor(id, workspace),
+    preferPrice: async (resourceId, priceId) => { await resourceService.setPreferredPrice(resourceId, priceId); toast('已设为首选价格', 'success'); await refresh(workspace); await loadPriceHistory(resourceId, workspace); },
+    withdrawPrice: async (resourceId, priceId) => { if (!confirm('撤回这条价格快照？历史记录和附件仍保留。')) return; await resourcePriceService.withdraw(priceId); await refresh(workspace); await loadPriceHistory(resourceId, workspace); },
     addToProject: showAddToProject,
     importExcel: () => window.__app.go('resource-import', { resourceType: state.resourceType }),
     downloadTemplate: () => exportResourceTemplate(state.resourceType),
   };
 }
 
-async function loadPriceHistory(resourceId) {
-  const host = document.getElementById('resourcePriceHistory');
+async function loadPriceHistory(resourceId, workspace = document.getElementById('workspace')) {
+  const host = workspace.querySelector('#resourcePriceHistory');
   if (!host || state.selectedId !== resourceId) return;
   const [resource, prices] = await Promise.all([resourceService.get(resourceId), resourcePriceService.listByResource(resourceId)]);
   host.innerHTML = prices.length ? `<div class="space-y-2">${prices.map(price => `<div class="border ${price.id === resource.preferredPriceId ? 'border-teal-300 bg-teal-50/50' : 'border-slate-200'} p-2"><div class="flex items-center gap-2"><span class="font-semibold text-slate-900">${fmtMoney(price.unitPrice)}</span>${price.id === resource.preferredPriceId ? '<span class="badge badge-green">首选</span>' : ''}${price.status === 'withdrawn' ? '<span class="badge badge-gray">已撤回</span>' : ''}<span class="ml-auto text-slate-500">${esc(price.priceDate)}</span></div><div class="mt-1 text-slate-500">${esc(price.region?.province || '')}${esc(price.region?.city || '')} · ${sourceLabel(price.sourceType)} · ${basisLabel(price.priceBasis)}${price.supplier ? ` · ${esc(price.supplier)}` : ''}</div><div class="mt-2 flex gap-3">${price.status === 'withdrawn' ? '' : `<button data-price-action="prefer" data-resource-id="${esc(resourceId)}" data-price-id="${esc(price.id)}" class="text-teal-700">设为首选</button><button data-price-action="withdraw" data-resource-id="${esc(resourceId)}" data-price-id="${esc(price.id)}" class="text-red-600">撤回</button>`}</div></div>`).join('')}</div>` : '<div class="border border-dashed border-slate-200 p-4 text-center">暂无价格历史。</div>';
@@ -186,7 +189,7 @@ function bindResourceIdActions(root) {
   }));
 }
 
-async function showResourceEditor(id = '') {
+async function showResourceEditor(id = '', workspace = document.getElementById('workspace')) {
   const item = id ? await resourceService.get(id) : { resourceType: state.resourceType, status: 'active', tags: [] };
   const meta = LABELS[state.resourceType];
   openModal(`${id ? '编辑' : '新增'}${meta.singular}`, `<form id="resourceEditForm" class="grid grid-cols-2 gap-3 text-sm">
@@ -195,11 +198,11 @@ async function showResourceEditor(id = '') {
   document.getElementById('saveResourceButton').onclick = async () => {
     const data = Object.fromEntries(new FormData(document.getElementById('resourceEditForm')));
     await resourceService.save({ ...item, ...data, id: id || undefined, resourceType: state.resourceType, tags: String(data.tags || '').split(/[,，]/).map(value => value.trim()).filter(Boolean) });
-    closeModal(); toast(`${meta.singular}已保存`, 'success'); await refresh();
+    closeModal(); toast(`${meta.singular}已保存`, 'success'); await refresh(workspace);
   };
 }
 
-async function showPriceEditor(resourceId) {
+async function showPriceEditor(resourceId, workspace = document.getElementById('workspace')) {
   openModal('新增价格快照', `<form id="resourcePriceForm" class="grid grid-cols-2 gap-3 text-sm">
     <label>价格来源<select name="sourceType" class="mt-1 h-9 w-full border border-slate-300 bg-white px-2"><option value="official">官方信息价</option><option value="supplier_quote">供应商报价</option><option value="transaction">历史成交价</option></select></label>
     <label>价格口径<select name="priceBasis" class="mt-1 h-9 w-full border border-slate-300 bg-white px-2"><option value="delivered">到场价</option><option value="ex_factory">出厂价</option><option value="installed_composite">安装综合价</option></select></label>
@@ -209,14 +212,14 @@ async function showPriceEditor(resourceId) {
   document.getElementById('saveResourcePriceButton').onclick = async () => {
     const form = document.getElementById('resourcePriceForm'); const data = Object.fromEntries(new FormData(form));
     await resourcePriceService.save({ ...data, resourceId, region: { province: data.province, city: data.city, district: data.district }, taxIncluded: Boolean(data.taxIncluded) });
-    closeModal(); toast('价格快照已保存', 'success'); await refresh(); await loadPriceHistory(resourceId);
+    closeModal(); toast('价格快照已保存', 'success'); await refresh(workspace); await loadPriceHistory(resourceId, workspace);
   };
 }
 
-async function removeResource(id) {
+async function removeResource(id, workspace = document.getElementById('workspace')) {
   if (!confirm('停用或移除这条主数据？有历史记录时将保留为停用档案。')) return;
-  try { await resourceService.remove(id); state.selectedId = ''; toast('已移除未使用资源', 'success'); await refresh(); }
-  catch (error) { if (error.code !== 'RESOURCE_IN_USE' || !confirm(`该资源有 ${error.usage.total} 条历史或引用。继续将只停用主数据，不删除价格、附件和引用，是否继续？`)) throw error; await resourceService.remove(id, { force: true }); state.selectedId = ''; toast('已停用，历史与引用完整保留', 'success'); await refresh(); }
+  try { await resourceService.remove(id); state.selectedId = ''; toast('已移除未使用资源', 'success'); await refresh(workspace); }
+  catch (error) { if (error.code !== 'RESOURCE_IN_USE' || !confirm(`该资源有 ${error.usage.total} 条历史或引用。继续将只停用主数据，不删除价格、附件和引用，是否继续？`)) throw error; await resourceService.remove(id, { force: true }); state.selectedId = ''; toast('已停用，历史与引用完整保留', 'success'); await refresh(workspace); }
 }
 
 async function showAddToProject(resourceId) {

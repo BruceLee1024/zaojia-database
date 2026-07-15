@@ -77,3 +77,20 @@
 - All 12 top-level view renderers accept the workspace root, including the three dynamic-import adapters. Initial nested paint/refresh paths in importer and resources receive the same root.
 - The regression test covers slow A, completed B, and latest C writing a shell before awaiting. Late A is rejected, B remains visible while C is pending, and only C's final content commits. It also asserts all three requests receive distinct roots.
 - Final verification after this review: `node tests/run.mjs` -> `All tests passed`; `git diff --check` and changed-file `node --check` passed.
+
+## Fourth final review fix: root-scoped view lifecycles
+
+### RED
+
+- `node tests/finalFixes.mjs` failed at module instantiation because the requested `createWorkspaceRoot` isolation contract did not exist.
+- The view-chain audit found that several renderers accepted `workspace` only for `innerHTML` while their first asynchronous `paint`, `refresh`, chart, attachment, or event-binding step still queried the global document. With concurrent staging roots containing duplicate IDs, an older request could bind or update a newer request's nodes.
+- `resourceImport` and `aiImportWizard` called `paint()` without awaiting or passing the route root; their extracted paint functions also referenced an out-of-scope `workspace` identifier.
+
+### GREEN
+
+- `createWorkspaceRoot` now keeps every request's reads, writes, and bindings on its own staging node. Only the committed root is activated against the real workspace, so its later event-driven refreshes remain scoped after child nodes move; stale roots never retarget.
+- `scopedDom(root)` provides root-local `getElementById`, `querySelector`, and `querySelectorAll` for legacy binding code without consulting the global document.
+- All 12 route renderers now carry the workspace through their initial paint/load/bind/chart/async-refresh chains. Resource price history and attachment loading receive the same root, and resource selection/action refreshes retain it.
+- `resourceImport` and `aiImportWizard` explicitly `await paint(workspace)` and bind their exposed async actions to that workspace.
+- The duplicate-ID integration contract creates two independent workspace roots, binds the newer root first and the older root late, and verifies neither handler nor query crosses roots. Per-view static contracts cover all 12 initial DOM chains.
+- Final verification after this review: `node tests/run.mjs` -> `All tests passed`; changed-file `node --check` and `git diff --check` passed.

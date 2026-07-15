@@ -9,34 +9,34 @@ export async function render(workspace = document.getElementById('workspace')) {
   state.fileName = '';
   state.preview = null;
   state.report = null;
-  exposeActions();
-  paint();
+  exposeActions(workspace);
+  await paint(workspace);
 }
 
-function exposeActions() {
+function exposeActions(workspace) {
   window.__resourceImport = {
     back: () => window.__app.go(state.resourceType === 'equipment' ? 'equipment' : 'materials'),
-    pick: () => document.getElementById('resourceImportFile')?.click(),
+    pick: () => workspace.querySelector('#resourceImportFile')?.click(),
     handle: async input => {
       const file = input.files?.[0];
       if (!file) return;
-      state.busy = true; state.fileName = file.name; state.report = null; paint();
+      state.busy = true; state.fileName = file.name; state.report = null; await paint(workspace);
       try { state.preview = await resourceImportService.preview(await resourceImportService.parse(file, state.resourceType), state.resourceType); }
       catch (error) { state.preview = null; toast(error.message || '文件解析失败', 'error'); }
-      finally { state.busy = false; paint(); }
+      finally { state.busy = false; await paint(workspace); }
     },
     commit: async () => {
       if (!state.preview || state.preview.counts.valid === 0) return;
-      state.busy = true; paint();
-      try { state.report = await resourceImportService.commit(state.preview, { updateExisting: document.getElementById('resourceImportUpdate')?.checked !== false }); toast('导入已完成', 'success'); }
+      state.busy = true; await paint(workspace);
+      try { state.report = await resourceImportService.commit(state.preview, { updateExisting: workspace.querySelector('#resourceImportUpdate')?.checked !== false }); toast('导入已完成', 'success'); }
       catch (error) { state.report = error.report || null; toast(error.message || '导入失败', 'error'); }
-      finally { state.busy = false; paint(); }
+      finally { state.busy = false; await paint(workspace); }
     },
     template: () => exportResourceTemplate(state.resourceType),
   };
 }
 
-function paint() {
+async function paint(workspace) {
   const label = state.resourceType === 'equipment' ? '设备' : '材料';
   const preview = state.preview;
   workspace.innerHTML = `<div class="page-frame min-h-full flex flex-col gap-4">

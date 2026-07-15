@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createLatestCoordinator, createLatestWorkspaceCoordinator, createSerializedKeyCoordinator } from '../assets/utils/requestCoordinator.js?v=6.2';
+import { createLatestCoordinator, createLatestWorkspaceCoordinator, createSerializedKeyCoordinator, createWorkspaceRoot } from '../assets/utils/requestCoordinator.js?v=6.2';
 import { buildEquipmentPackageDialog, resourceRowHtml } from '../assets/views/resources.js?v=6.2';
 import { quotaResourceChoiceHtml } from '../assets/views/quotaResourceCompositionPanel.js?v=6.2';
 
@@ -10,6 +10,7 @@ export async function testFinalFixes() {
   await testLatestCoordinator();
   await testSerializedCoordinator();
   await testLatestWorkspaceCoordinator();
+  testWorkspaceRootIsolation();
   await testRouteRenderersAcceptWorkspace();
   await testCoherentModuleVersionGraph();
   await testNoInlineUntrustedIdInterpolation();
@@ -55,6 +56,37 @@ async function testLatestWorkspaceCoordinator() {
   assert.equal(new Set(roots).size, 3);
 }
 
+function testWorkspaceRootIsolation() {
+  const element = name => ({
+    name,
+    duplicate: { owner: name, onclick: null },
+    innerHTML: '',
+    childNodes: [],
+    removed: false,
+    querySelector(selector) { this.duplicate.selector = selector; return this.duplicate; },
+    querySelectorAll(selector) { return [{ owner: name, selector }]; },
+    remove() { this.removed = true; },
+  });
+  const oldNode = element('old');
+  const newNode = element('new');
+  const realNode = element('real');
+  const oldRoot = createWorkspaceRoot(oldNode);
+  const newRoot = createWorkspaceRoot(newNode);
+  assert.equal(oldRoot.querySelector('#duplicate').owner, 'old');
+  assert.equal(newRoot.querySelector('#duplicate').owner, 'new');
+  newRoot.querySelector('#duplicate').onclick = () => 'new-handler';
+  realNode.duplicate = newNode.duplicate;
+  newRoot.activate(realNode);
+  oldRoot.querySelector('#duplicate').onclick = () => 'old-handler';
+  assert.equal(newRoot.querySelector('#duplicate').onclick(), 'new-handler');
+  assert.equal(oldNode.duplicate.onclick(), 'old-handler');
+  assert.equal(newRoot.querySelector('#duplicate').owner, 'new');
+  assert.equal(oldRoot.querySelector('#duplicate').owner, 'old');
+  oldRoot.remove();
+  assert.equal(oldNode.removed, true);
+  assert.equal(newNode.removed, false);
+}
+
 async function testRouteRenderersAcceptWorkspace() {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const views = ['dashboard', 'importer', 'quota', 'projects', 'boq', 'indicators', 'experience', 'settings', 'resources', 'resourceImport', 'boqLibrary', 'aiImportWizard'];
@@ -62,10 +94,33 @@ async function testRouteRenderersAcceptWorkspace() {
     const source = await readFile(join(root, 'assets', 'views', `${view}.js`), 'utf8');
     assert.match(source, /export async function render\(workspace\b/, `${view} must accept an isolated workspace root`);
   }
+  const contracts = {
+    dashboard: [/bindResourceHealthActions\([^;]*workspace\)/, /drawCharts\([^;]*workspace\)/],
+    importer: [/exposeImporterActions\(workspace\)/, /bindUploadEvents\(workspace\)/],
+    quota: [/await renderList\(workspace\)/, /scopedDom\(workspace\)/],
+    projects: [/const document = scopedDom\(workspace\)/],
+    boq: [/const document = scopedDom\(workspace\)/],
+    indicators: [/expose\(workspace\)/, /drawCharts\(workspace\)/],
+    experience: [/bindExperiencePage\(projects, document\)/, /bindReviewWorkspace\([^;]*document\)/],
+    settings: [/bindSettingsEvents\(document\)/, /bindTabEvents\(document\)/],
+    resources: [/exposeActions\(workspace\)/, /loadPriceHistory\([^;]*workspace\)/, /document: scopedDom\(workspace\)/],
+    resourceImport: [/exposeActions\(workspace\)/, /await paint\(workspace\)/],
+    boqLibrary: [/await renderRows\(workspace\)/, /renderDetail\(workspace,/],
+    aiImportWizard: [/expose\(workspace\)/, /await paint\(workspace\)/, /bindUpload\(workspace\)/],
+  };
+  for (const [view, patterns] of Object.entries(contracts)) {
+    const source = await readFile(join(root, 'assets', 'views', `${view}.js`), 'utf8');
+    patterns.forEach(pattern => assert.match(source, pattern, `${view} must keep its initial DOM chain workspace-scoped`));
+  }
   const app = await readFile(join(root, 'app.js'), 'utf8');
   assert.equal(app.includes('snapshotWorkspace'), false);
   assert.equal(app.includes('restoreWorkspace'), false);
   assert.match(app, /await r\.render\(workspace\)/);
+
+  const resourceImport = await readFile(join(root, 'assets/views/resourceImport.js'), 'utf8');
+  assert.match(resourceImport, /exposeActions\(workspace\);[\s\S]*await paint\(workspace\);/);
+  const aiImport = await readFile(join(root, 'assets/views/aiImportWizard.js'), 'utf8');
+  assert.match(aiImport, /expose\(workspace\);[\s\S]*await paint\(workspace\);/);
 }
 
 function testEquipmentDialogSafetyAndWithdrawal() {

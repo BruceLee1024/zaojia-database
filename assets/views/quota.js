@@ -1,7 +1,7 @@
 // 视图：定额库
 import { quotaService } from '../services/quotaService.js?v=6.2';
 import { boqService } from '../services/boqService.js?v=6.2';
-import { fmtMoney, esc, $, openModal, closeModal, toast } from '../utils/dom.js?v=6.2';
+import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
 import { exportQuotaTemplate } from '../data/excel.js?v=6.2';
 import { hasMissingPrice } from '../utils/costing.js?v=6.2';
 import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.2';
@@ -162,13 +162,13 @@ export async function render(workspace = document.getElementById('workspace')) {
     </div>
   `;
 
-  $('#qKw').oninput = e => { filterState.keyword = e.target.value; renderList(); };
-  $('#qCat').onchange = e => { filterState.category = e.target.value; renderList(); };
-  $('#qUnit').onchange = e => { filterState.unit = e.target.value; renderList(); };
-  $('#qPrice').onchange = e => { filterState.priceStatus = e.target.value; renderList(); };
-  $('#btnImport').onclick = importExcel;
-  $('#btnTpl').onclick = exportQuotaTemplate;
-  await renderList();
+  $('#qKw', workspace).oninput = e => { filterState.keyword = e.target.value; renderList(workspace); };
+  $('#qCat', workspace).onchange = e => { filterState.category = e.target.value; renderList(workspace); };
+  $('#qUnit', workspace).onchange = e => { filterState.unit = e.target.value; renderList(workspace); };
+  $('#qPrice', workspace).onchange = e => { filterState.priceStatus = e.target.value; renderList(workspace); };
+  $('#btnImport', workspace).onclick = importExcel;
+  $('#btnTpl', workspace).onclick = exportQuotaTemplate;
+  await renderList(workspace);
 }
 
 export function quotaRouteNotice(params = {}) {
@@ -177,7 +177,8 @@ export function quotaRouteNotice(params = {}) {
   return `来自“资源健康”：${count} 条定额的材料/设备价格或元数据已变更，请打开人材机组成对比并确认刷新快照。`;
 }
 
-async function renderList() {
+async function renderList(workspace = document.getElementById('workspace')) {
+  const document = scopedDom(workspace);
   const [rows, allRows] = await Promise.all([quotaService.list(filterState), quotaService.list()]);
   lastRows = rows;
   if (!rows.some(row => row.id === editorState.selectedId)) {

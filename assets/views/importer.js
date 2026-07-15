@@ -67,7 +67,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   state.draftAvailable = Boolean(readDraft());
   if (params.mode === 'boq') state.mode = 'boq';
   if (params.mode === 'hub') state.mode = 'hub';
-  exposeImporterActions();
+  exposeImporterActions(workspace);
   if (params.action === 'quota') {
     window.__app.state.routeParams = {};
     setTimeout(() => importQuotaExcel(), 0);
@@ -86,11 +86,11 @@ export async function render(workspace = document.getElementById('workspace')) {
   renderHub(workspace);
 }
 
-function exposeImporterActions() {
+function exposeImporterActions(workspace) {
   window.__importer = {
     showHub: () => {
       state.mode = 'hub';
-      renderHub();
+      renderHub(workspace);
     },
     startBOQImport: () => {
       if (!state.projects.length) {
@@ -112,8 +112,8 @@ function exposeImporterActions() {
     },
     importMaterials: () => window.__app.go('resource-import', { resourceType: 'material' }),
     importEquipment: () => window.__app.go('resource-import', { resourceType: 'equipment' }),
-    pickFile,
-    handleFile,
+    pickFile: () => pickFile(workspace),
+    handleFile: file => handleFile(file, workspace),
     setProject: id => {
       state.projectId = id;
       window.__app.state.currentProjectId = id;
@@ -458,7 +458,7 @@ function paint(workspace = document.getElementById('workspace')) {
       </div>
     </div>
   `;
-  bindUploadEvents();
+  bindUploadEvents(workspace);
 }
 
 function uploadZone(hasUploaded) {
@@ -915,11 +915,11 @@ function issueCard(issue) {
   `;
 }
 
-function bindUploadEvents() {
-  const input = document.getElementById('importFileInput');
-  const dropZone = document.getElementById('importDropZone');
+function bindUploadEvents(workspace = document.getElementById('workspace')) {
+  const input = workspace.querySelector('#importFileInput');
+  const dropZone = workspace.querySelector('#importDropZone');
   if (!input || !dropZone) return;
-  input.onchange = () => handleFile(input.files?.[0]);
+  input.onchange = () => handleFile(input.files?.[0], workspace);
   dropZone.ondragover = e => {
     e.preventDefault();
     dropZone.classList.add('ring-2', 'ring-blue-300');
@@ -928,15 +928,15 @@ function bindUploadEvents() {
   dropZone.ondrop = e => {
     e.preventDefault();
     dropZone.classList.remove('ring-2', 'ring-blue-300');
-    handleFile(e.dataTransfer?.files?.[0]);
+    handleFile(e.dataTransfer?.files?.[0], workspace);
   };
 }
 
-function pickFile() {
-  document.getElementById('importFileInput')?.click();
+function pickFile(workspace = document.getElementById('workspace')) {
+  workspace.querySelector('#importFileInput')?.click();
 }
 
-async function handleFile(file) {
+async function handleFile(file, workspace = document.getElementById('workspace')) {
   if (!file) return;
   try {
     const rows = await parseExcel(file);
@@ -953,7 +953,7 @@ async function handleFile(file) {
     state.selectedRows.clear();
     state.previewPage = 1;
     toast(`已解析 ${rows.length} 行，${mappingToastMessage('自动确认')}`, 'success');
-    paint();
+    paint(workspace);
   } catch (err) {
     console.error(err);
     toast(`解析失败：${err.message}`, 'error');

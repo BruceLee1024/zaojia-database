@@ -33,6 +33,19 @@ export function createSerializedKeyCoordinator() {
   };
 }
 
+export function createWorkspaceRoot(stagingNode) {
+  let queryRoot = stagingNode;
+  return {
+    get innerHTML() { return queryRoot.innerHTML; },
+    set innerHTML(value) { queryRoot.innerHTML = value; },
+    get childNodes() { return stagingNode.childNodes; },
+    querySelector(selector) { return queryRoot.querySelector(selector); },
+    querySelectorAll(selector) { return queryRoot.querySelectorAll(selector); },
+    activate(root) { queryRoot = root; },
+    remove() { stagingNode.remove(); },
+  };
+}
+
 export function createLatestWorkspaceCoordinator({ createRoot, commit, dispose = () => {} }) {
   let generation = 0;
   return {

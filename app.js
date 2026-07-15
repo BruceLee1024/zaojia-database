@@ -16,7 +16,7 @@ import { getStorageStatus } from './assets/data/storage.js?v=6.2';
 import { openModal, closeModal, esc } from './assets/utils/dom.js?v=6.2';
 import { ICONS } from './assets/utils/icons.js?v=6.2';
 import { navigationItemHtml } from './assets/views/navigation.js?v=6.2';
-import { createLatestCoordinator, createLatestWorkspaceCoordinator } from './assets/utils/requestCoordinator.js?v=6.2';
+import { createLatestCoordinator, createLatestWorkspaceCoordinator, createWorkspaceRoot } from './assets/utils/requestCoordinator.js?v=6.2';
 
 const VIEWS = [
   { id: 'dashboard',  label: '我的概览',   icon: ICONS.navigation.overview, group: '我的工作台', desc: '继续最近工作' },
@@ -116,6 +116,7 @@ async function renderWorkspace(generation = ++routeGeneration) {
 function commitWorkspace(detachedWorkspace) {
   const workspace = document.getElementById('workspace');
   if (workspace) workspace.replaceChildren(...detachedWorkspace.childNodes);
+  if (workspace) detachedWorkspace.activate(workspace);
   const current = detachedWorkspace.__routeMeta || {};
   const values = { crumb: current.label, crumbIcon: current.icon || 'dashboard', crumbGroup: current.group, crumbDesc: current.desc };
   Object.entries(values).forEach(([id, value]) => {
@@ -135,7 +136,7 @@ function createDetachedWorkspace() {
   }
   const workspace = document.createElement('div');
   host.prepend(workspace);
-  return workspace;
+  return createWorkspaceRoot(workspace);
 }
 
 function renderErrorState(current, err, workspace = document.getElementById('workspace')) {

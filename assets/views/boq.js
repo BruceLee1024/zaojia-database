@@ -7,7 +7,7 @@ import { versionService, defaultVersionName, exportVersionDiffText } from '../se
 import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
 import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.2';
 import { openReview } from './experience.js?v=6.2';
-import { fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js?v=6.2';
+import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
 import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=6.2';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.2';
 import { categoryGuess } from '../utils/stats.js?v=6.2';
@@ -37,7 +37,7 @@ function clampBoqDetailHeight(value) {
   return Math.min(Math.max(value, BOQ_DETAIL_MIN_HEIGHT), max);
 }
 
-function applyBoqDetailHeight() {
+function applyBoqDetailHeight(document = globalThis.document) {
   const detail = document.getElementById('boqDetail');
   const body = document.getElementById('boqDetailBody');
   if (!detail) return;
@@ -68,6 +68,7 @@ function startBoqResize(e) {
 }
 
 export async function render(workspace = document.getElementById('workspace')) {
+  const document = scopedDom(workspace);
   const projects = await projectRepo.all();
   const proj = projects.find(p => p.id === window.__app.state.currentProjectId) || projects[0];
   if (!proj) {
@@ -384,7 +385,7 @@ export async function render(workspace = document.getElementById('workspace')) {
     toast('已删除清单项', 'success');
     render();
   });
-  if (!boqState.detailCollapsed) applyBoqDetailHeight();
+  if (!boqState.detailCollapsed) applyBoqDetailHeight(document);
 }
 
 function boqWorkbenchStatus(project, lines, versions, extra = {}) {

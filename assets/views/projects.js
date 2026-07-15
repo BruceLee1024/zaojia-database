@@ -2,7 +2,7 @@
 import { projectService } from '../services/projectService.js?v=6.2';
 import { indicatorService } from '../services/indicatorService.js?v=6.2';
 import { boqRepo, versionRepo } from '../data/repository.js?v=6.2';
-import { fmt, fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js?v=6.2';
+import { fmt, fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
 import { hasMissingPrice } from '../utils/costing.js?v=6.2';
 import { openReview } from './experience.js?v=6.2';
 import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.2';
@@ -18,6 +18,7 @@ const SCALES = ['小型', '中型', '大型', '特大型'];
 const projectState = { status: '', type: '', risk: '', version: '', keyword: '', selectedId: '' };
 
 export async function render(workspace = document.getElementById('workspace')) {
+  const document = scopedDom(workspace);
   const params = window.__app?.state?.routeParams || {};
   if (params.keyword != null) projectState.keyword = params.keyword;
   if (params.selectedId) projectState.selectedId = params.selectedId;

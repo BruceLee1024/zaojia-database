@@ -8,7 +8,7 @@ import { STORES, dbGetAll } from '../data/repository.js?v=6.2';
 import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, storageGetAttachment, storageGetCache, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder, withFolderMirrorSuspended } from '../data/storage.js?v=6.2';
 import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, resetWithGenerator, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=6.2';
 import { ensureDemoData } from '../data/demo.js?v=6.2';
-import { esc, toast, fmt } from '../utils/dom.js?v=6.2';
+import { esc, toast, fmt, scopedDom } from '../utils/dom.js?v=6.2';
 
 const SETTINGS_TABS = [
   { id: 'storage', label: '数据保存', icon: 'folder_managed', desc: '本地数据' },
@@ -47,8 +47,9 @@ export async function render(workspace = document.getElementById('workspace')) {
       ${renderActiveTab(ctx)}
     </div>
   `;
-  bindSettingsEvents();
-  bindTabEvents();
+  const document = scopedDom(workspace);
+  bindSettingsEvents(document);
+  bindTabEvents(document);
 }
 
 export async function triggerExportBackup() {
@@ -426,7 +427,7 @@ function renderSettingsSummaryCards({ cfg, engine }) {
   `;
 }
 
-function bindSettingsEvents() {
+function bindSettingsEvents(document = globalThis.document) {
   const on = (id, handler) => {
     const el = document.getElementById(id);
     if (el) el.onclick = handler;
@@ -443,17 +444,17 @@ function bindSettingsEvents() {
   }
   const systemPrompt = document.getElementById('cfg_sys');
   if (systemPrompt) {
-    systemPrompt.oninput = updateSystemPromptCount;
+    systemPrompt.oninput = () => updateSystemPromptCount(document);
   }
   document.querySelectorAll('[data-ai-prompt-template]').forEach(button => {
-    button.onclick = () => applySystemPromptTemplate(button.dataset.aiPromptTemplate);
+    button.onclick = () => applySystemPromptTemplate(button.dataset.aiPromptTemplate, document);
   });
-  on('btnPromptGenerateToggle', togglePromptGenerator);
-  on('btnPromptGenerate', generatePromptDraft);
-  on('btnPromptApplyDraft', applyPromptDraft);
-  on('btnPromptReset', () => applySystemPromptTemplate('general'));
-  on('btnSave', saveAIConfig);
-  on('btnTest', testAI);
+  on('btnPromptGenerateToggle', () => togglePromptGenerator(document));
+  on('btnPromptGenerate', () => generatePromptDraft(document));
+  on('btnPromptApplyDraft', () => applyPromptDraft(document));
+  on('btnPromptReset', () => applySystemPromptTemplate('general', document));
+  on('btnSave', () => saveAIConfig(document));
+  on('btnTest', () => testAI(document));
   on('btnImport', importAll);
   on('btnExport', exportAll);
   on('btnExportZip', exportZip);
@@ -471,7 +472,7 @@ function bindSettingsEvents() {
   on('btnClear', clearAll);
 }
 
-function bindTabEvents() {
+function bindTabEvents(document = globalThis.document) {
   document.querySelectorAll('[data-settings-tab]').forEach(btn => {
     btn.onclick = () => {
       activeSettingsTab = btn.dataset.settingsTab;
@@ -480,7 +481,7 @@ function bindTabEvents() {
   });
 }
 
-function saveAIConfig() {
+function saveAIConfig(document = globalThis.document) {
   const system = document.getElementById('cfg_sys').value.trim();
   if (!system) {
     toast('系统提示词不能为空；你可以自行编辑，或恢复推荐默认。', 'error');
@@ -498,38 +499,38 @@ function saveAIConfig() {
   return true;
 }
 
-async function testAI() {
-  if (!saveAIConfig()) return;
+async function testAI(document = globalThis.document) {
+  if (!saveAIConfig(document)) return;
   const result = await testAIConnection();
   toast(result.summary, result.confidence === 'high' ? 'success' : 'error');
 }
 
-function updateSystemPromptCount() {
+function updateSystemPromptCount(document = globalThis.document) {
   const prompt = document.getElementById('cfg_sys');
   const count = document.getElementById('cfg_sys_count');
   if (prompt && count) count.textContent = `${prompt.value.length} 个字符`;
 }
 
-function applySystemPromptTemplate(key) {
+function applySystemPromptTemplate(key, document = globalThis.document) {
   const prompt = document.getElementById('cfg_sys');
   if (!prompt) return;
   const next = getAISystemPromptPreset(key);
   const saved = getAIConfig().system || '';
   if (prompt.value.trim() && prompt.value.trim() !== saved.trim() && !confirm('替换会覆盖当前未保存的提示词修改。是否继续？')) return;
   prompt.value = next;
-  updateSystemPromptCount();
+  updateSystemPromptCount(document);
   prompt.focus();
   toast('已填入模板；请检查或继续编辑后保存。', 'success');
 }
 
-function togglePromptGenerator() {
+function togglePromptGenerator(document = globalThis.document) {
   const generator = document.getElementById('promptGenerator');
   if (!generator) return;
   generator.classList.toggle('hidden');
   if (!generator.classList.contains('hidden')) document.getElementById('promptGenScenario')?.focus();
 }
 
-async function generatePromptDraft() {
+async function generatePromptDraft(document = globalThis.document) {
   const scenario = document.getElementById('promptGenScenario')?.value.trim();
   const focus = document.getElementById('promptGenFocus')?.value.trim();
   const responseStyle = document.getElementById('promptGenStyle')?.value;
@@ -566,14 +567,14 @@ async function generatePromptDraft() {
   }
 }
 
-function applyPromptDraft() {
+function applyPromptDraft(document = globalThis.document) {
   const draft = document.getElementById('promptDraft')?.value.trim();
   const prompt = document.getElementById('cfg_sys');
   if (!draft || !prompt) return;
   const saved = getAIConfig().system || '';
   if (prompt.value.trim() && prompt.value.trim() !== saved.trim() && !confirm('应用草案会覆盖当前未保存的提示词修改。是否继续？')) return;
   prompt.value = draft;
-  updateSystemPromptCount();
+  updateSystemPromptCount(document);
   prompt.focus();
   toast('草案已应用到编辑框；请检查后保存。', 'success');
 }

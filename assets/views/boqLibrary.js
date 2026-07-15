@@ -3,7 +3,7 @@ import { boqLibraryService } from '../services/boqLibraryService.js?v=6.2';
 import { suggestLibraryItem } from '../services/aiAssistService.js?v=6.2';
 import { projectRepo, quotaRepo } from '../data/repository.js?v=6.2';
 import { exportBoqLibraryTemplate } from '../data/excel.js?v=6.2';
-import { esc, openModal, closeModal, toast } from '../utils/dom.js?v=6.2';
+import { esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
 import { ICONS } from '../utils/icons.js?v=6.2';
 
 const state = { keyword: '', selectedId: '' };
@@ -13,7 +13,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   const route = window.__app && window.__app.state ? window.__app.state.routeParams || {} : {};
   if (route.keyword != null) state.keyword = route.keyword;
   if (route.selectedId) state.selectedId = route.selectedId;
-  window.__boqLibrary = { select, create, edit, apply, remove, importExcel };
+  window.__boqLibrary = { select: id => select(workspace, id), create, edit, apply, remove, importExcel };
   workspace.innerHTML = `
     <div class="page-frame h-full min-h-[700px] flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-4">
@@ -23,13 +23,15 @@ export async function render(workspace = document.getElementById('workspace')) {
       <div id="libraryMetrics" class="grid grid-cols-4 gap-4"></div>
       <div class="grid grid-cols-[minmax(0,1fr)_400px] gap-4 flex-1 min-h-0"><section class="rounded-lg border bg-white overflow-auto"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50"><tr><th class="p-3 text-left">清单编码</th><th class="p-3 text-left">清单名称</th><th class="p-3 text-left">项目特征</th><th class="p-3 text-left">单位</th><th class="p-3 text-right">默认工程量</th><th class="p-3 text-center">关联定额</th></tr></thead><tbody id="libraryRows"></tbody></table></section><aside id="libraryDetail" class="rounded-lg border border-slate-200 bg-white overflow-hidden min-w-0"></aside></div>
     </div>`;
+  const document = scopedDom(workspace);
   document.getElementById('libImport').onclick = importExcel;
   document.getElementById('libTemplate').onclick = exportBoqLibraryTemplate;
-  document.getElementById('libKeyword').oninput = function (event) { state.keyword = event.target.value; renderRows(); };
-  await renderRows();
+  document.getElementById('libKeyword').oninput = function (event) { state.keyword = event.target.value; renderRows(workspace); };
+  await renderRows(workspace);
 }
 
-async function renderRows() {
+async function renderRows(workspace = document.getElementById('workspace')) {
+  const document = scopedDom(workspace);
   items = await boqLibraryService.list({ keyword: state.keyword });
   if (!items.some(function (item) { return item.id === state.selectedId; })) state.selectedId = items[0] ? items[0].id : '';
   const all = await boqLibraryService.list({});
@@ -38,8 +40,8 @@ async function renderRows() {
   const added = all.filter(function (item) { return (item.createdAt || '').slice(0, 7) === new Date().toISOString().slice(0, 7); }).length;
   document.getElementById('libraryMetrics').innerHTML = buildLibraryMetricCards({ total: all.length, water, added, references: refs }).map(metric).join('');
   document.getElementById('libraryRows').innerHTML = items.length ? items.map(function (item) { return `<tr data-library-id="${item.id}" class="border-t cursor-pointer hover:bg-teal-50 ${item.id === state.selectedId ? 'bg-teal-50' : ''}"><td class="p-3 text-teal-700">${esc(item.code || '-')}</td><td class="p-3 font-medium">${esc(item.name)}</td><td class="p-3 text-slate-500">${esc(item.feature || '-')}</td><td class="p-3">${esc(item.unit)}</td><td class="p-3 text-right">${item.defaultQty || 0}</td><td class="p-3 text-center">${(item.quotaItemIds || []).length}</td></tr>`; }).join('') : '<tr><td colspan="6" class="p-12 text-center text-slate-400">暂无清单，可新建或导入 Excel。</td></tr>';
-  document.querySelectorAll('[data-library-id]').forEach(function (row) { row.onclick = function () { select(row.dataset.libraryId); }; });
-  renderDetail(items.find(function (item) { return item.id === state.selectedId; }));
+  document.querySelectorAll('[data-library-id]').forEach(function (row) { row.onclick = function () { select(workspace, row.dataset.libraryId); }; });
+  renderDetail(workspace, items.find(function (item) { return item.id === state.selectedId; }));
 }
 
 const METRIC_TONES = {
@@ -64,7 +66,7 @@ function metric(card) {
   const tone = METRIC_TONES[card.tone] || METRIC_TONES.blue;
   return `<div class="min-h-[138px] rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-[0_3px_12px_rgba(15,23,42,0.06)]"><div class="kpi-content-top flex h-full gap-4"><div class="icon-surface mt-0.5 ${tone.surface}"><span class="material-symbols-outlined icon-kpi">${card.icon}</span></div><div class="min-w-0"><div class="text-[17px] font-semibold text-slate-700">${esc(card.label)}</div><div class="mt-1 flex items-baseline gap-2"><span class="text-[34px] font-semibold leading-tight tracking-tight tabular-nums text-slate-950">${esc(card.value)}</span><span class="text-sm text-slate-500">${esc(card.unit)}</span></div><div class="mt-2 text-sm font-medium ${tone.note}">${esc(card.note)}</div></div></div></div>`;
 }
-function select(id) { state.selectedId = id; renderRows(); }
+function select(workspace, id) { state.selectedId = id; renderRows(workspace); }
 export function getLibraryDetailSummary(item = {}) {
   const source = String(item.source || '').trim();
   const version = String(item.version || '').trim();
@@ -104,8 +106,8 @@ export function applyLibraryAISuggestions(fields = {}, selectedQuotaIds = [], re
   return { fields: nextFields, quotaItemIds };
 }
 
-function renderDetail(item) {
-  const target = document.getElementById('libraryDetail');
+function renderDetail(workspace, item) {
+  const target = workspace.querySelector('#libraryDetail');
   if (!item) {
     target.innerHTML = `<div class="h-full flex items-center justify-center p-8 text-center"><div><div class="icon-surface icon-surface-slate mx-auto mb-3"><span class="material-symbols-outlined icon-empty">${ICONS.resource.boq}</span></div><div class="font-semibold text-slate-700">选择清单查看详情</div><div class="mt-1 text-sm text-slate-500">从左侧列表选择一条标准清单。</div></div></div>`;
     return;
