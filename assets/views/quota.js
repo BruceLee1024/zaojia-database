@@ -120,7 +120,8 @@ export async function render(workspace = document.getElementById('workspace')) {
             </div>
             <button onclick="window.__quota.showMissing()" class="px-3 py-1.5 text-xs rounded border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100">查看缺单价</button>
           </div>
-          <div class="overflow-auto scroll-thin flex-1 min-h-0">
+          <div class="mobile-card-list divide-y divide-slate-100" id="qMobileList"></div>
+          <div class="mobile-table overflow-auto scroll-thin flex-1 min-h-0">
             <table class="w-full text-sm table-fixed">
               <thead>
                 <tr class="text-left border-b">
@@ -171,9 +172,11 @@ async function renderList(workspace = document.getElementById('workspace')) {
   document.getElementById('quotaKpis').innerHTML = kpiStrip(allRows);
   document.getElementById('qCount').textContent = `显示 ${rows.length} / ${allRows.length} 条，最多展示前 500 条`;
   document.getElementById('qList').innerHTML = quotaRows(rows);
+  document.getElementById('qMobileList').innerHTML = quotaMobileCards(rows);
   document.getElementById('qPager').innerHTML = pager(rows);
   document.getElementById('quotaInspector').innerHTML = inspector(selectedItem());
   document.getElementById('quotaBottom').innerHTML = bottomPanels(allRows);
+  document.querySelectorAll('[data-mobile-quota]').forEach(button => button.onclick = () => selectQuota(button.dataset.mobileQuota));
 }
 
 function quotaRows(rows) {
@@ -194,6 +197,17 @@ function quotaRows(rows) {
         <td class="px-3 text-center">${priceBadge(it)}</td>
       </tr>
     `;
+  }).join('');
+}
+
+function quotaMobileCards(rows) {
+  const visible = rows.slice(0, 500);
+  if (!visible.length) return '<div class="px-5 py-12 text-center text-sm text-slate-400">没有匹配的定额条目。请调整筛选条件，或导入定额库。</div>';
+  return visible.map(it => {
+    const missing = hasMissingPrice(it.priceTotal);
+    return `<button type="button" class="w-full px-4 py-3 text-left hover:bg-teal-50/50" data-mobile-quota="${esc(it.id)}">
+      <div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="badge badge-blue">${esc(it.category || '未分类')}</span>${priceBadge(it)}</div><div class="mt-2 truncate font-semibold text-slate-900">${esc(it.name || '未命名定额')}</div><div class="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">${esc(it.feature || '未填写项目特征')}</div></div><div class="shrink-0 text-right"><div class="text-xs text-slate-500">${esc(it.unit || '-')}</div><div class="mt-2 font-semibold tabular-nums ${missing ? 'text-amber-700' : 'text-slate-900'}">${missing ? '待补价' : fmtMoney(it.priceTotal)}</div><span class="material-symbols-outlined mt-2 text-slate-400" aria-hidden="true">chevron_right</span></div></div>
+    </button>`;
   }).join('');
 }
 
@@ -435,7 +449,10 @@ function selectedItem() {
 async function selectQuota(id) {
   editorState.selectedId = id;
   document.getElementById('qList').innerHTML = quotaRows(lastRows);
+  document.getElementById('qMobileList').innerHTML = quotaMobileCards(lastRows);
   document.getElementById('quotaInspector').innerHTML = inspector(selectedItem());
+  document.querySelectorAll('[data-mobile-quota]').forEach(button => button.onclick = () => selectQuota(button.dataset.mobileQuota));
+  if (window.matchMedia('(max-width: 767px)').matches) openModal('定额详情', inspector(selectedItem()));
 }
 
 async function removeQuota(id) {

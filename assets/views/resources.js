@@ -179,8 +179,13 @@ function paint(workspace = document.getElementById('workspace')) {
 function resourceTable(meta) {
   return `<section class="library-list-pane min-h-[420px]">
     <div class="border-b border-slate-200 px-4 py-3 flex items-center"><h2 class="font-semibold text-slate-900">${meta.plural}清单</h2><span class="ml-2 text-xs text-slate-500">${state.rows.length} 条</span></div>
-    <div class="overflow-auto"><table class="w-full text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-3 py-2 text-left">编码 / 名称</th><th class="px-3 text-left">规格型号</th><th class="px-3 text-left">分类</th><th class="px-3 text-right">当前价</th><th class="px-3 text-left">状态</th><th class="px-3 w-28"></th></tr></thead>
+    <div class="mobile-card-list divide-y divide-slate-100">${state.rows.length ? state.rows.map(item => resourceMobileCard(item, state.prices.get(item.id))).join('') : `<div class="px-5 py-16 text-center text-sm text-slate-400">暂无符合条件的${meta.singular}。</div>`}</div>
+    <div class="mobile-table overflow-auto"><table class="w-full text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-3 py-2 text-left">编码 / 名称</th><th class="px-3 text-left">规格型号</th><th class="px-3 text-left">分类</th><th class="px-3 text-right">当前价</th><th class="px-3 text-left">状态</th><th class="px-3 w-28"></th></tr></thead>
     <tbody class="divide-y divide-slate-100">${state.rows.length ? state.rows.map(item => resourceRowHtml(item, state.prices.get(item.id), item.id === state.selectedId)).join('') : `<tr><td colspan="6" class="py-16 text-center text-slate-400">暂无符合条件的${meta.singular}。</td></tr>`}</tbody></table></div></section>`;
+}
+
+function resourceMobileCard(item, price) {
+  return `<article class="px-4 py-3"><div class="flex items-start gap-3"><button data-resource-action="openMobileDetail" data-resource-id="${esc(item.id)}" class="min-w-0 flex-1 text-left"><div class="flex items-center gap-2"><span class="badge ${item.status === 'inactive' ? 'badge-gray' : 'badge-green'}">${item.status === 'inactive' ? '停用' : '启用'}</span><span class="text-xs text-slate-500">${esc(item.category || '未分类')}</span></div><div class="mt-2 truncate font-semibold text-slate-900">${esc(item.name)}</div><div class="mt-1 truncate text-xs text-slate-500">${esc(item.code || '未编码')} · ${esc(item.specModel || '未填规格')} · ${esc(item.unit || '-')}</div><div class="mt-3 text-sm font-semibold tabular-nums ${price ? 'text-slate-900' : 'text-amber-700'}">${price ? fmtMoney(price.unitPrice) : '待询价'}</div></button><button aria-label="编辑${esc(item.name)}" data-resource-action="edit" data-resource-id="${esc(item.id)}" class="h-11 w-11 shrink-0 border border-slate-200 text-slate-500"><span class="material-symbols-outlined" aria-hidden="true">edit</span></button></div></article>`;
 }
 
 export function resourceRowHtml(item, price, active) {
@@ -212,6 +217,12 @@ function exposeActions(workspace, generation) {
   const context = { workspace, generation };
   window.__resources = {
     select: id => { runAtomicResourceRefresh.invalidate(); return selectResource(id, context); },
+    openMobileDetail: async id => {
+      runAtomicResourceRefresh.invalidate();
+      await selectResource(id, context);
+      const item = state.rows.find(row => row.id === id);
+      if (item) openModal(`${LABELS[state.resourceType].singular}详情`, mobileResourceDetail(item, state.prices.get(id)));
+    },
     filter: (key, value) => { if (!isResourceContextCurrent(context)) return; state[key] = value; clearTimeout(window.__resourceFilterTimer); window.__resourceFilterTimer = setTimeout(() => refresh(workspace, generation), 150); },
     clearFilters: () => { if (!isResourceContextCurrent(context)) return; state.keyword = ''; state.category = ''; state.status = ''; refresh(workspace, generation); },
     clearHealthFilter: () => { if (!isResourceContextCurrent(context)) return; state.resourceIds = []; state.healthLabel = ''; refresh(workspace, generation); },
@@ -227,6 +238,11 @@ function exposeActions(workspace, generation) {
     importExcel: () => window.__app.go('resource-import', { resourceType: state.resourceType }),
     downloadTemplate: () => exportResourceTemplate(state.resourceType),
   };
+}
+
+function mobileResourceDetail(item, price) {
+  const meta = LABELS[state.resourceType];
+  return `<div class="space-y-4 text-sm"><div><div class="text-xs text-slate-500">${esc(item.code || '未编码')} · ${esc(item.category || '未分类')}</div><h2 class="mt-1 text-lg font-semibold text-slate-900">${esc(item.name)}</h2><p class="mt-1 text-slate-500">${esc(item.specModel || '未填规格')} · ${esc(item.unit || '-')}</p></div><div class="grid grid-cols-2 gap-2">${field('状态', item.status === 'inactive' ? '停用' : '启用')}${field('当前参考价', price ? fmtMoney(price.unitPrice) : '待询价')}${field('品牌 / 厂家', item.brand || item.manufacturer)}${field('工艺段', item.processStage)}</div><div class="grid grid-cols-2 gap-2"><button onclick="window.__resources.edit('${esc(item.id)}')" class="h-11 brand-bg text-white">编辑${meta.singular}</button><button onclick="window.__resources.addPrice('${esc(item.id)}')" class="h-11 border border-teal-300 bg-white text-teal-700">新增价格</button></div></div>`;
 }
 
 async function loadPriceHistory(resourceId, workspace = document.getElementById('workspace'), generation = resourceRenderGeneration) {

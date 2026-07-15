@@ -216,26 +216,79 @@
   .ai-composer-note { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 8px; color: #64748b; font-size: 11px; line-height: 1.35; }
   .ai-composer-note .material-symbols-outlined { font-size: 14px; color: #0f766e; flex: 0 0 auto; }
   .ai-key { padding: 1px 4px; border: 1px solid #dbe3ea; border-radius: 4px; background: #f8fafc; color: #475569; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10px; white-space: nowrap; }
+  .mobile-only { display: none; }
+  .mobile-nav-sheet { display: none; }
+  .mobile-card-list { display: none; }
+  .mobile-scroll-hint { display: none; }
   @media (max-width: 1100px) {
     body.ai-open .app-shell { padding-right: 0; }
     .ai-drawer { width: min(520px, calc(100vw - 24px)); }
   }
-  @media (max-width: 640px) {
-    .app-shell > aside { width: 64px !important; }
-    .app-shell > aside > div:first-child { padding: 12px 10px; }
-    .app-shell > aside > div:first-child .w-11 { width: 42px; height: 42px; }
-    .app-shell > aside > div:first-child .w-11 + div,
-    .app-shell > aside > div:first-child .grid,
-    .app-shell > aside > div:last-child,
-    .app-shell .nav-section-title,
-    .app-shell .nav-item > span.flex-1,
-    .app-shell .nav-item > .rounded-full { display: none; }
-    .app-shell #nav { padding: 10px 7px; }
-    .app-shell .nav-item { justify-content: center; padding: 10px 6px; }
-    .app-shell > div > header { padding-left: 8px; padding-right: 8px; }
-    .app-shell #workspace { padding: 8px; }
-    .app-shell #aiOpenButton { width: 36px; padding-left: 0; padding-right: 0; justify-content: center; }
-    .app-shell #aiOpenButton > span:last-child { display: none; }
+  @media (max-width: 767px) {
+    html { background: var(--bg); }
+    body { overscroll-behavior: none; }
+    .mobile-only { display: flex; }
+    .desktop-sidebar { display: none; }
+    .app-shell { height: 100dvh; padding: 0 !important; }
+    .app-shell > div > header { height: 60px; padding: 0 12px; }
+    .app-shell > div > header .h-full { gap: 8px; }
+    .app-shell > div > header .h-9.w-9 { display: none; }
+    .app-shell > div > header #crumbGroup,
+    .app-shell > div > header #crumbDesc,
+    .app-shell > div > header #headerStorageLabel,
+    .app-shell > div > header .hidden.md\\:block { display: none !important; }
+    .app-shell > div > header #aiOpenButton { width: 40px; padding: 0; justify-content: center; }
+    .app-shell > div > header #aiOpenButton > span:last-child { display: none; }
+    .app-shell > div > header #aiOpenButton + button { display: none; }
+    .app-shell #workspace { padding: 12px; padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+    .page-frame { min-height: auto; }
+    .library-workbench { min-height: auto; }
+    .library-toolbar { padding: 12px; }
+    .library-toolbar-main { gap: 10px; }
+    .library-toolbar-icon { width: 36px; height: 36px; }
+    .library-toolbar-actions > button { flex: 1 1 auto; min-height: 44px; }
+    .library-filter-controls { display: grid; grid-template-columns: 1fr 1fr; }
+    .library-filter-controls > * { min-width: 0 !important; width: 100%; }
+    .library-filter-controls > button { grid-column: span 2; }
+    .library-summary-grid, .library-summary-grid.library-summary-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .library-metric-card { padding: 12px; }
+    .library-metric-card .text-2xl { font-size: 1.25rem; }
+    .library-split { display: block; min-height: auto; }
+    .library-list-pane { border-radius: 12px; }
+    .library-detail-pane { display: none; }
+    .mobile-card-list { display: block; }
+    .mobile-table { display: none; }
+    .mobile-scroll-hint { display: flex; align-items: center; gap: 4px; color: #64748b; font-size: 11px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    .boq-main-grid { display: block !important; }
+    .boq-desktop-tree, #boqDetail { display: none; }
+    .boq-mobile-list { display: block; }
+    .boq-mobile-card { display: block; width: 100%; padding: 12px 14px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    .boq-mobile-card:focus-visible { outline: 2px solid #0f766e; outline-offset: -2px; }
+    .mobile-bottom-nav { position: fixed; z-index: 35; left: 0; right: 0; bottom: 0; min-height: 64px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: rgba(255,255,255,.97); border-top: 1px solid #dbe4ef; backdrop-filter: blur(12px); }
+    .mobile-nav-button { min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #64748b; font-size: 10px; border-radius: 8px; }
+    .mobile-nav-button.active { color: #0f766e; background: #f0fdfa; font-weight: 700; }
+    .mobile-nav-sheet { position: fixed; inset: 0; z-index: 60; background: rgba(15,23,42,.45); align-items: flex-end; }
+    .mobile-nav-sheet.open { display: flex; }
+    .mobile-nav-sheet-panel { width: 100%; max-height: min(78dvh, 680px); overflow: auto; border-radius: 16px 16px 0 0; background: #fff; padding: 12px 16px calc(20px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 32px rgba(15,23,42,.18); }
+    .mobile-nav-sheet-item { min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 8px 4px; border-bottom: 1px solid #f1f5f9; color: #334155; text-align: left; width: 100%; }
+    .mobile-nav-sheet-item.active { color: #0f766e; font-weight: 700; }
+    .mobile-nav-sheet-group { margin: 16px 0 6px; color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+    #modal { padding: 0; align-items: flex-end; }
+    #modalPanel { max-width: none; max-height: min(92dvh, 820px); border-radius: 16px 16px 0 0; }
+    #modalBody { padding: 16px; }
+    #modalFoot { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+    #modalFoot > button { min-height: 44px; flex: 1 1 auto; }
+    body.ai-open .ai-drawer { width: 100vw; max-width: none; }
+    .ai-drawer { top: 0; bottom: 0; border-left: 0; }
+    .ai-composer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+    .ai-hint-grid, .ai-quick-tasks { grid-template-columns: 1fr; }
+    .mobile-form-grid, form.grid.grid-cols-2, form.grid.grid-cols-3, form.grid.grid-cols-4 { grid-template-columns: 1fr !important; }
+    .grid.grid-cols-5, .grid.grid-cols-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overflow-auto > table { min-width: 680px; }
+    .review-workspace [data-review-save-next],
+    .review-workspace [data-review-save-draft],
+    .review-workspace [data-review-next],
+    .review-workspace [data-review-prev] { min-height: 44px; }
     .review-workspace [data-review-save-next],
     .review-workspace [data-review-save-draft],
     .review-workspace [data-review-next],
@@ -250,7 +303,7 @@
 
 <div class="flex h-screen app-shell">
   <!-- 侧边栏 -->
-  <aside class="bg-slate-900 text-white w-[240px] flex flex-col flex-shrink-0 border-r border-slate-800">
+  <aside class="desktop-sidebar bg-slate-900 text-white w-[240px] flex flex-col flex-shrink-0 border-r border-slate-800">
     <div class="px-5 py-5 border-b border-slate-800">
       <div class="flex items-center gap-3">
         <div class="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-2xl text-teal-100">S</div>
@@ -311,6 +364,9 @@
           <span class="material-symbols-outlined icon-control absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">search</span>
           <span class="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-data text-slate-400">Enter</span>
         </div>
+        <button id="mobileSearchButton" class="mobile-only h-10 w-10 items-center justify-center text-slate-600 hover:bg-slate-100 shrink-0" aria-label="搜索资料">
+          <span class="material-symbols-outlined icon-action" aria-hidden="true">search</span>
+        </button>
         <button id="aiOpenButton" onclick="window.__app.openAI()" aria-controls="aiDrawer" aria-expanded="false" class="h-9 px-3 text-sm brand-bg text-white flex items-center gap-1.5 shrink-0">
           <span class="material-symbols-outlined icon-action" aria-hidden="true">auto_awesome</span>
         <span>问 AI</span>
@@ -323,6 +379,18 @@
 
     <main id="workspace" class="flex-1 overflow-auto scroll-thin p-6"></main>
   </div>
+</div>
+
+<!-- 手机端一级导航：其余模块收纳在“更多”面板中。 -->
+<nav id="mobileBottomNav" class="mobile-bottom-nav mobile-only" aria-label="手机端主导航"></nav>
+<div id="mobileNavSheet" class="mobile-nav-sheet" aria-hidden="true">
+  <section class="mobile-nav-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="mobileNavTitle">
+    <div class="flex items-center justify-between">
+      <h2 id="mobileNavTitle" class="font-semibold text-slate-900">全部功能</h2>
+      <button id="mobileNavClose" class="h-11 w-11 text-slate-500" aria-label="关闭全部功能"><span class="material-symbols-outlined">close</span></button>
+    </div>
+    <div id="mobileNavItems"></div>
+  </section>
 </div>
 
 <!-- 通用弹窗 -->

@@ -127,8 +127,8 @@ export async function render(workspace = document.getElementById('workspace')) {
       ${boqNextBanner(workbench)}
       ${boqToolbar(selectedCount)}
 
-      <div class="grid grid-cols-[300px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
-        ${projectTree(proj, boq)}
+      <div class="boq-main-grid grid grid-cols-[300px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
+        <div class="boq-desktop-tree">${projectTree(proj, boq)}</div>
         <div class="min-w-0 min-h-0 flex flex-col gap-3">
           <section class="bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden flex-1 min-h-[220px]">
             <div class="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center justify-between text-sm shrink-0">
@@ -142,7 +142,8 @@ export async function render(workspace = document.getElementById('workspace')) {
                 ${categories.slice(0, 3).map(c => `<span class="badge badge-gray">${esc(c.name)} ${fmtMoney(c.amount)}</span>`).join('')}
               </div>
             </div>
-            <div class="overflow-auto scroll-thin flex-1 min-h-0">
+            <div id="boqMobileList" class="boq-mobile-list mobile-card-list"></div>
+            <div class="mobile-table overflow-auto scroll-thin flex-1 min-h-0">
               <table class="w-full text-sm table-fixed">
                 <thead><tr class="text-left border-b border-slate-200 bg-white sticky top-0">
                   <th class="py-3 px-3 w-10"><input id="boqSelectAll" type="checkbox" ${filteredBoq.length && filteredBoq.every(b => boqState.selectedIds.has(b.id)) ? 'checked' : ''} /></th>
@@ -293,6 +294,18 @@ export async function render(workspace = document.getElementById('workspace')) {
     toast('已导出 Excel 报价单', 'success');
   };
 
+  const mobileList = document.getElementById('boqMobileList');
+  mobileList.innerHTML = pageRows.map((b, i) => boqMobileCard(b, pageStart + i + 1)).join('') || `<div class="px-5 py-12 text-center text-sm text-slate-400">${boq.length ? '当前筛选没有结果，请清除筛选后重试。' : '暂无清单数据，可使用上方“添加清单”开始编制。'}</div>`;
+  mobileList.querySelectorAll('[data-mobile-boq-open]').forEach(button => button.onclick = () => {
+    boqState.activeId = button.dataset.mobileBoqOpen;
+    const line = boq.find(item => item.id === boqState.activeId);
+    if (line) openModal('清单详情', detailPanel(line, [], null));
+  });
+  mobileList.querySelectorAll('[data-mobile-boq-select]').forEach(input => input.onchange = event => {
+    event.target.checked ? boqState.selectedIds.add(event.target.dataset.mobileBoqSelect) : boqState.selectedIds.delete(event.target.dataset.mobileBoqSelect);
+    render();
+  });
+
   const tbody = document.getElementById('boqList');
   tbody.innerHTML = pageRows.map((b, i) => `
     <tr class="border-b border-slate-100 hover:bg-slate-50/80 ${b.id === boqState.activeId ? 'bg-teal-50/60' : ''}" data-id="${b.id}" draggable="true">
@@ -387,6 +400,15 @@ export async function render(workspace = document.getElementById('workspace')) {
     render();
   });
   if (!boqState.detailCollapsed) applyBoqDetailHeight(document);
+}
+
+function boqMobileCard(line, index) {
+  const missing = hasMissingPrice(line.unitPrice);
+  return `<article class="boq-mobile-card ${line.id === boqState.activeId ? 'bg-teal-50/50' : 'bg-white'}">
+    <div class="flex items-start gap-3"><input type="checkbox" class="mt-1 h-5 w-5 shrink-0" aria-label="选择${esc(line.name || '清单项')}" data-mobile-boq-select="${esc(line.id)}" ${boqState.selectedIds.has(line.id) ? 'checked' : ''} />
+      <button type="button" class="min-w-0 flex-1 text-left" data-mobile-boq-open="${esc(line.id)}"><div class="flex items-center gap-2"><span class="text-xs text-slate-400">${index}</span>${riskBadges(line)}</div><div class="mt-1 truncate font-semibold text-slate-900">${esc(line.name || '未命名清单')}</div><div class="mt-1 truncate text-xs text-slate-500">${esc(line.code || '未编码')} · ${esc(line.feature || '未填写项目特征')}</div><div class="mt-3 grid grid-cols-3 gap-2 text-xs"><span><b class="block text-slate-400 font-normal">工程量</b><span class="mt-0.5 block tabular-nums text-slate-800">${line.qty || 0} ${esc(line.unit || '')}</span></span><span><b class="block text-slate-400 font-normal">综合单价</b><span class="mt-0.5 block tabular-nums ${missing ? 'text-amber-700' : 'text-slate-800'}">${missing ? '待补价' : fmtMoney(line.unitPrice)}</span></span><span class="text-right"><b class="block text-slate-400 font-normal">合价</b><span class="mt-0.5 block tabular-nums font-semibold text-slate-900">${fmtMoney(line.amount || 0)}</span></span></div></button><span class="material-symbols-outlined mt-8 text-slate-400" aria-hidden="true">chevron_right</span>
+    </div>
+  </article>`;
 }
 
 function boqWorkbenchStatus(project, lines, versions, extra = {}) {

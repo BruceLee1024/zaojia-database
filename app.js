@@ -80,6 +80,57 @@ function renderNav() {
     </div>
   `).join('');
   document.querySelectorAll('[data-go]').forEach(el => el.onclick = () => go(el.dataset.go));
+  renderMobileNav();
+}
+
+const MOBILE_PRIMARY_VIEWS = ['dashboard', 'importer', 'projects', 'boq'];
+
+function renderMobileNav() {
+  const root = document.getElementById('mobileBottomNav');
+  const allItems = document.getElementById('mobileNavItems');
+  if (!root || !allItems) return;
+  const primary = VIEWS.filter(view => MOBILE_PRIMARY_VIEWS.includes(view.id));
+  root.innerHTML = `${primary.map(view => mobileNavButton(view)).join('')}${mobileNavButton({ id: 'more', label: '更多', icon: 'apps' })}`;
+  allItems.innerHTML = [...new Set(VIEWS.map(view => view.group))].map(group => `
+    <div class="mobile-nav-sheet-group">${escapeHtml(group)}</div>
+    ${VIEWS.filter(view => view.group === group && !view.hidden).map(view => `<button class="mobile-nav-sheet-item ${state.currentView === view.id ? 'active' : ''}" data-mobile-go="${view.id}"><span class="material-symbols-outlined icon-nav" aria-hidden="true">${view.icon}</span><span>${escapeHtml(view.label)}</span><span class="ml-auto text-xs text-slate-400">${escapeHtml(view.desc || '')}</span></button>`).join('')}
+  `).join('');
+  root.querySelectorAll('[data-mobile-go]').forEach(button => button.onclick = () => go(button.dataset.mobileGo));
+  root.querySelector('[data-mobile-more]')?.addEventListener('click', openMobileNav);
+  allItems.querySelectorAll('[data-mobile-go]').forEach(button => button.onclick = () => { closeMobileNav(); go(button.dataset.mobileGo); });
+}
+
+function mobileNavButton(view) {
+  const isMore = view.id === 'more';
+  const active = isMore ? !MOBILE_PRIMARY_VIEWS.includes(state.currentView) : state.currentView === view.id;
+  return `<button class="mobile-nav-button ${active ? 'active' : ''}" ${isMore ? 'data-mobile-more' : `data-mobile-go="${view.id}"`} aria-label="${escapeHtml(view.label)}"><span class="material-symbols-outlined icon-nav" aria-hidden="true">${view.icon}</span><span>${escapeHtml(view.label)}</span></button>`;
+}
+
+function openMobileNav() {
+  const sheet = document.getElementById('mobileNavSheet');
+  sheet?.classList.add('open');
+  sheet?.setAttribute('aria-hidden', 'false');
+  document.getElementById('mobileNavClose')?.focus();
+}
+
+function closeMobileNav() {
+  const sheet = document.getElementById('mobileNavSheet');
+  sheet?.classList.remove('open');
+  sheet?.setAttribute('aria-hidden', 'true');
+}
+
+function openMobileSearch() {
+  openModal('搜索资料', '<label class="block text-sm text-slate-700">搜索定额、项目、指标或经验<input id="mobileSearchInput" type="search" placeholder="输入至少两个字" class="mt-2 h-11 w-full border px-3" aria-label="搜索定额、项目、指标或经验" /></label><div class="mt-3 text-xs text-slate-500">输入后将展示匹配资料；按 Enter 可直接打开首条结果。</div>');
+  const input = document.getElementById('mobileSearchInput');
+  let timer = null;
+  input?.addEventListener('input', event => {
+    clearTimeout(timer);
+    const keyword = event.target.value.trim();
+    if (keyword.length >= 2) timer = setTimeout(() => runGlobalSearch(keyword), 300);
+  });
+  input?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && event.target.value.trim()) runGlobalSearch(event.target.value.trim(), { openFirst: true });
+  });
 }
 
 async function go(view, params = {}) {
@@ -258,11 +309,15 @@ window.__app = {
   exportAll,
   runGlobalSearch,
   openSearchResult,
+  openMobileSearch,
 };
 
 window.addEventListener('DOMContentLoaded', async () => {
   // 首次使用保持正式资料库为空；演示资料只能由用户在「备份与恢复」中主动加载。
   renderNav();
+  document.getElementById('mobileNavClose')?.addEventListener('click', closeMobileNav);
+  document.getElementById('mobileNavSheet')?.addEventListener('click', event => { if (event.target.id === 'mobileNavSheet') closeMobileNav(); });
+  document.getElementById('mobileSearchButton')?.addEventListener('click', openMobileSearch);
   document.getElementById('workspace').innerHTML = '<div class="min-h-full flex items-center justify-center p-8 text-sm text-slate-500">正在读取本机资料…</div>';
   ai.close();
   renderStorageBadge();
