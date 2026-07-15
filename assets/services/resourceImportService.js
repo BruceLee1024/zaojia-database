@@ -1,5 +1,5 @@
 import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.2';
-import { resourceIdentity } from './resourceService.js?v=6.2';
+import { resourceCodeIdentity, resourceCompositeIdentity, validateResourceCollection } from './resourceService.js?v=6.2';
 
 const SOURCE_TYPE_MAP = new Map([
   ['official', 'official'], ['官方信息价', 'official'], ['信息价', 'official'],
@@ -33,25 +33,31 @@ export const resourceImportService = {
     validateResourceType(resourceType);
     const existing = await resourceRepo.all();
     const typedExisting = existing.filter(item => item.resourceType === resourceType);
-    const existingByCode = new Map(typedExisting.filter(item => text(item.code)).map(item => [resourceIdentity(item), item]));
-    const existingByComposite = new Map(typedExisting.map(item => [resourceIdentity({ ...item, code: '' }), item]));
+    const existingByCode = new Map(existing.filter(item => text(item.code)).map(item => [resourceCodeIdentity(item), item]));
+    const existingByComposite = new Map(typedExisting.map(item => [resourceCompositeIdentity(item), item]));
     const batchByCode = new Map();
     const batchByComposite = new Map();
     const previewRows = (Array.isArray(rows) ? rows : []).map((raw, index) => {
       const resource = normalizeResourceRow(raw, resourceType);
       const price = normalizePriceRow(raw);
       const errors = validateRow(resource, price);
-      const identity = resourceIdentity(resource);
-      const compositeIdentity = resourceIdentity({ ...resource, code: '' });
+      const codeIdentity = resourceCodeIdentity(resource);
+      const compositeIdentity = resourceCompositeIdentity(resource);
+      const identity = codeIdentity || compositeIdentity;
       const usesCode = Boolean(text(resource.code));
-      const existingItem = usesCode ? existingByCode.get(identity) : existingByComposite.get(compositeIdentity);
-      const first = usesCode ? batchByCode.get(identity) : batchByComposite.get(compositeIdentity);
+      const codeMatch = codeIdentity ? existingByCode.get(codeIdentity) : null;
+      const compositeMatch = existingByComposite.get(compositeIdentity);
+      const existingItem = codeMatch || (!usesCode ? compositeMatch : null);
+      const first = (codeIdentity ? batchByCode.get(codeIdentity) : null) || batchByComposite.get(compositeIdentity);
       const firstIndex = first?.index;
-      let action = errors.length ? 'invalid' : existingItem ? 'update' : 'create';
+      const conflictingExisting = codeMatch && compositeMatch && codeMatch.id !== compositeMatch.id
+        ? compositeMatch
+        : (!codeMatch && usesCode && compositeMatch && text(compositeMatch.code) && resourceCodeIdentity(compositeMatch) !== codeIdentity ? compositeMatch : null);
+      let action = errors.length ? 'invalid' : conflictingExisting ? 'conflict' : existingItem ? 'update' : 'create';
       if (!errors.length && firstIndex != null) action = 'duplicate';
-      if (!errors.length && firstIndex == null) {
+      if (!errors.length && firstIndex == null && action !== 'conflict') {
         const entry = { index, identity };
-        if (usesCode) batchByCode.set(identity, entry);
+        if (usesCode) batchByCode.set(codeIdentity, entry);
         batchByComposite.set(compositeIdentity, entry);
       }
       return {
@@ -62,6 +68,7 @@ export const resourceImportService = {
         price,
         action,
         existingId: existingItem?.id || '',
+        conflictId: conflictingExisting?.id || '',
         duplicateOf: firstIndex ?? null,
         duplicateIdentity: first?.identity || '',
         errors,
@@ -72,11 +79,12 @@ export const resourceImportService = {
       rows: previewRows,
       counts: {
         total: previewRows.length,
-        valid: previewRows.filter(row => !row.errors.length).length,
+        valid: previewRows.filter(row => !row.errors.length && row.action !== 'conflict').length,
         invalid: previewRows.filter(row => row.action === 'invalid').length,
         create: previewRows.filter(row => row.action === 'create').length,
         update: previewRows.filter(row => row.action === 'update').length,
         duplicate: previewRows.filter(row => row.action === 'duplicate').length,
+        conflict: previewRows.filter(row => row.action === 'conflict').length,
         withPrice: previewRows.filter(row => row.price).length,
       },
     };
@@ -99,9 +107,9 @@ export const resourceImportService = {
 
     for (const row of preview.rows) {
       const invariantErrors = validateRow(row.resource || {}, row.price || null);
-      if (row.action === 'invalid' || invariantErrors.length) {
+      if (row.action === 'invalid' || row.action === 'conflict' || invariantErrors.length) {
         report.counts.errors += 1;
-        report.rows.push({ index: row.index, status: 'error', errors: [...new Set([...(row.errors || []), ...invariantErrors])] });
+        report.rows.push({ index: row.index, status: 'error', errors: [...new Set([...(row.errors || []), ...(row.action === 'conflict' ? ['编码或规格身份与已有资源冲突'] : []), ...invariantErrors])] });
         continue;
       }
       let resourceId = row.existingId || resolved.get(row.identity) || resolved.get(row.duplicateIdentity) || '';
@@ -149,6 +157,7 @@ export const resourceImportService = {
     }
 
     try {
+      validateResourceCollection(resources);
       await resourceRepo.replaceAll(resources);
       await resourcePriceRepo.replaceAll(prices);
     } catch (cause) {
@@ -258,7 +267,15 @@ function normalizePriceRow(raw) {
     validTo: normalizeDate(value('失效日期', 'validTo')),
     supplier: text(value('供应商', 'supplier')),
     projectId: '',
-    components: { base: 0, freight: 0, transportLoss: 0, procurementStorage: 0, installation: 0, commissioning: 0, other: 0 },
+    components: {
+      base: numericValue(value('基础价', 'base')),
+      freight: numericValue(value('运杂费', '运费', 'freight')),
+      transportLoss: numericValue(value('运输损耗', 'transportLoss')),
+      procurementStorage: numericValue(value('采购保管费', 'procurementStorage')),
+      installation: numericValue(value('安装费', 'installation')),
+      commissioning: numericValue(value('调试费', 'commissioning')),
+      other: numericValue(value('其他费用', 'other')),
+    },
     installationScope: text(value('安装范围', 'installationScope')),
     note: text(value('价格备注', 'priceNote')),
   };

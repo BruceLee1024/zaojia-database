@@ -130,6 +130,10 @@ export function resourceHealthSection(health = emptyResourceHealth()) {
     ['expiredCurrentPrice', '当前价已过期', '当前价或手动首选价超过有效期', 'event_busy'],
     ['missingQuoteEvidence', '报价依据缺失', '供应商报价未关联可用附件', 'attach_file_off'],
     ['pendingQuotaUpdates', '定额快照待更新', '已保存快照与当前价格或元数据不同', 'sync_problem'],
+    ['inactiveResourceInUse', '停用资源仍被引用', '历史引用保留，但需要确认是否替换为可用资源', 'archive'],
+    ['unsupportedCostingPrice', '历史口径待治理', '历史快照不是到场价，不会自动重算', 'price_change'],
+    ['duplicateCode', '重复资源编码', '编码必须在材料与设备库中全局唯一', 'content_copy'],
+    ['duplicateComposite', '重复规格身份', '相同类型、名称、规格、单位与品牌/厂家需人工合并', 'merge'],
   ];
   return `<section class="card p-0 overflow-hidden" aria-labelledby="resourceHealthTitle">
     <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
@@ -179,6 +183,10 @@ export function healthResourceRouteParams(issueKey, issue = {}, type = 'material
     missingCurrentPrice: '缺参考价',
     expiredCurrentPrice: '价格已过期',
     missingQuoteEvidence: '询价缺附件',
+    inactiveResourceInUse: '停用资源被引用',
+    unsupportedCostingPrice: '历史价格口径待治理',
+    duplicateCode: '重复编码',
+    duplicateComposite: '重复规格身份',
   };
   return {
     resourceIds: type === 'equipment' ? (issue.equipmentResourceIds || []) : (issue.materialResourceIds || []),
@@ -188,7 +196,7 @@ export function healthResourceRouteParams(issueKey, issue = {}, type = 'material
 
 function emptyResourceHealth() {
   const empty = { total: 0, material: 0, equipment: 0, resourceIds: [], materialResourceIds: [], equipmentResourceIds: [], priceIds: [], usageIds: [], quotaItemIds: [] };
-  return { summary: { total: 0, material: 0, equipment: 0 }, missingCurrentPrice: empty, expiredCurrentPrice: empty, missingQuoteEvidence: empty, pendingQuotaUpdates: empty };
+  return { summary: { total: 0, material: 0, equipment: 0 }, missingCurrentPrice: empty, expiredCurrentPrice: empty, missingQuoteEvidence: empty, pendingQuotaUpdates: empty, inactiveResourceInUse: empty, unsupportedCostingPrice: empty, duplicateCode: empty, duplicateComposite: empty };
 }
 
 function buildNextActions({ missingQuota, missingBoq, noVersionProjects, archived, engine, experience, projects }) {

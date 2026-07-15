@@ -1,25 +1,30 @@
-// 视图：AI 抽屉
+// 视图：AI 造价工作副驾。本地规则优先；远端调用按会话授权。
 import { tryLocalCommand } from '../ai/localCommands.js?v=6.2';
 import { callLLM } from '../ai/remoteLLM.js?v=6.2';
+import { createAiResponse, parseRemoteResponse } from '../services/aiTaskService.js?v=6.2';
+import { createAiSession, listAiSessions, saveAiSessionMessage } from '../services/aiSessionService.js?v=6.2';
 
-const history = [];
 let aiReturnFocus = null;
 let remoteConsentGranted = false;
+let activeSessionId = '';
+let activeProjectId = '';
+let restoring = false;
 
-export function open() {
+const QUICK_TASKS = [
+  ['审查报价', '审查当前报价有没有风险'], ['查缺单价', '检查缺单价'], ['项目对标', '当前项目对标，贵不贵'],
+  ['成本结构', '查看当前项目成本结构'], ['报价版本', '查看当前项目报价版本列表和差异'], ['推荐定额', '推荐 水池 防水 定额'],
+  ['查经验', '查防水报价经验'], ['快速估算', '估算 5万m³/d 污水厂造价区间'],
+];
+
+export async function open() {
   aiReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   document.body.classList.add('ai-open');
   document.getElementById('aiDrawer')?.setAttribute('aria-hidden', 'false');
   document.getElementById('aiOpenButton')?.setAttribute('aria-expanded', 'true');
-  document.getElementById('aiInput').focus();
-  if (!document.getElementById('aiMsgs').children.length) {
-    addMsg('assistant',
-`你好，我是工程造价助手。
-
-我会优先处理本地问题；只有需要远端模型时，才会在本次会话首次发送前征得你的确认。`);
-    addSuggestions();
-  }
+  await ensureSession();
+  document.getElementById('aiInput')?.focus();
 }
+
 export function close() {
   document.body.classList.remove('ai-open');
   document.getElementById('aiDrawer')?.setAttribute('aria-hidden', 'true');
@@ -28,92 +33,204 @@ export function close() {
   aiReturnFocus = null;
 }
 
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && document.body.classList.contains('ai-open')) close();
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.body.classList.contains('ai-open')) close();
 });
 
-function addMsg(role, text) {
+export async function newSession() {
+  const projectId = window.__app?.state?.currentProjectId || '';
+  const session = await createAiSession({ projectId });
+  activeSessionId = session.id;
+  activeProjectId = projectId;
+  remoteConsentGranted = false;
+  clearMessages();
+  await addWelcome();
+  await renderSessions();
+  document.getElementById('aiInput')?.focus();
+}
+
+async function ensureSession() {
+  const projectId = window.__app?.state?.currentProjectId || '';
+  if (activeSessionId && activeProjectId === projectId) return;
+  const sessions = await listAiSessions(projectId);
+  if (sessions[0]) await selectSession(sessions[0].id);
+  else await newSession();
+}
+
+async function selectSession(sessionId) {
+  const sessions = await listAiSessions(window.__app?.state?.currentProjectId || '');
+  const session = sessions.find(item => item.id === sessionId);
+  if (!session) return;
+  activeSessionId = sessionId;
+  activeProjectId = session.projectId || '';
+  remoteConsentGranted = false;
+  restoring = true;
+  clearMessages();
+  for (const message of session.messages || []) {
+    if (message.role === 'assistant' && message.response) addResponse(message.response, false);
+    else addMsg(message.role, message.text, false);
+  }
+  if (!session.messages?.length) await addWelcome();
+  restoring = false;
+  await renderSessions();
+}
+
+async function addWelcome() {
+  addResponse(createAiResponse({
+    summary: '我是你的工程造价工作副驾。可以先做本地审查、对标、定额检索和资料诊断；需要远端模型时，本次会话首次外发前会征得确认。',
+    source: 'local', confidence: 'high',
+    nextQuestions: ['你可以从下面的任务开始，或直接描述项目和目标。'],
+  }));
+  addQuickTasks();
+}
+
+function clearMessages() {
+  const container = document.getElementById('aiMsgs');
+  if (container) container.replaceChildren();
+}
+
+function addMsg(role, text, persist = true) {
   const div = document.createElement('div');
-  div.className = `px-3 py-2 rounded-md text-sm leading-6 whitespace-pre-wrap border ${role === 'user' ? 'ai-bubble-user border-teal-700' : 'ai-bubble-assistant border-slate-200'}`;
+  div.className = `ai-message px-3 py-2 rounded-md text-sm leading-6 whitespace-pre-wrap border ${role === 'user' ? 'ai-bubble-user border-teal-700' : 'ai-bubble-assistant border-slate-200'}`;
   div.style.alignSelf = role === 'user' ? 'flex-end' : 'flex-start';
   div.style.maxWidth = role === 'user' ? '88%' : '100%';
   div.textContent = text;
-  document.getElementById('aiMsgs').appendChild(div);
-  document.getElementById('aiMsgs').scrollTop = document.getElementById('aiMsgs').scrollHeight;
+  appendMessage(div);
+  if (persist) persistMessage({ role, text });
+  return div;
 }
 
-function addActionMsg(msg, actions) {
-  const wrap = document.createElement('div');
-  wrap.className = 'px-3 py-2 rounded-md text-sm bg-white border border-slate-200 space-y-2';
-  wrap.style.alignSelf = 'flex-start';
-  wrap.style.maxWidth = '100%';
-  const txt = document.createElement('div');
-  txt.className = 'whitespace-pre-wrap';
-  txt.textContent = msg;
-  wrap.appendChild(txt);
-  if (actions && actions.length) {
+function addResponse(response, persist = true) {
+  const result = createAiResponse(response);
+  const wrap = document.createElement('article');
+  wrap.className = 'ai-response bg-white border border-slate-200 rounded-md p-3 space-y-2 text-sm';
+  wrap.dataset.source = result.source;
+  const meta = document.createElement('div');
+  meta.className = 'flex items-center gap-2 text-[11px] text-slate-500';
+  meta.innerHTML = `<span class="rounded px-1.5 py-0.5 ${result.source === 'local' ? 'bg-teal-50 text-teal-700' : 'bg-violet-50 text-violet-700'}">${result.source === 'local' ? '本地资料' : '远端模型'}</span><span>可信度：${confidenceLabel(result.confidence)}</span>`;
+  const summary = document.createElement('div');
+  summary.className = 'whitespace-pre-wrap leading-6 text-slate-800';
+  summary.textContent = result.summary;
+  wrap.append(meta, summary);
+  result.sections.forEach(section => appendSection(wrap, section.title, section.content));
+  if (result.evidence.length) appendSection(wrap, '依据', result.evidence.map(item => `• ${item.label || '资料'}：${item.detail || item.text || ''}`).join('\n'));
+  if (result.risks.length) appendSection(wrap, '风险提示', result.risks.map(item => `• ${item}`).join('\n'), 'text-amber-700');
+  if (result.nextQuestions.length) appendSection(wrap, '下一步', result.nextQuestions.map(item => `• ${item}`).join('\n'), 'text-slate-600');
+  if (result.proposedActions.length) {
     const row = document.createElement('div');
-    row.className = 'ai-hint-grid';
-    actions.forEach(a => {
-      const b = document.createElement('button');
-      b.className = 'min-h-8 px-2 py-1 text-xs rounded border border-slate-200 bg-slate-50 text-slate-700 hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 text-left';
-      b.textContent = a.label;
-      b.onclick = a.onClick;
-      row.appendChild(b);
+    row.className = 'ai-hint-grid pt-1';
+    result.proposedActions.forEach(action => {
+      const button = document.createElement('button');
+      button.className = `min-h-8 px-2 py-1 text-xs rounded border text-left ${action.requiresConfirmation ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200'}`;
+      button.textContent = `${action.requiresConfirmation ? '需确认 · ' : ''}${action.label}`;
+      button.onclick = action.onClick;
+      row.appendChild(button);
     });
     wrap.appendChild(row);
   }
-  document.getElementById('aiMsgs').appendChild(wrap);
-  document.getElementById('aiMsgs').scrollTop = document.getElementById('aiMsgs').scrollHeight;
+  appendMessage(wrap);
+  if (persist) persistMessage({ role: 'assistant', text: result.summary, response: serializableResponse(result) });
+  return wrap;
 }
 
-function replaceLast(text) {
-  const last = document.getElementById('aiMsgs').lastElementChild;
-  if (last) last.textContent = text;
-  document.getElementById('aiMsgs').scrollTop = document.getElementById('aiMsgs').scrollHeight;
+function appendSection(parent, title, content, tone = '') {
+  const section = document.createElement('div');
+  section.className = `border-l-2 border-slate-200 pl-2 whitespace-pre-wrap text-xs leading-5 ${tone}`;
+  section.textContent = `${title}\n${content}`;
+  parent.appendChild(section);
 }
 
-function addSuggestions() {
-  addActionMsg('常用问题', [
-    { label: '审查报价', onClick: () => send('审查当前报价有没有风险') },
-    { label: '复盘项目', onClick: () => send('复盘当前项目') },
-    { label: '查经验', onClick: () => send('查防水报价经验') },
-    { label: '检查缺单价', onClick: () => send('检查缺单价') },
-    { label: '项目对标', onClick: () => send('当前项目对标，贵不贵') },
-    { label: '报价版本', onClick: () => send('查看当前项目报价版本列表和差异') },
-    { label: '推荐定额', onClick: () => send('推荐 水池 防水 定额') },
-  ]);
+function addQuickTasks() {
+  const wrap = document.createElement('div');
+  wrap.className = 'ai-quick-tasks';
+  QUICK_TASKS.forEach(([label, prompt]) => {
+    const button = document.createElement('button');
+    button.className = 'text-left text-xs px-2 py-1.5 border border-slate-200 rounded bg-white hover:bg-teal-50 hover:text-teal-700';
+    button.textContent = label;
+    button.onclick = () => send(prompt);
+    wrap.appendChild(button);
+  });
+  appendMessage(wrap);
+}
+
+function appendMessage(element) {
+  const container = document.getElementById('aiMsgs');
+  if (!container) return;
+  container.appendChild(element);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function persistMessage(message) {
+  if (restoring || !activeSessionId) return;
+  try {
+    await saveAiSessionMessage(activeSessionId, message);
+    renderSessions();
+  } catch (error) { console.warn('AI session persistence failed', error); }
+}
+
+function serializableResponse(response) {
+  const { proposedActions, ...safe } = response;
+  return { ...safe, proposedActions: proposedActions.map(({ onClick, ...action }) => action) };
+}
+
+async function renderSessions() {
+  const container = document.getElementById('aiSessionList');
+  if (!container) return;
+  const sessions = await listAiSessions(window.__app?.state?.currentProjectId || '');
+  container.replaceChildren();
+  sessions.slice(0, 8).forEach(session => {
+    const button = document.createElement('button');
+    button.className = `w-full px-2 py-1.5 rounded text-left text-xs truncate ${session.id === activeSessionId ? 'bg-teal-50 text-teal-800' : 'text-slate-600 hover:bg-slate-100'}`;
+    button.textContent = session.title || '新对话';
+    button.title = session.title || '新对话';
+    button.onclick = () => selectSession(session.id);
+    container.appendChild(button);
+  });
 }
 
 export async function send(text) {
-  addMsg('user', text);
-  // 先尝试本地
+  const value = String(text || '').trim();
+  if (!value) return;
+  await ensureSession();
+  addMsg('user', value);
+  const thinking = addMsg('assistant', '正在基于本地资料分析…', false);
   try {
-    const local = await tryLocalCommand(text);
-    if (local && local.handled) {
-      const last = document.getElementById('aiMsgs').lastElementChild;
-      if (last && last.textContent === '…思考中') last.remove();
-      if (local.actions) addActionMsg(local.msg, local.actions);
-      else addMsg('assistant', local.msg);
+    const local = await tryLocalCommand(value);
+    if (local?.handled) {
+      thinking.remove();
+      addResponse(createAiResponse({ ...local, source: 'local' }));
       return;
     }
-  } catch (e) { console.warn('local cmd err', e); }
+  } catch (error) { console.warn('local AI command failed', error); }
 
-  addMsg('assistant', '…思考中');
+  thinking.textContent = '正在准备远端请求，等待你的确认…';
   try {
     if (!remoteConsentGranted) {
-      const approved = confirm('本次远端 AI 请求会发送：当前项目摘要、最多 30 条当前清单、最近 5 个报价版本摘要、最多 30 条指标摘要及最多 8 条相关复盘摘要；不会发送 API Key。是否继续？');
+      const approved = confirm('本次会向你配置的模型发送去标识化的当前项目摘要、最多 30 条清单、5 个报价版本摘要、30 条指标和 8 条相关经验；不会发送 API Key，也不会自动修改资料。是否继续？');
       if (!approved) {
-        replaceLast('已取消远端 AI 请求。你仍可使用本地查询、报价审查和资料库筛选。');
+        thinking.textContent = '已取消远端请求。你仍可使用本地审查、对标和资料检索。';
         return;
       }
       remoteConsentGranted = true;
     }
-    const reply = await callLLM(text, history);
-    history.push({ role: 'user', content: text });
-    history.push({ role: 'assistant', content: reply });
-    replaceLast(reply);
-  } catch (e) {
-    replaceLast('❌ ' + e.message);
+    thinking.textContent = '远端模型正在生成…';
+    const reply = await callLLM(value, await getRemoteHistory(), {
+      onDelta: partial => { thinking.textContent = partial; },
+    });
+    const response = parseRemoteResponse(reply);
+    thinking.remove();
+    addResponse(response);
+  } catch (error) {
+    thinking.textContent = `❌ ${error.message}`;
   }
+}
+
+async function getRemoteHistory() {
+  const sessions = await listAiSessions(window.__app?.state?.currentProjectId || '');
+  const session = sessions.find(item => item.id === activeSessionId);
+  return (session?.messages || []).slice(-6).map(item => ({ role: item.role, content: item.text })).filter(item => ['user', 'assistant'].includes(item.role));
+}
+
+function confidenceLabel(value) {
+  return ({ high: '较高', medium: '中等', low: '较低' })[value] || '中等';
 }

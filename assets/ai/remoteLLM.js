@@ -3,8 +3,9 @@ import { getAIConfig } from '../services/aiService.js?v=6.2';
 import { quotaRepo, projectRepo, indicatorRepo, boqRepo, versionRepo, experienceCardRepo } from '../data/repository.js?v=6.2';
 import { categoryGuess } from '../utils/stats.js?v=6.2';
 import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { sanitizeRemoteContext } from '../services/aiTaskService.js?v=6.2';
 
-export async function callLLM(text, history = []) {
+export async function callLLM(text, history = [], options = {}) {
   const cfg = getAIConfig();
   if (!cfg.api_key) throw new Error('未配置 API Key');
 
@@ -82,6 +83,10 @@ export async function callLLM(text, history = []) {
     return text.toLowerCase().split(/\s+/).some(w => w.length > 1 && blob.includes(w));
   }).slice(0, 12).map(q => ({ name: q.name, unit: q.unit, price: q.priceTotal, cat: q.category }));
 
+  const remoteContext = options.anonymize === false ? ctx : sanitizeRemoteContext({ ...ctx, currentLines });
+  const responseContract = `
+返回 JSON 对象，不要使用 Markdown 代码块：
+{"summary":"一句结论","sections":[{"title":"依据","content":"..."}],"evidence":[{"label":"数据依据","detail":"..."}],"risks":["..."],"nextQuestions":["..."],"confidence":"high|medium|low"}`;
   const systemMsg = `${cfg.system}
 
 工作边界：
@@ -89,9 +94,9 @@ export async function callLLM(text, history = []) {
 - 优先指出数据依据、样本数、缺单价、0 工程量和异常系数。
 - 指标样本少或 confidence 为“仅参考/低可信”时要明确提醒。
 - 引用经验卡时必须说明适用边界、可信度和过期风险；不要把经验卡当成硬性指标。
-- 回答保持简洁，先给结论，再给依据和建议动作。
+- 回答保持简洁，先给结论，再给依据和建议动作。${responseContract}
 
-当前数据上下文(JSON)：${JSON.stringify(ctx)}
+当前数据上下文(JSON)：${JSON.stringify(remoteContext)}
 命中的定额条目(JSON)：${JSON.stringify(matched)}`;
   const messages = [
     { role: 'system', content: systemMsg },
@@ -100,17 +105,47 @@ export async function callLLM(text, history = []) {
   ];
 
   const url = cfg.base_url.replace(/\/$/, '') + '/chat/completions';
+  const stream = typeof options.onDelta === 'function';
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.api_key}` },
-    body: JSON.stringify({ model: cfg.model, messages, temperature: 0.3, stream: false }),
+    body: JSON.stringify({ model: cfg.model, messages, temperature: 0.3, stream }),
   });
   if (!resp.ok) {
     const err = await resp.text();
     throw new Error(`请求失败：${resp.status}\n${err.slice(0, 300)}`);
   }
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || '（无回复）';
+  if (!stream || !resp.body) {
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content || '（无回复）';
+  }
+  return await readSseResponse(resp.body, options.onDelta);
+}
+
+async function readSseResponse(stream, onDelta) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const rows = buffer.split('\n');
+    buffer = rows.pop() || '';
+    for (const row of rows) {
+      const payload = row.trim().replace(/^data:\s*/, '');
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        const chunk = JSON.parse(payload).choices?.[0]?.delta?.content || '';
+        if (chunk) {
+          text += chunk;
+          onDelta(text);
+        }
+      } catch { /* Ignore provider keep-alive and non-standard SSE rows. */ }
+    }
+  }
+  return text || '（无回复）';
 }
 
 export async function testConnection() {

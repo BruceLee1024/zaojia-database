@@ -16,6 +16,45 @@ export function resourceIdentity(resource = {}) {
   ].join('|');
 }
 
+export function resourceCodeIdentity(resource = {}) {
+  const code = normalizeIdentityPart(resource.code);
+  return code ? `code:${code}` : '';
+}
+
+export function resourceCompositeIdentity(resource = {}) {
+  return [
+    normalizeIdentityPart(resource.resourceType),
+    normalizeIdentityPart(resource.name),
+    normalizeIdentityPart(resource.specModel),
+    normalizeIdentityPart(resource.unit),
+    normalizeIdentityPart(resource.brand || resource.manufacturer),
+  ].join('|');
+}
+
+export function findResourceConflict(candidate, resources = []) {
+  const codeIdentity = resourceCodeIdentity(candidate);
+  const compositeIdentity = resourceCompositeIdentity(candidate);
+  return resources.find(item => item.id !== candidate.id && (
+    (codeIdentity && resourceCodeIdentity(item) === codeIdentity)
+    || resourceCompositeIdentity(item) === compositeIdentity
+  )) || null;
+}
+
+export function validateResourceCollection(resources = []) {
+  resources.forEach(item => validateResource(item));
+  resources.forEach((item, index) => {
+    const conflict = findResourceConflict(item, resources.slice(0, index));
+    if (conflict) throw duplicateResourceError(conflict);
+  });
+  return resources;
+}
+
+export function assertResourceAvailableForNewUse(resource) {
+  if (!resource) throw new Error('材料或设备不存在');
+  if (resource.status === 'inactive') throw new Error('已停用的材料或设备不能用于新计价');
+  return resource;
+}
+
 export const resourceService = {
   async list({ keyword = '', resourceType = '', category = '', status = '' } = {}) {
     const normalizedKeyword = String(keyword).trim().toLowerCase();
@@ -90,13 +129,9 @@ export const resourceService = {
       createdAt: existing?.createdAt || payload.createdAt || now,
       updatedAt: now,
     };
-    const identity = resourceIdentity(item);
-    const duplicate = (await resourceRepo.all()).find(candidate => candidate.id !== item.id && resourceIdentity(candidate) === identity);
+    const duplicate = findResourceConflict(item, await resourceRepo.all());
     if (duplicate) {
-      const error = new Error('已存在相同编码或相同类型、名称、规格、单位和品牌的材料/设备');
-      error.code = 'RESOURCE_DUPLICATE';
-      error.duplicate = duplicate;
-      throw error;
+      throw duplicateResourceError(duplicate);
     }
     return await resourceRepo.upsert(item);
   },
@@ -159,6 +194,38 @@ export const resourceService = {
     }
     return await resourceRepo.update(resourceId, { preferredPriceId: priceId || '', updatedAt: new Date().toISOString() });
   },
+
+  async merge(sourceId, targetId) {
+    if (!sourceId || sourceId === targetId) throw new Error('请选择两个不同的材料或设备进行合并');
+    const [source, target, resources, prices, attachments, usages, lines] = await Promise.all([
+      resourceRepo.findById(sourceId), resourceRepo.findById(targetId), resourceRepo.all(), resourcePriceRepo.all(),
+      resourceAttachmentRepo.all(), quotaResourceUsageRepo.all(), boqRepo.all(),
+    ]);
+    if (!source || !target) throw new Error('待合并材料或设备不存在');
+    if (source.resourceType !== target.resourceType) throw new Error('只能合并同类型的材料或设备');
+    const now = new Date().toISOString();
+    const nextResources = resources.map(item => item.id === sourceId ? {
+      ...item, status: 'inactive', preferredPriceId: '', mergedIntoResourceId: targetId, mergedAt: now, updatedAt: now,
+    } : item);
+    const nextPrices = prices.map(item => item.resourceId === sourceId ? { ...item, resourceId: targetId, mergedFromResourceId: sourceId } : item);
+    const nextAttachments = attachments.map(item => item.resourceId === sourceId ? { ...item, resourceId: targetId } : item);
+    const nextUsages = usages.map(item => item.resourceId === sourceId ? { ...item, resourceId: targetId, mergedFromResourceId: sourceId, updatedAt: now } : item);
+    const nextLines = lines.map(item => replaceResourceReferences(item, sourceId, targetId));
+    try {
+      await resourceRepo.replaceAll(nextResources);
+      await resourcePriceRepo.replaceAll(nextPrices);
+      await resourceAttachmentRepo.replaceAll(nextAttachments);
+      await quotaResourceUsageRepo.replaceAll(nextUsages);
+      await boqRepo.replaceAll(nextLines);
+    } catch (cause) {
+      await Promise.allSettled([
+        resourceRepo.replaceAll(resources), resourcePriceRepo.replaceAll(prices), resourceAttachmentRepo.replaceAll(attachments),
+        quotaResourceUsageRepo.replaceAll(usages), boqRepo.replaceAll(lines),
+      ]);
+      throw Object.assign(new Error('资源合并失败，已尝试恢复原数据'), { code: 'RESOURCE_MERGE_FAILED', cause });
+    }
+    return { sourceId, targetId, mergedAt: now };
+  },
 };
 
 function validateResource(payload) {
@@ -172,6 +239,20 @@ function validateResource(payload) {
 
 function normalizeIdentityPart(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function duplicateResourceError(duplicate) {
+  const error = new Error('已存在相同编码或相同类型、名称、规格、单位和品牌的材料/设备');
+  error.code = 'RESOURCE_DUPLICATE';
+  error.duplicate = duplicate;
+  return error;
+}
+
+function replaceResourceReferences(line, sourceId, targetId) {
+  const fields = ['resourceItemId', 'linkedResourceItemId', 'installationResourceItemId', 'manualInstallationResourceId'];
+  const next = { ...line };
+  fields.forEach(field => { if (next[field] === sourceId) next[field] = targetId; });
+  return next;
 }
 
 function isPlainObject(value) {

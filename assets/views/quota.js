@@ -76,60 +76,43 @@ export async function render(workspace = document.getElementById('workspace')) {
   ]);
   exposeQuotaActions();
   workspace.innerHTML = `
-    <div class="page-frame h-full min-h-[760px] flex flex-col gap-4">
-      <section class="rounded-lg border border-slate-200 bg-white px-4 py-4 shrink-0">
-        <div class="flex items-center gap-4">
-          <div>
-            <div class="flex items-center gap-2">
-              <h1 class="text-xl font-semibold text-slate-950">我的定额库</h1>
-              <span class="text-slate-300">/</span>
-              <span class="text-sm font-medium text-slate-500">价格参考 · 常用定额整理</span>
-            </div>
-            <div class="mt-1 text-xs text-slate-500">维护自己的常用价格、项目特征、计算规则和人材机组成。</div>
-          </div>
-          <div class="flex-1"></div>
-          <button id="btnImport" class="h-10 px-4 text-sm brand-bg text-white flex items-center gap-1.5">
-            <span class="material-symbols-outlined text-[18px]">upload</span>导入 Excel
-          </button>
-          <button onclick="window.__quota.newItem()" class="h-10 px-4 text-sm bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5">
-            <span class="material-symbols-outlined text-[18px]">add</span>新增定额
-          </button>
-          <button id="btnTpl" class="h-10 px-4 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">
-            <span class="material-symbols-outlined text-[18px]">download</span>下载模板
-          </button>
+    <div class="page-frame library-workbench h-full flex flex-col">
+      <section class="library-toolbar shrink-0">
+        <div class="library-toolbar-main">
+          <span class="library-toolbar-icon material-symbols-outlined">menu_book</span>
+          <div><h1 class="text-xl font-semibold text-slate-950">我的定额库</h1><p class="mt-1 text-xs text-slate-500">维护常用价格、项目特征、计算规则和人材机组成。</p></div>
+          <div class="library-toolbar-actions"><button id="btnTpl" class="h-9 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">下载模板</button><button id="btnImport" class="h-9 px-3 text-sm border border-teal-300 bg-white text-teal-700">导入 Excel</button><button onclick="window.__quota.newItem()" class="h-9 px-4 text-sm brand-bg text-white">新增定额</button></div>
         </div>
 
         ${routeNotice ? `<div role="status" class="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">${esc(routeNotice)}</div>` : ''}
 
-        <div class="mt-4 flex items-center gap-2">
-          <div class="relative flex-1 min-w-[320px]">
+        <div class="library-filter-row">
+          <div class="relative min-w-0">
             <input id="qKw" value="${esc(filterState.keyword)}" placeholder="搜索清单名称 / 项目特征 / 关键词..."
               class="h-10 w-full border border-slate-300 bg-white pl-10 pr-3 text-sm" />
             <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[19px]">search</span>
           </div>
-          <select id="qCat" class="h-10 w-36 border border-slate-300 bg-white px-2 text-sm">
+          <div class="library-filter-controls"><select id="qCat" class="h-10 min-w-[130px] border border-slate-300 bg-white px-2 text-sm">
             <option value="">全部分类</option>
             ${cats.map(c => `<option value="${esc(c)}" ${filterState.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
           </select>
-          <select id="qUnit" class="h-10 w-32 border border-slate-300 bg-white px-2 text-sm">
+          <select id="qUnit" class="h-10 min-w-[110px] border border-slate-300 bg-white px-2 text-sm">
             <option value="">全部单位</option>
             ${units.map(u => `<option value="${esc(u)}" ${filterState.unit === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}
           </select>
-          <select id="qPrice" class="h-10 w-36 border border-slate-300 bg-white px-2 text-sm">
+          <select id="qPrice" class="h-10 min-w-[120px] border border-slate-300 bg-white px-2 text-sm">
             <option value="">价格状态</option>
             <option value="priced" ${filterState.priceStatus === 'priced' ? 'selected' : ''}>已有单价</option>
             <option value="missing" ${filterState.priceStatus === 'missing' ? 'selected' : ''}>缺单价</option>
           </select>
-          <button onclick="window.__quota.clearFilters()" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 flex items-center gap-1">
-            <span class="material-symbols-outlined text-[17px]">filter_alt_off</span>清空
-          </button>
+          <button onclick="window.__quota.clearFilters()" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">清除筛选</button></div>
         </div>
       </section>
 
-      <div id="quotaKpis" class="grid grid-cols-3 gap-4 shrink-0">${kpiStrip(allRows)}</div>
+      <div id="quotaKpis" class="library-summary-grid shrink-0">${kpiStrip(allRows)}</div>
 
-      <div class="grid grid-cols-[minmax(0,1fr)_400px] gap-4 flex-1 min-h-0">
-        <section class="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col min-w-0">
+      <div class="library-split">
+        <section class="library-list-pane flex flex-col">
           <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between shrink-0">
             <div>
               <div class="font-semibold text-slate-900">定额条目</div>
@@ -155,7 +138,7 @@ export async function render(workspace = document.getElementById('workspace')) {
           <div id="qPager" class="px-4 py-3 border-t border-slate-200 bg-white shrink-0"></div>
         </section>
 
-        <aside id="quotaInspector" class="rounded-lg border border-slate-200 bg-white overflow-hidden min-w-0"></aside>
+        <aside id="quotaInspector" class="library-detail-pane"></aside>
       </div>
 
       <section id="quotaBottom" class="grid grid-cols-3 gap-4 shrink-0"></section>
@@ -247,7 +230,7 @@ function kpiStrip(rows) {
 }
 
 function kpiCard(label, value, unit, icon, color, note) {
-  return `<div class="rounded-lg border border-slate-200 bg-white px-4 py-3">
+  return `<div class="library-metric-card px-4 py-3">
     <div class="flex items-start justify-between">
       <div>
         <div class="text-xs font-medium text-slate-500">${label}</div>

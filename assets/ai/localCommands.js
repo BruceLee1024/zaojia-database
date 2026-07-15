@@ -83,17 +83,18 @@ async function cmdAddBOQ(projName, quotaHint, qty, unit) {
   const proj = projects.find(p => p.name.includes(projName)) || projects[0];
   if (!proj) return { handled: true, msg: '没找到匹配的项目，请先在「项目管理」里建一个。' };
 
-  try {
-    const line = await boqService.addByText(proj.id, quotaHint, qty);
-    const newTotal = (await projectRepo.findById(proj.id)).totalCost;
-    return {
-      handled: true,
-      msg: `✅ 已给「${proj.name}」添加清单\n\n• 名称：${line.name}\n• 工程量：${qty} ${line.unit || ''}\n• 综合单价：${hasMissingPrice(line.unitPrice) ? '缺失/为 0' : fmtMoney(line.unitPrice) + '/' + (line.unit || '')}\n• 合价：${fmtMoney(line.amount)}\n\n项目最新总造价：${fmtMoney(newTotal)}${hasMissingPrice(line.unitPrice) ? '\n\n注意：该条缺少有效综合单价，请补价后再作为正式报价。' : ''}`,
-      actions: [{ label: '📂 打开项目查看', onClick: () => { window.__app.go('boq', { projectId: proj.id }); window.__app.closeAI(); } }],
-    };
-  } catch (e) {
-    return { handled: true, msg: e.message };
-  }
+  return {
+    handled: true,
+    msg: `已识别出新增建议：向「${proj.name}」添加「${quotaHint}」，工程量 ${qty} ${unit || ''}。\n\n这会修改项目清单，请确认后再执行。`,
+    actions: [{ label: '确认新增清单', type: 'create', requiresConfirmation: true, onClick: async () => {
+      if (!confirm(`确认向「${proj.name}」新增「${quotaHint}」吗？`)) return;
+      try {
+        const line = await boqService.addByText(proj.id, quotaHint, qty);
+        const newTotal = (await projectRepo.findById(proj.id)).totalCost;
+        alert(`已新增「${line.name}」，项目最新总造价：${fmtMoney(newTotal)}`);
+      } catch (e) { alert(e.message); }
+    } }, { label: '先查看项目', onClick: () => { window.__app.go('boq', { projectId: proj.id }); window.__app.closeAI(); } }],
+  };
 }
 
 async function cmdMissingPrices() {
@@ -163,12 +164,15 @@ async function cmdProjectCost(projName) {
 async function cmdAdjustPrice(projName, target, factor) {
   const proj = await findProject(projName);
   if (!proj) return { handled: true, msg: '没找到匹配的项目' };
-  const count = await boqService.batchAdjust(proj.id, target, factor);
-  const newTotal = (await projectRepo.findById(proj.id)).totalCost;
   return {
     handled: true,
-    msg: `✅ 已对「${proj.name}」中 ${count} 条${target === '全部' ? '' : `含「${target}」的`}清单应用 ×${factor} 调价。\n\n项目最新造价：${fmtMoney(newTotal)}`,
-    actions: [{ label: '📂 查看清单', onClick: () => { window.__app.go('boq', { projectId: proj.id }); window.__app.closeAI(); } }],
+    msg: `已识别出调价建议：将「${proj.name}」中${target === '全部' ? '全部清单' : `含「${target}」的清单`}按 ×${factor} 调整。\n\n这会改写当前报价，请确认后执行。`,
+    actions: [{ label: '确认执行调价', type: 'update', requiresConfirmation: true, onClick: async () => {
+      if (!confirm(`确认对「${proj.name}」执行 ×${factor} 调价吗？建议先保存版本。`)) return;
+      const count = await boqService.batchAdjust(proj.id, target, factor);
+      const newTotal = (await projectRepo.findById(proj.id)).totalCost;
+      alert(`已调整 ${count} 条清单，项目最新造价：${fmtMoney(newTotal)}`);
+    } }, { label: '先查看清单', onClick: () => { window.__app.go('boq', { projectId: proj.id }); window.__app.closeAI(); } }],
   };
 }
 

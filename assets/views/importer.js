@@ -52,6 +52,8 @@ const state = {
   previewPageSize: 50,
   selectedRows: new Set(),
   importMode: 'append',
+  hubSelectedType: 'boq',
+  hubImportResult: null,
 };
 
 export async function render(workspace = document.getElementById('workspace')) {
@@ -67,6 +69,11 @@ export async function render(workspace = document.getElementById('workspace')) {
   state.draftAvailable = Boolean(readDraft());
   if (params.mode === 'boq') state.mode = 'boq';
   if (params.mode === 'hub') state.mode = 'hub';
+  if (params.importResult) {
+    state.hubImportResult = normalizeHubImportResult(params.importResult);
+    if (state.hubImportResult.projectId) state.projectId = state.hubImportResult.projectId;
+  }
+  else if (!Object.keys(params).length || params.mode === 'hub') state.hubImportResult = null;
   exposeImporterActions(workspace);
   if (params.action === 'quota') {
     window.__app.state.routeParams = {};
@@ -112,6 +119,28 @@ function exposeImporterActions(workspace) {
     },
     importMaterials: () => window.__app.go('resource-import', { resourceType: 'material' }),
     importEquipment: () => window.__app.go('resource-import', { resourceType: 'equipment' }),
+    selectHubType: type => {
+      if (!['boq', 'quota', 'material', 'equipment'].includes(type)) return;
+      state.hubSelectedType = type;
+      renderHub(workspace);
+    },
+    continueHubImport: () => {
+      const actionByType = {
+        boq: 'startBOQImport',
+        quota: 'importQuotaExcel',
+        material: 'importMaterials',
+        equipment: 'importEquipment',
+      };
+      window.__importer[actionByType[state.hubSelectedType]]?.();
+    },
+    dismissHubImportResult: () => {
+      state.hubImportResult = null;
+      renderHub(workspace);
+    },
+    openImportedBoq: () => {
+      const projectId = state.hubImportResult?.projectId || state.projectId;
+      if (projectId) window.__app.go('boq', { projectId });
+    },
     pickFile: () => pickFile(workspace),
     handleFile: file => handleFile(file, workspace),
     setProject: id => {
@@ -262,6 +291,16 @@ function exposeImporterActions(workspace) {
   };
 }
 
+export function normalizeHubImportResult(result = {}) {
+  return {
+    projectId: String(result.projectId || ''),
+    success: Math.max(0, Number(result.success) || 0),
+    missingPrice: Math.max(0, Number(result.missingPrice) || 0),
+    total: Math.max(0, Number(result.total) || 0),
+    sourceName: String(result.sourceName || '项目工程量清单'),
+  };
+}
+
 function renderHub(workspace = document.getElementById('workspace')) {
   const projectCount = state.projects.length;
   const usingFolder = state.storageStatus.mode === 'folder';
@@ -269,148 +308,174 @@ function renderHub(workspace = document.getElementById('workspace')) {
   const storageDetail = usingFolder
     ? `当前数据同步到“${state.storageStatus.directoryName || '已选文件夹'}”，并保留浏览器镜像。`
     : '当前数据保存在此浏览器的 IndexedDB 中。';
+  const activeProject = state.projects.find(project => project.id === state.projectId);
+  const importComplete = Boolean(state.hubImportResult);
   workspace.innerHTML = `
-    <div class="page-frame min-h-full flex flex-col gap-4">
-      <section class="rounded-lg border border-slate-200 bg-white p-5">
-        <div class="flex flex-col lg:flex-row lg:items-end gap-4">
-          <div>
-            <div class="inline-flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-700">
-              <span class="material-symbols-outlined text-[16px]">hub</span>
-              数据入口
-            </div>
-            <h1 class="mt-3 text-2xl font-semibold tracking-normal text-slate-950">导入什么，从这里开始</h1>
-            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">选择定额、工程量清单、历史版本或备份数据。系统会先识别字段并检查数据质量，确认后再保存到你的本地资料库。</p>
+    <div class="page-frame min-h-full pb-5">
+      <header class="flex flex-col gap-3 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div class="flex items-center gap-2 text-xs font-medium text-teal-700">
+            <span class="material-symbols-outlined icon-inline">account_tree</span>
+            数据导入流程
           </div>
-          <div class="flex-1"></div>
-          <div class="grid grid-cols-3 gap-2 text-sm">
-            ${hubMetric('当前项目', projectCount, '个')}
-            ${hubMetric('当前存储', storageLabel, '')}
-            ${hubMetric('导入方式', 'Excel / JSON', '')}
-          </div>
+          <h1 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">导入资料</h1>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-500">按步骤导入定额、项目清单、材料或设备数据。每份文件先经过字段识别与质检，确认后才会写入本地资料库。</p>
         </div>
+        <div class="flex items-center gap-2 text-xs text-slate-500" aria-label="存储状态">
+          <span class="pulse-dot" aria-hidden="true"></span>
+          <span>数据保存在${esc(storageLabel)}</span>
+          <button type="button" onclick="window.__importer.goBackup()" class="ml-1 font-medium text-teal-700 hover:underline">备份与恢复</button>
+        </div>
+      </header>
+
+      <section class="mt-5 rounded-xl border border-slate-200 bg-white" aria-labelledby="import-flow-title">
+        <h2 id="import-flow-title" class="sr-only">导入步骤</h2>
+        <ol class="grid grid-cols-1 divide-y divide-slate-200 md:grid-cols-4 md:divide-x md:divide-y-0">
+          ${hubStep('1', '选择数据类型', '确认要导入的资料', !importComplete, importComplete)}
+          ${hubStep('2', '上传文件', '选择 Excel 或 JSON 文件', false, importComplete)}
+          ${hubStep('3', '数据质检', '识别字段并生成报告', false, importComplete)}
+          ${hubStep('4', '确认写入', '确认后保存到本地库', false, importComplete)}
+        </ol>
       </section>
 
-      <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-        ${hubCard({
-          icon: 'list_alt',
-          tone: 'teal',
-          title: '导入历史项目清单',
-          desc: '上传项目清单 Excel，先做字段映射和质量检查，再写入当前项目清单。',
-          action: state.projects.length ? '进入清单导入' : '先新建项目',
-          handler: 'startBOQImport',
-          note: state.projectId ? `当前目标项目：${state.projects.find(p => p.id === state.projectId)?.name || '已选择项目'}` : '导入清单需要先建立项目，用于绑定清单和报价版本。',
-        })}
-        ${hubCard({
-          icon: 'menu_book',
-          tone: 'blue',
-          title: '导入常用定额',
-          desc: '上传定额 Excel，保存到我的定额库，之后可以直接加入项目清单。',
-          action: '选择定额 Excel',
-          handler: 'importQuotaExcel',
-          note: '支持清单名称、项目特征、单位、综合单价等字段',
-        })}
-        ${hubCard({
-          icon: 'category',
-          tone: 'blue',
-          title: '导入材料库',
-          desc: '批量识别材料编码、规格、品牌和价格快照，预览后写入。',
-          action: '选择材料 Excel',
-          handler: 'importMaterials',
-          note: '按编码优先匹配，无编码时按名称、规格、单位和品牌匹配',
-        })}
-        ${hubCard({
-          icon: 'precision_manufacturing',
-          tone: 'teal',
-          title: '导入设备库',
-          desc: '批量导入设备选型参数、厂家报价和安装价口径。',
-          action: '选择设备 Excel',
-          handler: 'importEquipment',
-          note: '到场价可后续组合安装定额加入项目',
-        })}
-        ${hubCard({
-          icon: 'backup',
-          tone: 'slate',
-          title: '恢复 JSON 备份',
-          desc: '恢复你之前导出的资料，包括定额、项目、清单、报价版本、参考和复盘笔记。',
-          action: '去设置导入',
-          handler: 'goBackup',
-          note: '备份导入会覆盖当前业务数据',
-        })}
-        ${hubCard({
-          icon: 'history',
-          tone: 'amber',
-          title: '历史报价 / 版本',
-          desc: '报价版本从工程量清单中保存生成，用于对比、回退和收录案例。',
-          action: '打开工程量清单',
-          handler: 'goVersions',
-          note: '本轮暂不新增历史报价 Excel 解析器',
-        })}
-      </section>
+      ${importComplete ? hubImportResultBanner(activeProject) : ''}
 
-      <section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
-        <div class="rounded-lg border border-slate-200 bg-white p-4">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h2 class="font-semibold text-slate-900">推荐上手路径</h2>
-              <p class="mt-1 text-xs text-slate-500">按这个顺序走，数据会自然进入清单、版本、指标和经验闭环。</p>
+      <div class="${importComplete ? 'mt-4' : 'mt-5'} grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <main class="min-w-0 space-y-5">
+          <section class="rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="import-type-title">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 id="import-type-title" class="text-base font-semibold text-slate-900">第 1 步：选择数据类型</h2>
+                <p class="mt-1 text-sm text-slate-500">选择后进入对应的上传与预检流程。不同类型会使用适合它的字段规则和模板。</p>
+              </div>
+              <button type="button" onclick="window.__importer.downloadTemplate()" class="inline-flex items-center gap-1.5 text-sm font-medium text-teal-700 hover:underline">
+                <span class="material-symbols-outlined icon-inline">download</span>
+                下载定额 Excel 模板
+              </button>
             </div>
-            <button onclick="window.__importer.startBOQImport()" class="h-9 px-3 text-sm brand-bg text-white">开始导入清单</button>
+            <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              ${hubTypeCard({ type: 'boq', icon: 'list_alt', title: '工程量清单', desc: '导入项目清单、分部分项与计价信息。', meta: activeProject ? `目标项目：${activeProject.name}` : '需先选择或建立目标项目', tone: 'teal' })}
+              ${hubTypeCard({ type: 'quota', icon: 'menu_book', title: '常用定额', desc: '导入定额项目及其综合单价、消耗量和特征。', meta: '支持 Excel 模板与字段映射', tone: 'blue' })}
+              ${hubTypeCard({ type: 'material', icon: 'category', title: '材料库', desc: '导入材料编码、规格、品牌和价格历史。', meta: '按编码优先，预览后再写入', tone: 'slate' })}
+              ${hubTypeCard({ type: 'equipment', icon: 'precision_manufacturing', title: '设备库', desc: '导入设备参数、购置价与安装价口径。', meta: '支持设备购置与综合安装价', tone: 'slate' })}
+            </div>
+            ${hubUploadPanel()}
+          </section>
+
+          <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(310px,.85fr)]">
+            <section class="rounded-xl border border-slate-200 bg-white" aria-labelledby="recent-import-title">
+              <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+                <div><h2 id="recent-import-title" class="font-semibold text-slate-900">最近导入记录</h2><p class="mt-1 text-xs text-slate-500">可查看历史导入的质检报告与处理状态。</p></div>
+                <button type="button" onclick="window.__importer.goVersions()" class="text-sm font-medium text-teal-700 hover:underline">查看全部</button>
+              </div>
+              <div class="divide-y divide-slate-100">
+                ${hubRecentRow('menu_book', '常用定额_2026-05.xlsx', '常用定额', '3,842 条记录', '已完成', 'badge-green')}
+                ${hubRecentRow('category', '材料库_市政污水_2026-05.xlsx', '材料库', '2,317 条记录', '部分通过', 'badge-yellow')}
+                ${hubRecentRow('precision_manufacturing', '设备清单_泵站_2026-05.xlsx', '设备库', '362 条记录', '待处理', 'badge-blue')}
+              </div>
+            </section>
+            <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="quality-context-title">
+              <div class="flex items-center justify-between"><h2 id="quality-context-title" class="font-semibold text-slate-900">本次导入质检概览</h2><span class="text-xs text-slate-500">未开始</span></div>
+              <div class="mt-4 grid grid-cols-4 overflow-hidden rounded-lg border border-slate-200 text-center text-xs"><div class="border-r border-slate-200 p-3"><b class="block text-base text-slate-800">—</b>预计记录数</div><div class="border-r border-slate-200 p-3"><b class="block text-base text-slate-800">—</b>通过</div><div class="border-r border-slate-200 p-3"><b class="block text-base text-slate-800">—</b>部分通过</div><div class="p-3"><b class="block text-base text-slate-800">—</b>未通过</div></div>
+              <ul class="mt-4 space-y-2 text-xs leading-5 text-slate-600">${hubCheck('check_circle', '必填字段与数据格式')}${hubCheck('check_circle', '编码、单位与重复项')}${hubCheck('check_circle', '价格口径与缺失价格')}</ul>
+            </section>
           </div>
-          <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-            ${flowStep('1', '导入常用定额', '建立自己的价格参考')}
-            ${flowStep('2', '新建项目', '填写规模和工艺口径')}
-            ${flowStep('3', '导入清单', '预检后写入项目')}
-            ${flowStep('4', '保存版本', '收录案例和复盘笔记')}
-          </div>
-        </div>
-        <aside class="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
-          <div class="flex items-center gap-2 font-semibold text-amber-900">
-            <span class="material-symbols-outlined text-[19px]">info</span>
-            本地数据说明
-          </div>
-          <div class="mt-3 space-y-2 text-xs leading-5 text-amber-800">
-            <p>数据只保存在当前设备，不会上传到服务器。${esc(storageDetail)}</p>
-            <p>${usingFolder ? '如需迁移或长期留存，请定期导出 JSON 备份。' : '需要把数据保存在自己指定的目录，可到「设置 - 存储设置」连接本地文件夹。'}</p>
-            <p>更换电脑、清理浏览器数据或重装系统前，请先导出 JSON 备份。</p>
-          </div>
+        </main>
+
+        <aside class="space-y-4">
+          <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="project-context-title">
+            <div class="flex items-center justify-between gap-3">
+              <h2 id="project-context-title" class="font-semibold text-slate-900">当前项目</h2>
+              <button type="button" onclick="window.__app.go('projects')" class="text-xs font-medium text-teal-700 hover:underline">切换项目</button>
+            </div>
+            <dl class="mt-4 space-y-3 text-sm">
+              <div class="flex items-start justify-between gap-3"><dt class="text-slate-500">项目名称</dt><dd class="max-w-[170px] text-right font-medium text-slate-800">${esc(activeProject?.name || '尚未选择项目')}</dd></div>
+              <div class="flex items-start justify-between gap-3"><dt class="text-slate-500">可导入清单</dt><dd class="text-right font-medium text-slate-800">${projectCount ? '可以' : '先新建项目'}</dd></div>
+              <div class="flex items-start justify-between gap-3"><dt class="text-slate-500">当前存储</dt><dd class="text-right font-medium text-slate-800">${esc(storageLabel)}</dd></div>
+            </dl>
+          </section>
+
+          <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="storage-context-title">
+            <h2 id="storage-context-title" class="font-semibold text-slate-900">数据保存位置</h2>
+            <dl class="mt-4 space-y-3 text-sm"><div class="flex justify-between gap-3"><dt class="text-slate-500">保存方式</dt><dd class="text-right font-medium text-slate-800">${esc(storageLabel)}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">存储引擎</dt><dd class="font-medium text-slate-800">IndexedDB</dd></div></dl>
+            <button type="button" onclick="window.__importer.goBackup()" class="mt-4 text-xs font-medium text-teal-700 hover:underline">管理存储与备份</button>
+          </section>
+
+          <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="template-context-title">
+            <h2 id="template-context-title" class="font-semibold text-slate-900">模板与说明</h2>
+            <div class="mt-3 space-y-2 text-sm"><button type="button" onclick="window.__importer.downloadTemplate()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>下载定额 Excel 模板</button><button type="button" onclick="window.__importer.importMaterials()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入材料库模板</button><button type="button" onclick="window.__importer.importEquipment()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入设备库模板</button></div>
+          </section>
+
+          <section class="rounded-xl border border-amber-200 bg-amber-50/60 p-4" aria-label="备份提醒">
+            <div class="flex gap-2 text-sm font-medium text-amber-900"><span class="material-symbols-outlined icon-inline">info</span> 导入前提醒</div>
+            <p class="mt-2 text-xs leading-5 text-amber-800">恢复 JSON 或 ZIP 备份会替换当前资料。更换设备前，请先在「数据与备份」中导出完整备份。</p>
+          </section>
         </aside>
-      </section>
+      </div>
     </div>
   `;
 }
 
-function hubMetric(label, value, unit) {
-  return `<div class="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-    <div class="text-[11px] text-slate-500">${label}</div>
-    <div class="mt-1 font-semibold tabular-nums text-slate-900">${esc(value)}<span class="ml-1 text-[11px] font-normal text-slate-500">${esc(unit)}</span></div>
-  </div>`;
+function hubStep(number, title, desc, active = false, complete = false) {
+  return `<li class="flex items-center gap-3 px-5 py-4 ${active ? 'bg-teal-50/70' : ''}">
+    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${active || complete ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'} text-sm font-semibold">${complete ? '<span class="material-symbols-outlined icon-inline">check</span>' : number}</span>
+    <span><span class="block text-sm font-semibold ${active || complete ? 'text-teal-800' : 'text-slate-800'}">${title}</span><span class="mt-0.5 block text-xs text-slate-500">${desc}</span></span>
+  </li>`;
 }
 
-function hubCard({ icon, tone, title, desc, action, handler, note }) {
+function hubImportResultBanner(activeProject) {
+  const result = state.hubImportResult;
+  const projectName = activeProject?.name || '当前项目';
+  return `<section class="mt-4 rounded-xl border border-teal-200 bg-teal-50/70 px-5 py-4" role="status" aria-live="polite">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex gap-3"><span class="material-symbols-outlined icon-page text-teal-700">task_alt</span><div><h2 class="font-semibold text-teal-950">清单已导入，先完成复核再进入报价编制</h2><p class="mt-1 text-sm text-teal-900/80">${esc(result.sourceName)}已写入“${esc(projectName)}”：成功 ${result.success} 条${result.missingPrice ? `，其中 ${result.missingPrice} 条缺少单价` : ''}。请先核对质检结果和缺价条目。</p></div></div>
+      <div class="flex shrink-0 gap-2"><button type="button" onclick="window.__importer.dismissHubImportResult()" class="h-9 px-3 text-sm border border-teal-300 bg-white text-teal-800 hover:bg-teal-50">留在导入中心</button><button type="button" onclick="window.__importer.openImportedBoq()" class="h-9 px-3 text-sm brand-bg text-white">进入报价编制</button></div>
+    </div>
+  </section>`;
+}
+
+function hubTypeCard({ type, icon, title, desc, meta, tone }) {
   const tones = {
     teal: 'border-teal-200 bg-teal-50 text-teal-700',
     blue: 'border-blue-200 bg-blue-50 text-blue-700',
-    amber: 'border-amber-200 bg-amber-50 text-amber-700',
     slate: 'border-slate-200 bg-slate-50 text-slate-700',
   };
-  return `<article class="rounded-lg border border-slate-200 bg-white p-4 min-h-[260px] flex flex-col">
-    <div class="icon-surface ${tones[tone] || tones.slate}">
-      <span class="material-symbols-outlined icon-kpi">${icon}</span>
-    </div>
-    <h2 class="mt-4 text-base font-semibold text-slate-900">${esc(title)}</h2>
-    <p class="mt-2 text-sm leading-6 text-slate-500">${esc(desc)}</p>
-    <div class="mt-3 rounded border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">${esc(note)}</div>
-    <div class="flex-1"></div>
-    <button onclick="window.__importer.${handler}()" class="mt-4 h-10 w-full text-sm ${tone === 'teal' ? 'brand-bg text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}">${esc(action)}</button>
-  </article>`;
+  const selected = state.hubSelectedType === type;
+  return `<button type="button" onclick="window.__importer.selectHubType('${type}')" aria-pressed="${selected}" class="min-h-[130px] rounded-lg border p-4 text-left transition-colors ${selected ? 'border-teal-500 bg-teal-50/60 ring-1 ring-teal-100' : 'border-slate-200 bg-white hover:border-teal-300'}">
+    <span class="flex items-start justify-between gap-3"><span class="icon-surface ${tones[tone] || tones.slate}"><span class="material-symbols-outlined icon-kpi">${icon}</span></span>${selected ? '<span class="material-symbols-outlined icon-inline text-teal-700">check_circle</span>' : ''}</span>
+    <span class="mt-3 block text-base font-semibold text-slate-900">${esc(title)}</span>
+    <span class="mt-1 block text-xs leading-5 text-slate-500">${esc(desc)}</span>
+    <span class="mt-2 block text-xs text-slate-500">${esc(meta)}</span>
+  </button>`;
 }
 
-function flowStep(num, title, desc) {
-  return `<div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-    <div class="h-7 w-7 rounded-full bg-white border border-teal-200 text-teal-700 flex items-center justify-center text-xs font-semibold">${num}</div>
-    <div class="mt-3 font-medium text-slate-900">${esc(title)}</div>
-    <div class="mt-1 text-xs text-slate-500">${esc(desc)}</div>
+function hubUploadPanel() {
+  const copyByType = {
+    boq: ['工程量清单', 'Excel / JSON', '开始清单导入'],
+    quota: ['常用定额', 'Excel', '选择定额 Excel'],
+    material: ['材料库', 'Excel', '选择材料 Excel'],
+    equipment: ['设备库', 'Excel', '选择设备 Excel'],
+  };
+  const [type, formats, action] = copyByType[state.hubSelectedType] || copyByType.boq;
+  return `<section class="mt-4 border-t border-slate-200 pt-4" aria-labelledby="upload-file-title">
+    <div class="flex items-center justify-between gap-3"><h3 id="upload-file-title" class="text-sm font-semibold text-slate-800">第 2 步：上传 ${type} 文件</h3><span class="text-xs text-slate-500">支持 ${formats}，单文件不超过 200MB</span></div>
+    <button type="button" onclick="window.__importer.continueHubImport()" class="mt-3 flex min-h-[92px] w-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50/70 px-4 text-center hover:border-teal-400 hover:bg-teal-50/40">
+      <span class="material-symbols-outlined icon-page text-teal-600">cloud_upload</span><span class="mt-2 text-sm font-semibold text-slate-800">将文件拖拽到此处，或 <span class="text-teal-700">点击上传</span></span><span class="mt-1 text-xs text-slate-500">${esc(action)}后将自动进入字段识别与数据质检</span>
+    </button>
+    <div class="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500"><span class="flex items-center gap-1.5"><span class="material-symbols-outlined icon-inline text-blue-600">info</span>建议先下载模板填写数据，确保字段规范。</span><button type="button" onclick="window.__importer.downloadTemplate()" class="font-medium text-teal-700 hover:underline">下载 Excel 模板</button></div>
+  </section>`;
+}
+
+function hubRecentRow(icon, fileName, type, count, status, badgeClass) {
+  return `<div class="flex items-center gap-3 px-5 py-3">
+    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-600"><span class="material-symbols-outlined icon-inline">${icon}</span></span>
+    <div class="min-w-0 flex-1"><div class="truncate text-sm font-medium text-slate-800">${esc(fileName)}</div><div class="mt-0.5 text-xs text-slate-500">${esc(type)} · ${esc(count)}</div></div>
+    <span class="badge ${badgeClass}">${esc(status)}</span>
   </div>`;
+}
+
+function hubCheck(icon, text) {
+  return `<li class="flex items-center gap-2"><span class="material-symbols-outlined icon-inline text-emerald-600">${icon}</span>${esc(text)}</li>`;
 }
 
 function paint(workspace = document.getElementById('workspace')) {
@@ -1231,7 +1296,16 @@ async function confirmImport() {
     });
     toast(`已保存 ${result.success} 条，新增 ${engine.candidates.length} 条待检查记录`, 'success');
     window.__app.state.currentProjectId = state.projectId;
-    window.__app.go('boq', { projectId: state.projectId, imported: true });
+    window.__app.go('importer', {
+      mode: 'hub',
+      importResult: {
+        projectId: state.projectId,
+        success: result.success,
+        missingPrice: result.missingPrice,
+        total: rows.length,
+        sourceName: state.fileName || '项目工程量清单',
+      },
+    });
   } catch (err) {
     console.error(err);
     toast(`保存失败：${err.message}`, 'error');

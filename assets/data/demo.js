@@ -1,5 +1,5 @@
 // 演示数据加载 + 智能兜底单价
-import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from './repository.js?v=6.2';
+import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo, resourceRepo, resourcePriceRepo, quotaResourceUsageRepo, resourceAttachmentRepo } from './repository.js?v=6.2';
 import { parseExcel, detectRowKind, rowToQuotaItem, rowToBOQ } from './excel.js?v=6.2';
 import { categoryGuess } from '../utils/stats.js?v=6.2';
 import { uid } from '../utils/dom.js?v=6.2';
@@ -84,6 +84,15 @@ const BUILTIN_BOQ_LIBRARY = [
   ['030501001001', '潜水搅拌机安装', '含支架、吊装、单机调试', '台', 2, '设备安装工程', '污水处理设备安装', 'equipment', ['潜水搅拌机安装']],
   ['030601001001', 'HDPE 排水管安装', 'DN300；热熔连接；含管件安装', 'm', 120, '管网工程', '厂区污水管网', 'pipe', ['HDPE 排水管 DN300', '阀门井砌筑']],
   ['030701001001', 'PLC 控制柜安装', '含 I/O 检查、联动调试', '台', 1, '电气自控工程', '污水处理自控系统', 'electric', []],
+];
+
+const BUILTIN_RESOURCES = [
+  { key: 'demo-resource-hdpe', resourceType: 'material', code: 'DEMO-M-001', category: '管材', name: 'HDPE 双壁波纹管', specModel: 'DN300 SN8', unit: 'm', brand: '示例品牌', manufacturer: '示例管材厂', processStage: '厂区管网', unitPrice: 168 },
+  { key: 'demo-resource-cable', resourceType: 'material', code: 'DEMO-M-002', category: '电缆', name: '交联聚乙烯电力电缆', specModel: 'YJV-0.6/1kV 4×25', unit: 'm', brand: '示例品牌', manufacturer: '示例电缆厂', processStage: '电气自控', unitPrice: 86 },
+  { key: 'demo-resource-valve', resourceType: 'material', code: 'DEMO-M-003', category: '阀门', name: '法兰蝶阀', specModel: 'DN200 PN1.0', unit: '个', brand: '示例品牌', manufacturer: '示例阀门厂', processStage: '工艺管道', unitPrice: 1280 },
+  { key: 'demo-resource-pump', resourceType: 'equipment', code: 'DEMO-E-001', category: '水泵', name: '潜水排污泵', specModel: 'Q=25m³/h H=15m', unit: '台', brand: '示例品牌', manufacturer: '示例设备厂', processStage: '污水提升', unitPrice: 12800 },
+  { key: 'demo-resource-blower', resourceType: 'equipment', code: 'DEMO-E-002', category: '风机', name: '罗茨鼓风机', specModel: 'Q=18m³/min P=58.8kPa', unit: '台', brand: '示例品牌', manufacturer: '示例设备厂', processStage: '生化曝气', unitPrice: 38600 },
+  { key: 'demo-resource-grid', resourceType: 'equipment', code: 'DEMO-E-003', category: '预处理设备', name: '回转式格栅除污机', specModel: '渠宽 1000mm', unit: '台', brand: '示例品牌', manufacturer: '示例设备厂', processStage: '预处理', unitPrice: 68000 },
 ];
 
 // 关键词兜底单价（行业经验值）
@@ -283,8 +292,13 @@ export async function loadDemoData() {
 }
 
 export async function ensureDemoData({ force = false } = {}) {
-  const [projects, quota, boq] = await Promise.all([projectRepo.all(), quotaRepo.all(), boqRepo.all()]);
-  if (!force && (projects.length || quota.length || boq.length)) return { loaded: false };
+  const [projects, quota, boq, resources] = await Promise.all([projectRepo.all(), quotaRepo.all(), boqRepo.all(), resourceRepo.all()]);
+  const demoProjectIds = new Set(projects.filter(item => item.demoSource === 'builtin' || item.demoKey).map(item => item.id));
+  const hasPersonalData = projects.some(item => !demoProjectIds.has(item.id))
+    || quota.some(item => item.demoSource !== 'builtin')
+    || boq.some(item => !demoProjectIds.has(item.projectId))
+    || resources.some(item => item.demoSource !== 'builtin');
+  if (!force && hasPersonalData) return { loaded: false };
   if (force) {
     await Promise.all([
       quotaRepo.replaceAll([]),
@@ -299,11 +313,62 @@ export async function ensureDemoData({ force = false } = {}) {
       dataQualityReportRepo.replaceAll([]),
       experienceSessionRepo.replaceAll([]),
       experienceCardRepo.replaceAll([]),
+      resourceRepo.replaceAll([]),
+      resourcePriceRepo.replaceAll([]),
+      quotaResourceUsageRepo.replaceAll([]),
+      resourceAttachmentRepo.replaceAll([]),
     ]);
   }
   await ensureBuiltinDemoData();
   await seedDemoVersionsAndFacts();
   return { loaded: true };
+}
+
+/**
+ * 只移除系统演示资料，保留客户导入或手动建立的正式资料。
+ * 兼容旧版本未写入 demoSource 标记的内置定额与清单库。
+ */
+export async function removeDemoData() {
+  const [projects, quota, library, boq, versions, facts, candidates, jobs, reports, sessions, cards, resources, prices, usages, attachments] = await Promise.all([
+    projectRepo.all(), quotaRepo.all(), boqLibraryRepo.all(), boqRepo.all(), versionRepo.all(),
+    dataFactRepo.all(), dataCandidateRepo.all(), dataJobRepo.all(), dataQualityReportRepo.all(),
+    experienceSessionRepo.all(), experienceCardRepo.all(),
+    resourceRepo.all(), resourcePriceRepo.all(), quotaResourceUsageRepo.all(), resourceAttachmentRepo.all(),
+  ]);
+  const demoProjectIds = new Set(projects.filter(project => project.demoKey || project.demoSource === 'builtin').map(project => project.id));
+  const demoQuotaNames = new Set(BUILTIN_QUOTAS.map(([, name]) => name));
+  const demoVersionIds = new Set(versions.filter(version => demoProjectIds.has(version.projectId) || version.demoSource === 'builtin').map(version => version.id));
+  const demoQuotaIds = new Set(boq.filter(item => demoProjectIds.has(item.projectId)).map(item => item.quotaItemId).filter(Boolean));
+  const formalQuotaIds = new Set(boq.filter(item => !demoProjectIds.has(item.projectId)).map(item => item.quotaItemId).filter(Boolean));
+  const relatedToDemo = item => demoProjectIds.has(item.projectId) || demoVersionIds.has(item.versionId) || item.demoSource === 'builtin';
+  const isLegacyDemoQuota = item => demoQuotaNames.has(item.name) && demoQuotaIds.has(item.id) && !formalQuotaIds.has(item.id);
+  const demoResourceIds = new Set(resources.filter(item => item.demoSource === 'builtin').map(item => item.id));
+  const personalResourceReferences = new Set([
+    ...usages.filter(item => demoResourceIds.has(item.resourceId)).map(item => item.resourceId),
+    ...boq.filter(item => !demoProjectIds.has(item.projectId)).flatMap(item => [item.resourceItemId, item.linkedResourceItemId, item.installationResourceItemId, item.manualInstallationResourceId]),
+  ].filter(id => demoResourceIds.has(id)));
+
+  await Promise.all([
+    projectRepo.replaceAll(projects.filter(project => !demoProjectIds.has(project.id))),
+    quotaRepo.replaceAll(quota.filter(item => item.demoSource !== 'builtin' && !isLegacyDemoQuota(item))),
+    boqLibraryRepo.replaceAll(library.filter(item => item.demoSource !== 'builtin' && item.source !== '系统示例')),
+    boqRepo.replaceAll(boq.filter(item => !demoProjectIds.has(item.projectId))),
+    versionRepo.replaceAll(versions.filter(item => !demoProjectIds.has(item.projectId) && item.demoSource !== 'builtin')),
+    dataFactRepo.replaceAll(facts.filter(item => !relatedToDemo(item))),
+    dataCandidateRepo.replaceAll(candidates.filter(item => !relatedToDemo(item))),
+    dataJobRepo.replaceAll(jobs.filter(item => !relatedToDemo(item))),
+    dataQualityReportRepo.replaceAll(reports.filter(item => !relatedToDemo(item))),
+    experienceSessionRepo.replaceAll(sessions.filter(item => !demoProjectIds.has(item.projectId))),
+    experienceCardRepo.replaceAll(cards.filter(item => !demoProjectIds.has(item.projectId))),
+    resourceRepo.replaceAll(resources
+      .filter(item => item.demoSource !== 'builtin' || personalResourceReferences.has(item.id))
+      .map(item => personalResourceReferences.has(item.id) ? { ...item, demoSource: '', demoKey: '', updatedAt: new Date().toISOString() } : item)),
+    resourcePriceRepo.replaceAll(prices.filter(item => !demoResourceIds.has(item.resourceId) || personalResourceReferences.has(item.resourceId))),
+    quotaResourceUsageRepo.replaceAll(usages.filter(item => !demoResourceIds.has(item.resourceId) || personalResourceReferences.has(item.resourceId))),
+    resourceAttachmentRepo.replaceAll(attachments.filter(item => !demoResourceIds.has(item.resourceId) || personalResourceReferences.has(item.resourceId))),
+  ]);
+  await dataEngineService.rebuildIndicators({ skipBackfill: true });
+  return { removedProjects: demoProjectIds.size };
 }
 
 async function ensureBuiltinDemoData() {
@@ -326,6 +391,7 @@ async function ensureBuiltinDemoData() {
       breakdown: { 人工: 0, 材料: 0, 设备: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
       useBreakdown: false,
       tags: [category.replace(/与.*/, ''), structureGroup],
+      demoSource: 'builtin',
       updatedAt: now,
     };
     quota.push(item);
@@ -338,9 +404,10 @@ async function ensureBuiltinDemoData() {
   for (const [code, name, feature, unit, defaultQty, major, scope, structureGroup, quotaNames] of BUILTIN_BOQ_LIBRARY) {
     if (libraryCodes.has(code)) continue;
     library.push({ id: uid(), code, name, feature, unit, defaultQty, major, scope, structureGroup,
-      quotaItemIds: quotaNames.map(name => quotaByName.get(name)?.id).filter(Boolean), source: '系统示例', version: 'v1.0', note: '', status: 'active', referenceCount: 0, lastReferencedAt: '', lastReferencedProjectName: '', createdAt: now, updatedAt: now });
+      quotaItemIds: quotaNames.map(name => quotaByName.get(name)?.id).filter(Boolean), source: '系统示例', demoSource: 'builtin', version: 'v1.0', note: '', status: 'active', referenceCount: 0, lastReferencedAt: '', lastReferencedProjectName: '', createdAt: now, updatedAt: now });
   }
   await boqLibraryRepo.replaceAll(library);
+  await ensureBuiltinDemoResources(now);
 
   const projects = await projectRepo.all();
   const projectByKey = new Map(projects.map(p => [p.demoKey, p]));
@@ -351,6 +418,7 @@ async function ensureBuiltinDemoData() {
       project = {
         id: uid(),
         demoKey: meta.key,
+        demoSource: 'builtin',
         name: meta.name,
         type: meta.type,
         scale: meta.scale,
@@ -396,6 +464,38 @@ async function ensureBuiltinDemoData() {
   });
   await projectRepo.replaceAll(projects);
   await boqRepo.replaceAll(boq);
+}
+
+async function ensureBuiltinDemoResources(now) {
+  const resources = await resourceRepo.all();
+  const prices = await resourcePriceRepo.all();
+  const byKey = new Map(resources.map(item => [item.demoKey, item]));
+  for (const meta of BUILTIN_RESOURCES) {
+    let resource = byKey.get(meta.key);
+    if (!resource) {
+      resource = {
+        id: uid(), resourceType: meta.resourceType, code: meta.code, category: meta.category, name: meta.name,
+        specModel: meta.specModel, unit: meta.unit, brand: meta.brand, manufacturer: meta.manufacturer,
+        standard: '', processStage: meta.processStage, attributes: {}, tags: ['系统示例', meta.category], status: 'active',
+        preferredPriceId: '', note: '系统内置演示资源', demoSource: 'builtin', demoKey: meta.key, createdAt: now, updatedAt: now,
+      };
+      resources.push(resource);
+      byKey.set(meta.key, resource);
+    }
+    if (!prices.some(price => price.resourceId === resource.id && price.demoSource === 'builtin')) {
+      const price = {
+        id: uid(), resourceId: resource.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: meta.unitPrice,
+        currency: 'CNY', taxIncluded: true, taxRate: 13, region: { province: '四川', city: '成都', district: '' },
+        priceDate: '2026-07-01', validFrom: '', validTo: '2026-12-31', supplier: '系统示例', projectId: '',
+        components: { base: meta.unitPrice, freight: 0, transportLoss: 0, procurementStorage: 0, installation: 0, commissioning: 0, other: 0 },
+        installationScope: '', note: '系统内置演示价格快照', status: 'active', demoSource: 'builtin', createdAt: now,
+      };
+      prices.push(price);
+      resource.preferredPriceId = price.id;
+    }
+  }
+  await resourceRepo.replaceAll(resources);
+  await resourcePriceRepo.replaceAll(prices);
 }
 
 async function seedDemoVersionsAndFacts() {

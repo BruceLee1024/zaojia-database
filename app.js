@@ -9,7 +9,6 @@ import * as experience from './assets/views/experience.js?v=6.2';
 import * as settings  from './assets/views/settings.js?v=6.2';
 import * as ai        from './assets/views/ai.js?v=6.2';
 import * as resources from './assets/views/resources.js?v=6.2';
-import { ensureDemoData } from './assets/data/demo.js?v=6.2';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=6.2';
 import { smartSearch } from './assets/services/aiAssistService.js?v=6.2';
 import { getStorageStatus } from './assets/data/storage.js?v=6.2';
@@ -248,6 +247,7 @@ window.__app = {
   go,
   openAI: ai.open,
   closeAI: ai.close,
+  newAISession: ai.newSession,
   sendAI: () => {
     const inp = document.getElementById('aiInput');
     const t = inp.value.trim();
@@ -261,21 +261,18 @@ window.__app = {
 };
 
 window.addEventListener('DOMContentLoaded', async () => {
-  // 先挂载导航和启动状态，避免初始化本地示例数据时页面出现空壳。
+  // 首次使用保持正式资料库为空；演示资料只能由用户在「备份与恢复」中主动加载。
   renderNav();
   document.getElementById('workspace').innerHTML = '<div class="min-h-full flex items-center justify-center p-8 text-sm text-slate-500">正在读取本机资料…</div>';
-  try {
-    await ensureDemoData();
-  } catch (err) {
-    // 演示数据只负责初始化示例内容，失败时不能阻断已有本地数据和主界面启动。
-    console.error('[demo] 初始化示例数据失败，继续加载已有本地数据', err);
-  }
   ai.close();
   renderStorageBadge();
   await renderWorkspace(++routeGeneration);
 
   document.getElementById('aiInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') window.__app.sendAI();
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      window.__app.sendAI();
+    }
   });
 
   let searchTimer = null;

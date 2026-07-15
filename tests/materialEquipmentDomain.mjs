@@ -16,6 +16,8 @@ export async function testMaterialEquipmentDomain() {
     await resetDomainStores();
     await testResourceIdentityAndReferenceProtection();
     await resetDomainStores();
+    await testDuplicateProtectionAndControlledMerge();
+    await resetDomainStores();
     await testAppendOnlyPricesAndCurrentSelection();
     await resetDomainStores();
     await testQuotaCompositionAndLegacyBreakdown();
@@ -27,6 +29,26 @@ export async function testMaterialEquipmentDomain() {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+async function testDuplicateProtectionAndControlledMerge() {
+  const source = await resourceService.save({ resourceType: 'material', code: 'M-SOURCE', name: '旧钢管', specModel: 'DN100', unit: 'm', brand: '甲' });
+  const target = await resourceService.save({ resourceType: 'material', code: 'M-TARGET', name: '新钢管', specModel: 'DN100', unit: 'm', brand: '乙' });
+  await assert.rejects(() => resourceService.save({ resourceType: 'equipment', code: 'm-source', name: '同编码设备', unit: '台' }), /相同编码/);
+  await assert.rejects(() => resourceService.save({ resourceType: 'material', code: 'M-OTHER', name: '旧钢管', specModel: 'DN100', unit: 'm', brand: '甲' }), /相同编码/);
+  const price = await resourcePriceService.save({ resourceId: source.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 88, region: { city: '成都' }, priceDate: '2026-07-15' });
+  await quotaResourceUsageRepo.upsert({ id: 'usage-merge', quotaItemId: 'q-merge', resourceId: source.id, resourceType: 'material', selectedPriceId: price.id, priceSnapshot: { unitPrice: 88 } });
+  await resourceAttachmentRepo.upsert({ id: 'attachment-merge', resourceId: source.id, priceId: price.id });
+  await globalStoreSet(STORES.project_boq, [{ id: 'line-merge', projectId: 'p-merge', resourceItemId: source.id, resourceSnapshot: { id: source.id, name: source.name } }]);
+  await resourceService.merge(source.id, target.id);
+  assert.equal((await resourceService.get(source.id)).status, 'inactive');
+  assert.equal((await resourceService.get(source.id)).mergedIntoResourceId, target.id);
+  assert.equal((await resourcePriceRepo.findById(price.id)).resourceId, target.id);
+  assert.equal((await quotaResourceUsageRepo.findById('usage-merge')).resourceId, target.id);
+  assert.equal((await resourceAttachmentRepo.findById('attachment-merge')).resourceId, target.id);
+  const line = (await globalStoreGet(STORES.project_boq))[0];
+  assert.equal(line.resourceItemId, target.id);
+  assert.equal(line.resourceSnapshot.id, source.id, '历史项目快照不得改写');
 }
 
 async function testCrossProjectEquipmentPackageIsolation(storage) {
@@ -115,7 +137,7 @@ async function testAppendOnlyPricesAndCurrentSelection() {
   const latest = await resourcePriceService.save({ resourceId: equipment.id, sourceType: 'supplier_quote', priceBasis: 'delivered', unitPrice: 10000, taxIncluded: true, taxRate: 13, region: { city: '成都' }, priceDate: '2026-06-01', supplier: '甲公司' });
   assert.equal((await resourcePriceService.getCurrentPrice(equipment.id)).id, latest.id);
   await resourceService.setPreferredPrice(equipment.id, oldPrice.id);
-  assert.equal((await resourcePriceService.getCurrentPrice(equipment.id)).id, oldPrice.id);
+  assert.equal((await resourcePriceService.getCurrentPrice(equipment.id)).id, latest.id, '过期首选价必须回退到有效价格');
   await assert.rejects(() => resourcePriceService.save({ ...latest, unitPrice: 1 }), err => err.code === 'PRICE_IMMUTABLE');
   await resourceAttachmentRepo.upsert({ id: 'price-evidence', resourceId: equipment.id, priceId: oldPrice.id, status: 'available' });
   assert.equal(typeof resourcePriceService.withdraw, 'function');
@@ -133,6 +155,8 @@ async function testAppendOnlyPricesAndCurrentSelection() {
   await assert.rejects(() => resourcePriceService.save({ resourceId: equipment.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 100, region: { city: '成都' }, priceDate: '2026-02-30' }), /价格日期/);
   await assert.rejects(() => resourcePriceService.save({ resourceId: equipment.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 100, region: { city: '成都' }, priceDate: '2026-02-28', validFrom: '2026-04-31' }), /生效日期/);
   await assert.rejects(() => resourcePriceService.save({ resourceId: equipment.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 100, region: { city: '成都' }, priceDate: '2026-02-28', validTo: '2026-02-29' }), /失效日期/);
+  const future = await resourcePriceService.save({ resourceId: equipment.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 101, region: { city: '成都' }, priceDate: '2026-07-15', validFrom: '2099-01-01' });
+  assert.notEqual((await resourcePriceService.getCurrentPrice(equipment.id)).id, future.id, '未生效价格不能成为当前价');
 }
 
 async function testQuotaCompositionAndLegacyBreakdown() {
@@ -141,7 +165,7 @@ async function testQuotaCompositionAndLegacyBreakdown() {
   const materialPrice = await resourcePriceService.save({ resourceId: material.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 100, region: { province: '四川' }, priceDate: '2026-07-01' });
   const withdrawnMaterialPrice = await resourcePriceService.save({ resourceId: material.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 90, region: { province: '四川' }, priceDate: '2025-07-01' });
   await resourcePriceService.remove(withdrawnMaterialPrice.id);
-  const equipmentPrice = await resourcePriceService.save({ resourceId: equipment.id, sourceType: 'transaction', priceBasis: 'ex_factory', unitPrice: 500, region: { city: '成都' }, priceDate: '2026-07-02' });
+  const equipmentPrice = await resourcePriceService.save({ resourceId: equipment.id, sourceType: 'transaction', priceBasis: 'delivered', unitPrice: 500, region: { city: '成都' }, priceDate: '2026-07-02' });
   await globalStoreSet(STORES.quota_items, [{ id: 'q1', name: '管道安装', breakdown: { 人工: 30, 材料: 5, 机械: 10, 管理费: 2, 利润: 1, 风险: 1 } }]);
   await assert.rejects(() => quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: material.id, quantityPerUnit: 1, selectedPriceId: withdrawnMaterialPrice.id }), /已撤回/);
   const materialUsage = await quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: material.id, resourceType: 'equipment', quantityPerUnit: 2, lossRate: 5, selectedPriceId: materialPrice.id });
@@ -158,6 +182,10 @@ async function testQuotaCompositionAndLegacyBreakdown() {
   assert.equal(applied.useBreakdown, true);
   assert.equal(applied.priceTotal, 504);
   await assert.rejects(() => quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: material.id, quantityPerUnit: -1 }), /用量/);
+  const factoryPrice = await resourcePriceService.save({ resourceId: material.id, sourceType: 'official', priceBasis: 'ex_factory', unitPrice: 80, region: { city: '成都' }, priceDate: '2026-07-15' });
+  await assert.rejects(() => quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: material.id, selectedPriceId: factoryPrice.id, quantityPerUnit: 1 }), /到场价/);
+  await resourceService.setStatus(material.id, 'inactive');
+  await assert.rejects(() => quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: material.id, selectedPriceId: materialPrice.id, quantityPerUnit: 1 }), /停用/);
 }
 
 async function testEquipmentPackageAndRollback(storage) {

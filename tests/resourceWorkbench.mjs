@@ -17,6 +17,8 @@ export async function testResourceWorkbench() {
     await reset();
     await testPreviewUsesCodeFirstIdentityAndExactFallback();
     await reset();
+    await testPreviewFlagsCodeAndCompositeConflict();
+    await reset();
     await testCommitDeduplicatesResourcesAndPrices();
     await reset();
     await testCommitRollsBackBothStores(storage);
@@ -35,6 +37,16 @@ export async function testResourceWorkbench() {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+async function testPreviewFlagsCodeAndCompositeConflict() {
+  await resourceRepo.replaceAll([{ id: 'existing', resourceType: 'material', code: 'M-01', name: '钢管', specModel: 'DN100', unit: 'm', brand: 'A', status: 'active' }]);
+  const preview = await resourceImportService.preview([{ 编码: 'M-02', 名称: '钢管', 规格型号: 'DN100', 单位: 'm', 品牌: 'A' }], 'material');
+  assert.equal(preview.rows[0].action, 'conflict');
+  assert.equal(preview.counts.valid, 0);
+  const report = await resourceImportService.commit(preview);
+  assert.equal(report.counts.errors, 1);
+  assert.equal((await resourceRepo.all()).length, 1);
 }
 
 function testFailureReportMetricTone() {
@@ -172,9 +184,9 @@ async function testPreviewUsesCodeFirstIdentityAndExactFallback() {
   assert.equal(preview.rows[1].existingId, 'fallback');
   assert.equal(preview.rows[2].action, 'update');
   assert.equal(preview.rows[2].existingId, 'coded');
-  assert.equal(preview.rows[3].action, 'create');
+  assert.equal(preview.rows[3].action, 'duplicate');
   assert.equal(preview.rows[4].action, 'invalid');
-  assert.deepEqual(preview.counts, { total: 5, valid: 4, invalid: 1, create: 1, update: 3, duplicate: 0, withPrice: 0 });
+  assert.deepEqual(preview.counts, { total: 5, valid: 4, invalid: 1, create: 0, update: 3, duplicate: 1, conflict: 0, withPrice: 0 });
   await resourceImportService.commit(preview, { updateExisting: true });
   assert.equal((await resourceRepo.findById('coded')).code, 'M-01');
 }

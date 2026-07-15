@@ -59,20 +59,20 @@ async function testUsageComparisonRemovalAndExplicitRefresh() {
   await quotaRepo.replaceAll([{ id: 'q1', name: '泵安装', breakdown: { 人工: 10, 材料: 0, 机械: 5 } }]);
   await resourceRepo.replaceAll([{ id: 'r1', resourceType: 'equipment', name: '泵', unit: '台', status: 'active', preferredPriceId: 'p2' }]);
   await resourcePriceRepo.replaceAll([
-    { id: 'p1', resourceId: 'r1', unitPrice: 100, priceBasis: 'delivered', sourceType: 'official', priceDate: '2025-01-01', validTo: '2025-12-31', supplier: '甲厂', taxIncluded: true, taxRate: 13, region: { province: '四川' } },
-    { id: 'p2', resourceId: 'r1', unitPrice: 125, priceBasis: 'installed_composite', sourceType: 'supplier_quote', priceDate: '2026-07-01', validTo: '2026-12-31', supplier: '乙厂', taxIncluded: false, taxRate: 9, region: { province: '重庆' }, installationScope: '含调试' },
+    { id: 'p1', resourceId: 'r1', unitPrice: 100, priceBasis: 'delivered', sourceType: 'official', priceDate: '2026-01-01', validTo: '2026-12-31', supplier: '甲厂', taxIncluded: true, taxRate: 13, region: { province: '四川' } },
+    { id: 'p2', resourceId: 'r1', unitPrice: 125, priceBasis: 'delivered', sourceType: 'supplier_quote', priceDate: '2026-07-01', validTo: '2026-12-31', supplier: '乙厂', taxIncluded: false, taxRate: 9, region: { province: '重庆' } },
   ]);
   const usage = await quotaResourceService.saveUsage({ quotaItemId: 'q1', resourceId: 'r1', selectedPriceId: 'p1', quantityPerUnit: 2, lossRate: 10 });
   const before = await quotaResourceService.compareUsage(usage.id);
   assert.equal(before.stale, true);
   assert.equal(before.priceDelta, 25);
   assert.equal(before.currentPrice.id, 'p2');
-  ['supplier', 'taxIncluded', 'taxRate', 'region', 'installationScope'].forEach(reason => assert.equal(before.staleReasons.includes(reason), true));
+  ['supplier', 'taxIncluded', 'taxRate', 'region'].forEach(reason => assert.equal(before.staleReasons.includes(reason), true));
   assert.equal((await quotaResourceUsageRepo.findById(usage.id)).selectedPriceId, 'p1', '比较不得自动刷新');
 
   const refreshed = await quotaResourceService.refreshUsageSnapshot(usage.id);
   assert.equal(refreshed.selectedPriceId, 'p2');
-  assert.equal(refreshed.priceSnapshot.priceBasis, 'installed_composite');
+  assert.equal(refreshed.priceSnapshot.priceBasis, 'delivered');
   assert.equal(refreshed.calculatedCost, 275);
   assert.equal((await quotaResourceService.compareUsage(usage.id)).stale, false);
   assert.deepEqual(await quotaResourceService.removeUsage(usage.id), refreshed);

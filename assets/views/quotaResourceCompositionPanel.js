@@ -1,5 +1,6 @@
 import { quotaResourceService } from '../services/quotaResourceService.js?v=6.2';
 import { resourcePriceService } from '../services/resourcePriceService.js?v=6.2';
+import { isPriceEffective } from '../services/resourcePriceService.js?v=6.2';
 import { resourceService } from '../services/resourceService.js?v=6.2';
 import { esc, fmtMoney, toast } from '../utils/dom.js?v=6.2';
 import { buildCompositionPreview, buildUsageComparisonViewModel, renderCompositionPreview } from './quotaResourceComposition.js?v=6.2';
@@ -112,15 +113,15 @@ export function quotaResourceChoiceHtml(item, selected = false) {
 }
 
 function linkForm(resource, prices) {
-  const availablePrices = prices.filter(price => price.status !== 'withdrawn');
+  const availablePrices = prices.filter(price => isPriceEffective(price) && price.priceBasis === 'delivered');
   return `<div class="rounded border border-teal-200 bg-teal-50 p-3">
     <div class="mb-2 text-sm font-medium text-teal-950">关联 ${esc(resource.name)}</div>
     <div class="grid grid-cols-2 gap-2 xl:grid-cols-[1fr_110px_90px_auto]">
-      <label class="col-span-2 text-xs text-slate-600 xl:col-span-1">价格快照<select id="quotaResourcePrice" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${availablePrices.map(price => `<option value="${esc(price.id)}">${fmtMoney(price.unitPrice)} · ${basisLabel(price.priceBasis)} · ${esc(price.priceDate || '')}</option>`).join('')}</select></label>
+      <label class="col-span-2 text-xs text-slate-600 xl:col-span-1">价格快照<select id="quotaResourcePrice" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${availablePrices.map(price => `<option value="${esc(price.id)}">${fmtMoney(price.unitPrice)} · 到场价 · ${esc(price.priceDate || '')} · ${esc(price.region?.city || price.region?.province || '')}</option>`).join('')}</select></label>
       <label class="text-xs text-slate-600">单位用量<input id="quotaResourceQty" type="number" min="0" step="0.0001" value="1" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-right text-sm" /></label>
       <label class="text-xs text-slate-600">损耗率 %<input id="quotaResourceLoss" type="number" min="0" step="0.01" value="0" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-right text-sm" /></label>
       <button id="quotaResourceLink" data-panel-mutation data-no-price="${availablePrices.length ? 'false' : 'true'}" type="button" ${availablePrices.length ? '' : 'disabled'} class="mt-5 h-9 rounded bg-teal-700 px-3 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-300">关联</button>
-    </div>${availablePrices.length ? '' : '<div class="mt-2 text-xs text-amber-700">该资源尚无可用价格，请先在材料/设备库建立价格记录。</div>'}
+    </div>${availablePrices.length ? '' : '<div class="mt-2 text-xs text-amber-700">该资源没有可用于定额的有效到场价；过期、未生效、撤回及非到场价均不可选。</div>'}
   </div>`;
 }
 

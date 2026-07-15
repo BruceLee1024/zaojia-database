@@ -7,6 +7,7 @@ import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, sav
 import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.2';
 import { createRecognitionRequest, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.2';
 import { getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js?v=6.2';
+import { normalizeHubImportResult } from '../assets/views/importer.js?v=6.2';
 import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js?v=6.2';
 import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js?v=6.2';
 import { AI_SYSTEM_PROMPT_PRESETS, DEFAULT_AI_SYSTEM_PROMPT, getAIConfig, getAISystemPromptPreset, restoreBackupSafeAIConfig, toBackupSafeAIConfig } from '../assets/services/aiService.js?v=6.2';
@@ -17,6 +18,7 @@ import { testResourceAttachments } from './resourceAttachments.mjs';
 import { testBackupService } from './backupService.mjs';
 import { testQuotaBoqIntegration } from './quotaBoqIntegration.mjs';
 import { testFinalFixes } from './finalFixes.mjs';
+import { testAiCopilot, testAiSessionPersistence } from './aiCopilot.mjs';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -495,6 +497,7 @@ testSheetHeaderDetection();
 testCombinedNameFeatureColumnMetadata();
 testAiImportRecognitionContract();
 testAiImportWizardSafety();
+testImportCompletionHandoff();
 testAiImportReadinessExplainsMissingRequiredMapping();
 testLibraryDetailSummary();
 testLibraryMetricCards();
@@ -516,7 +519,17 @@ await testBackupService();
 await testQuotaBoqIntegration();
 await testResourceHealth();
 await testFinalFixes();
+testAiCopilot();
+await testAiSessionPersistence();
 console.log('All tests passed');
+
+function testImportCompletionHandoff() {
+  const result = normalizeHubImportResult({ projectId: 'project-1', success: '12', missingPrice: '3', total: '15', sourceName: '清单.xlsx' });
+  assert.deepEqual(result, { projectId: 'project-1', success: 12, missingPrice: 3, total: 15, sourceName: '清单.xlsx' });
+  assert.deepEqual(normalizeHubImportResult({ success: -1, missingPrice: 'bad' }), {
+    projectId: '', success: 0, missingPrice: 0, total: 0, sourceName: '项目工程量清单',
+  });
+}
 
 async function testLocalFolderJsonStorage() {
   globalThis.localStorage = {
@@ -1180,7 +1193,7 @@ async function testBuiltinDemoData() {
     },
   };
   const repo = await import('../assets/data/repository.js?v=test-demo');
-  const { ensureDemoData } = await import('../assets/data/demo.js?v=test-demo');
+  const { ensureDemoData, removeDemoData } = await import('../assets/data/demo.js?v=test-demo');
 
   await Promise.all([
     repo.quotaRepo.replaceAll([]),
@@ -1195,6 +1208,10 @@ async function testBuiltinDemoData() {
     repo.dataQualityReportRepo.replaceAll([]),
     repo.experienceSessionRepo.replaceAll([]),
     repo.experienceCardRepo.replaceAll([]),
+    repo.resourceRepo.replaceAll([]),
+    repo.resourcePriceRepo.replaceAll([]),
+    repo.quotaResourceUsageRepo.replaceAll([]),
+    repo.resourceAttachmentRepo.replaceAll([]),
   ]);
 
   const first = await ensureDemoData();
@@ -1205,8 +1222,18 @@ async function testBuiltinDemoData() {
   assert.equal((await repo.boqRepo.all()).length >= 20, true);
   assert.equal((await repo.versionRepo.all()).length >= 3, true);
   assert.equal((await repo.dataFactRepo.all()).some(f => f.sourceType === 'archived_project'), true);
+  const demoResources = await repo.resourceRepo.all();
+  assert.equal(demoResources.length >= 6, true);
+  assert.equal(demoResources.every(item => item.demoSource === 'builtin'), true);
+  assert.equal((await repo.resourcePriceRepo.all()).every(item => item.demoSource === 'builtin'), true);
 
   const second = await ensureDemoData();
-  assert.equal(second.loaded, false);
+  assert.equal(second.loaded, true);
   assert.equal((await repo.projectRepo.all()).length, 3);
+  await repo.resourceRepo.upsert({ id: 'personal-resource', resourceType: 'material', code: 'PERSONAL-M-001', name: '个人材料', unit: 'm', status: 'active' });
+  assert.equal((await ensureDemoData()).loaded, false, '个人资源存在时不得混合加载演示数据');
+  const removed = await removeDemoData();
+  assert.equal(removed.removedProjects, 3);
+  assert.deepEqual((await repo.resourceRepo.all()).map(item => item.id), ['personal-resource']);
+  assert.equal((await repo.resourcePriceRepo.all()).length, 0);
 }

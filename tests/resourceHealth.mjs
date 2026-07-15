@@ -38,7 +38,7 @@ export async function testResourceHealth() {
     },
   ];
 
-  assert.equal(selectCurrentResourcePrice(resources[1], prices, localToday).id, 'p-expired', '首选价即使过期也仍是当前价');
+  assert.equal(selectCurrentResourcePrice(resources[1], prices, localToday), null, '过期首选价不能成为当前价');
   assert.deepEqual(getUsageComparisonReasons(usages[1], resources[2], prices[1]), []);
   assert.deepEqual(getUsageComparisonReasons({ ...usages[1], resourceType: 'material' }, resources[2], prices[1]), ['resourceType']);
   assert.equal(getUsageComparisonReasons({ ...usages[1], resourceId: 'e-inactive' }, resources[3], prices[3])[0], 'resourceInactive');
@@ -59,13 +59,13 @@ export async function testResourceHealth() {
     prices: [{ id: 'only-expired-price', resourceId: onlyExpired.id, priceDate: '2026-07-01', validTo: '2026-07-14' }],
     today: localToday,
   });
-  assert.equal(onlyExpiredHealth.missingCurrentPrice.total, 0);
+  assert.equal(onlyExpiredHealth.missingCurrentPrice.total, 1);
   assert.deepEqual(onlyExpiredHealth.expiredCurrentPrice.resourceIds, [onlyExpired.id]);
 
   const health = buildResourceHealth({ resources, prices, attachments, usages, today: localToday });
   assert.deepEqual(health.missingCurrentPrice, {
-    total: 1, material: 1, equipment: 0,
-    resourceIds: ['m-no-price'], materialResourceIds: ['m-no-price'], equipmentResourceIds: [], priceIds: [], usageIds: [], quotaItemIds: [],
+    total: 2, material: 2, equipment: 0,
+    resourceIds: ['m-no-price', 'm-expired'], materialResourceIds: ['m-no-price', 'm-expired'], equipmentResourceIds: [], priceIds: [], usageIds: [], quotaItemIds: [],
   });
   assert.deepEqual(health.expiredCurrentPrice, {
     total: 1, material: 1, equipment: 0,
@@ -79,7 +79,7 @@ export async function testResourceHealth() {
     total: 1, material: 0, equipment: 1,
     resourceIds: ['e-current'], materialResourceIds: [], equipmentResourceIds: ['e-current'], priceIds: ['p-current'], usageIds: ['u-stale'], quotaItemIds: ['q-stale'],
   });
-  assert.deepEqual(health.summary, { total: 4, material: 2, equipment: 2 });
+  assert.deepEqual(health.summary, { total: 5, material: 3, equipment: 2 });
 
   const mixedPending = buildResourceHealth({
     resources: [
@@ -127,7 +127,7 @@ export async function testResourceHealth() {
   assert.equal(normalNavigation.selectedId, 'm-no-price');
   assert.deepEqual(normalNavigation.resourceIds, []);
   assert.equal(normalNavigation.healthLabel, '');
-  assert.deepEqual(healthResourceRouteParams('missingCurrentPrice', health.missingCurrentPrice, 'material'), { resourceIds: ['m-no-price'], healthLabel: '缺参考价' });
+  assert.deepEqual(healthResourceRouteParams('missingCurrentPrice', health.missingCurrentPrice, 'material'), { resourceIds: ['m-no-price', 'm-expired'], healthLabel: '缺参考价' });
   assert.deepEqual(healthResourceRouteParams('expiredCurrentPrice', health.expiredCurrentPrice, 'material'), { resourceIds: ['m-expired'], healthLabel: '价格已过期' });
   assert.deepEqual(healthResourceRouteParams('missingQuoteEvidence', health.missingQuoteEvidence, 'equipment'), { resourceIds: ['e-current'], healthLabel: '询价缺附件' });
   assert.equal(quotaRouteNotice({ healthReason: 'pending-resource-updates', affectedCount: 2 }), '来自“资源健康”：2 条定额的材料/设备价格或元数据已变更，请打开人材机组成对比并确认刷新快照。');

@@ -282,7 +282,16 @@ async function importConfirmed(workspace) {
     if (workspace.isInvalidated) return;
     window.__app.state.currentProjectId = state.projectId;
     toast(`项目清单导入完成：成功 ${result.success} 条，缺单价 ${result.missingPrice} 条`, 'success');
-    window.__app.go('boq', { projectId: state.projectId, imported: true });
+    window.__app.go('importer', {
+      mode: 'hub',
+      importResult: {
+        projectId: state.projectId,
+        success: result.success,
+        missingPrice: result.missingPrice,
+        total: lines.length,
+        sourceName: state.fileName || '项目工程量清单',
+      },
+    });
   } catch (error) { toast(`导入失败：${error.message}`, 'error'); }
   finally { state.busy = false; }
 }

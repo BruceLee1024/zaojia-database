@@ -6,8 +6,8 @@ import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
 import { experienceService } from '../services/experienceService.js?v=6.2';
 import { STORES, dbGetAll } from '../data/repository.js?v=6.2';
 import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, storageGetAttachment, storageGetCache, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder, withFolderMirrorSuspended } from '../data/storage.js?v=6.2';
-import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, resetWithGenerator, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=6.2';
-import { ensureDemoData } from '../data/demo.js?v=6.2';
+import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=6.2';
+import { ensureDemoData, removeDemoData } from '../data/demo.js?v=6.2';
 import { esc, toast, fmt, scopedDom } from '../utils/dom.js?v=6.2';
 
 const SETTINGS_TABS = [
@@ -361,7 +361,7 @@ function renderBackupTab() {
         ${backupAction('恢复备份', '接受旧 JSON 或完整 ZIP；恢复前会先校验全部内容。', 'upload_file', 'btnImport')}
         ${backupAction('导出完整 ZIP', '包含所有业务数据、校验清单和附件原文件。', 'folder_zip', 'btnExportZip')}
         ${backupAction('导出兼容 JSON', '不包含附件二进制，仅用于兼容旧版和轻量留档。', 'download', 'btnExport')}
-        ${backupAction('加载演示数据', '已有业务数据不会被覆盖，用于快速体验系统流程。', 'database', 'btnDemo')}
+        ${backupAction('加载演示数据', '包含项目、定额、材料、设备与价格快照；仅在资料库为空时加载。', 'database', 'btnDemo')}
       </div>
       <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">ZIP 才是可完整迁移附件的备份；JSON 中只有附件元数据。备份包含敏感业务资料，请妥善保存。任何备份都不会导出或覆盖当前设备的 API Key。</div>
     </section>
@@ -381,7 +381,7 @@ function renderDangerTab() {
         </div>
       </div>
       <div class="mt-5 grid grid-cols-3 gap-4">
-        ${dangerAction('重置演示数据', '清空当前业务数据后重新加载内置演示数据。', 'restart_alt', 'btnDemoReset')}
+        ${dangerAction('清理演示数据', '仅删除系统示例项目、定额、材料、设备、价格及派生记录，不影响客户资料。', 'restart_alt', 'btnDemoClear')}
         ${dangerAction('清理待检查记录', '删除待检查记录，不影响可用案例、项目和清单。', 'mop', 'btnEngineClearCandidates')}
         ${dangerAction('清空全部数据', '清空所有业务记录与附件原文件。', 'delete_forever', 'btnClear')}
       </div>
@@ -468,7 +468,7 @@ function bindSettingsEvents(document = globalThis.document) {
   on('btnEngineRebuild', rebuildEngine);
   on('btnEngineClearCandidates', clearCandidates);
   on('btnDemo', loadDemo);
-  on('btnDemoReset', resetDemo);
+  on('btnDemoClear', clearDemo);
   on('btnClear', clearAll);
 }
 
@@ -649,24 +649,24 @@ async function clearCandidates() {
 }
 
 async function loadDemo() {
-  if (!confirm('将加载内置演示数据：定额库 + 3 个示例项目 + 报价版本 + 指标样本。已有业务数据不会被覆盖。')) return;
+  if (!confirm('将加载内置演示数据：定额库、材料设备库、3 个示例项目、价格快照、报价版本和指标样本。为避免与个人资料混用，资料库必须为空。')) return;
   const result = await ensureDemoData();
   if (!result.loaded) {
-    toast('当前已有业务数据；如需重新体验，请使用「重置演示数据」。', 'success');
+    toast('当前正式资料库不为空，演示数据未加载。请使用单独的浏览器资料库体验，或先备份并清理演示数据。', 'error');
     return;
   }
   toast('演示数据已加载', 'success');
   window.__app.go('dashboard');
 }
 
-async function resetDemo() {
-  if (!confirm('将先清空当前业务数据，再重新加载演示数据。此操作不可撤销，确定继续？')) return;
+async function clearDemo() {
+  if (!confirm('仅清理系统内置演示资料及其派生记录，客户项目、定额、清单和附件不会删除。确定继续？')) return;
   try {
-    await resetWithGenerator(backupAdapter, () => ensureDemoData({ force: true }));
-    toast('演示数据已重置', 'success');
-    window.__app.go('dashboard');
+    const result = await removeDemoData();
+    toast(result.removedProjects ? '演示数据已清理，客户资料保持不变。' : '没有检测到演示数据。', 'success');
+    window.__app.go('importer');
   } catch (error) {
-    toast(backupOperationErrorMessage(error, '重置演示数据'), 'error');
+    toast(backupOperationErrorMessage(error, '清理演示数据'), 'error');
   }
 }
 

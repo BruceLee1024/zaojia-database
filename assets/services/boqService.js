@@ -6,6 +6,8 @@ import { calculateAmount } from '../utils/costing.js?v=6.2';
 import { hasMissingPrice } from '../utils/costing.js?v=6.2';
 import { localDateKey } from '../utils/localDate.js?v=6.2';
 import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.2';
+import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.2';
+import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.2';
 
 const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 
@@ -59,8 +61,9 @@ export const boqService = {
       ]);
       if (!project) throw new Error('项目不存在');
     if (!resource || resource.resourceType !== 'equipment') throw new Error('只能将设备加入项目');
+    assertResourceAvailableForNewUse(resource);
     if (!price || price.resourceId !== resourceId) throw new Error('设备价格不存在或不属于当前设备');
-    if (price.status === 'withdrawn') throw new Error('已撤回价格不能加入项目');
+    assertPriceUsableForCosting(price, resource, { context: 'equipment' });
     const quantity = Number(qty);
     if (!Number.isFinite(quantity) || quantity < 0) throw new Error('设备数量不能为负数');
     if (installQuotaId && !installQuota) throw new Error('安装定额不存在');

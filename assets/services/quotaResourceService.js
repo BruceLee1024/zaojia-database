@@ -1,6 +1,8 @@
 import { quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.2';
 import { uid } from '../utils/dom.js?v=6.2';
 import { resourcePriceService } from './resourcePriceService.js?v=6.2';
+import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.2';
+import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.2';
 import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=6.2';
 
 export const quotaResourceService = {
@@ -52,6 +54,8 @@ export const quotaResourceService = {
     ]);
     if (!resource) throw new Error('材料或设备已失效，无法刷新快照');
     if (!currentPrice) throw new Error('当前材料或设备没有可用价格');
+    assertResourceAvailableForNewUse(resource);
+    assertPriceUsableForCosting(currentPrice, resource, { context: 'quota' });
     return await quotaResourceUsageRepo.update(usageId, {
       resourceType: resource.resourceType,
       selectedPriceId: currentPrice.id,
@@ -66,6 +70,7 @@ export const quotaResourceService = {
     if (!quota) throw new Error('定额不存在');
     const resource = await resourceRepo.findById(payload.resourceId);
     if (!resource) throw new Error('材料或设备不存在');
+    assertResourceAvailableForNewUse(resource);
     const quantityPerUnit = Number(payload.quantityPerUnit);
     const lossRate = Number(payload.lossRate || 0);
     if (!Number.isFinite(quantityPerUnit) || quantityPerUnit < 0) throw new Error('单位用量不能为负数');
@@ -74,7 +79,7 @@ export const quotaResourceService = {
       ? await resourcePriceRepo.findById(payload.selectedPriceId)
       : await resourcePriceService.getCurrentPrice(payload.resourceId);
     if (!price || price.resourceId !== payload.resourceId) throw new Error('所选价格不存在或不属于当前材料/设备');
-    if (price.status === 'withdrawn') throw new Error('已撤回价格不能用于定额资源快照');
+    assertPriceUsableForCosting(price, resource, { context: 'quota' });
     const priceSnapshot = snapshotPrice(price);
     const usage = {
       id: payload.id || uid(),

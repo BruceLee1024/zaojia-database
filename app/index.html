@@ -106,6 +106,50 @@
     margin-left: auto;
     margin-right: auto;
   }
+  /* 资料库工作台：材料、设备、定额、清单统一遵循同一层级与密度。 */
+  .library-workbench { min-height: 700px; gap: 16px; }
+  .library-toolbar {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 16px;
+  }
+  .library-toolbar-main { display: flex; align-items: center; gap: 12px; }
+  .library-toolbar-icon {
+    display: inline-flex;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    border: 1px solid #99f6e4;
+    border-radius: 8px;
+    background: #f0fdfa;
+    color: #0f766e;
+  }
+  .library-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+  .library-filter-row { display: grid; grid-template-columns: minmax(240px, 1fr) auto; gap: 8px; margin-top: 16px; }
+  .library-filter-controls { display: flex; min-width: 0; gap: 8px; }
+  .library-summary-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .library-summary-grid.library-summary-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .library-metric-card { min-height: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: none; }
+  .library-split { display: grid; min-height: 0; flex: 1 1 auto; gap: 16px; grid-template-columns: minmax(0, 1fr) 400px; }
+  .library-list-pane, .library-detail-pane { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+  .library-list-pane { min-width: 0; }
+  .library-detail-pane { min-width: 0; }
+  @media (max-width: 1024px) {
+    .library-toolbar-main { align-items: flex-start; flex-wrap: wrap; }
+    .library-toolbar-actions { width: 100%; margin-left: 0; }
+    .library-filter-row { grid-template-columns: 1fr; }
+    .library-filter-controls { flex-wrap: wrap; }
+    .library-split { grid-template-columns: 1fr; }
+    .library-detail-pane { min-height: 360px; }
+  }
+  @media (max-width: 640px) {
+    .library-toolbar { padding: 12px; }
+    .library-toolbar-actions > button { flex: 1 1 auto; }
+    .library-summary-grid, .library-summary-grid.library-summary-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
   .table-fixed th {
     position: sticky;
     top: 0;
@@ -150,9 +194,9 @@
   .ai-bubble-user { background: var(--brand-container); color: #fff; }
   .ai-bubble-assistant { background: #f1f5f9; color: #0f172a; }
   .app-shell { width: 100%; box-sizing: border-box; transition: padding-right .18s ease; }
-  body.ai-open .app-shell { padding-right: 360px; }
+  body.ai-open .app-shell { padding-right: 520px; }
   .ai-drawer {
-    width: 360px;
+    width: 520px;
     transform: translateX(100%);
     transition: transform .18s ease;
   }
@@ -162,9 +206,19 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
+  .ai-session-list { max-height: 96px; overflow: auto; }
+  .ai-quick-tasks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .ai-response { align-self: flex-start; max-width: 100%; }
+  .ai-composer { padding: 12px; background: #fff; }
+  .ai-composer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+  .ai-composer-input { min-height: 52px; line-height: 1.45; }
+  .ai-composer-send { min-width: 52px; min-height: 52px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+  .ai-composer-note { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 8px; color: #64748b; font-size: 11px; line-height: 1.35; }
+  .ai-composer-note .material-symbols-outlined { font-size: 14px; color: #0f766e; flex: 0 0 auto; }
+  .ai-key { padding: 1px 4px; border: 1px solid #dbe3ea; border-radius: 4px; background: #f8fafc; color: #475569; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10px; white-space: nowrap; }
   @media (max-width: 1100px) {
     body.ai-open .app-shell { padding-right: 0; }
-    .ai-drawer { width: min(360px, calc(100vw - 24px)); }
+    .ai-drawer { width: min(520px, calc(100vw - 24px)); }
   }
   @media (max-width: 640px) {
     .app-shell > aside { width: 64px !important; }
@@ -285,28 +339,33 @@
   </div>
 </div>
 
-<!-- AI 抽屉 -->
+<!-- AI 工作副驾 -->
 <div id="aiDrawer" class="ai-drawer fixed right-0 top-0 bottom-0 bg-white z-40 flex flex-col border-l border-slate-200" role="dialog" aria-modal="false" aria-labelledby="aiDrawerTitle" aria-hidden="true">
-  <div class="h-14 px-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+  <div class="px-4 py-3 border-b border-slate-200 flex items-start justify-between shrink-0">
     <div class="min-w-0">
       <div class="font-semibold flex items-center gap-2">
         <span class="material-symbols-outlined icon-action text-teal-700">smart_toy</span>
-        <span id="aiDrawerTitle">个人造价助手</span>
+        <span id="aiDrawerTitle">AI 造价工作副驾</span>
       </div>
-      <div class="mt-0.5 text-[11px] text-slate-500">只读参考 · 不自动修改你的清单</div>
+      <div class="mt-0.5 text-[11px] text-slate-500">本地优先 · 外发前确认 · 写入需二次确认</div>
     </div>
-    <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1" aria-label="关闭 AI 助手">
-      <span class="material-symbols-outlined icon-action" aria-hidden="true">close</span>
-    </button>
+    <div class="flex items-center gap-1">
+      <button onclick="window.__app.newAISession()" class="text-slate-400 hover:text-teal-700 p-1" aria-label="新建 AI 会话" title="新建对话"><span class="material-symbols-outlined icon-action" aria-hidden="true">add_comment</span></button>
+      <button onclick="window.__app.closeAI()" class="text-slate-400 hover:text-slate-700 p-1" aria-label="关闭 AI 助手"><span class="material-symbols-outlined icon-action" aria-hidden="true">close</span></button>
+    </div>
+  </div>
+  <div class="border-b border-slate-200 bg-slate-50 px-3 py-2 shrink-0">
+    <div class="flex items-center justify-between text-[11px] text-slate-500 mb-1"><span>当前项目的本地会话</span><span>最多保留 30 个</span></div>
+    <div id="aiSessionList" class="ai-session-list space-y-0.5" aria-label="AI 会话列表"></div>
   </div>
   <div id="aiMsgs" class="flex-1 min-h-0 overflow-auto scroll-thin p-3 space-y-2 bg-slate-50" role="log" aria-live="polite" aria-relevant="additions"></div>
-  <div class="border-t border-slate-200 p-3 space-y-2 shrink-0 bg-white">
-    <div class="flex gap-2">
-      <input id="aiInput" type="text" placeholder="问点啥：5万m³/d 水池造价区间 / 推荐防水定额 …"
-        class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-teal-600" />
-      <button onclick="window.__app.sendAI()" class="px-4 py-2 text-sm brand-bg text-white">发送</button>
+  <div class="ai-composer border-t border-slate-200 shrink-0">
+    <div class="ai-composer-row">
+      <textarea id="aiInput" rows="2" placeholder="描述你要完成的工作：审查、对标、估算、查经验或推荐定额…"
+        class="ai-composer-input w-full border border-gray-300 rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:border-teal-600" aria-label="向 AI 造价工作副驾提问"></textarea>
+      <button onclick="window.__app.sendAI()" class="ai-composer-send px-3 text-sm brand-bg text-white" aria-label="发送给 AI"><span class="material-symbols-outlined text-[17px] leading-none" aria-hidden="true">arrow_upward</span><span>发送</span></button>
     </div>
-    <div class="text-[11px] text-gray-400">提示：在「数据与备份」中配置 AI。只有主动提问时，相关内容才会发送给你配置的 AI。</div>
+    <div class="ai-composer-note"><span class="material-symbols-outlined" aria-hidden="true">lock</span><span><span class="ai-key">Enter</span> 发送，<span class="ai-key">Shift + Enter</span> 换行；仅在你确认后外发去标识化资料。</span></div>
   </div>
 </div>
 

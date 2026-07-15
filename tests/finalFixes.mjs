@@ -231,7 +231,7 @@ function testEquipmentDialogSafetyAndWithdrawal() {
   const hostile = 'x\" onclick=\"alert(1)<script>';
   const dialog = buildEquipmentPackageDialog({
     projects: [{ id: hostile, name: '<img src=x>' }],
-    prices: [{ id: 'withdrawn', status: 'withdrawn', unitPrice: 1 }, { id: hostile, status: 'active', unitPrice: 2 }],
+    prices: [{ id: 'withdrawn', status: 'withdrawn', unitPrice: 1 }, { id: hostile, status: 'active', priceBasis: 'delivered', unitPrice: 2 }],
     quotas: [{ id: hostile, name: '<svg onload=alert(1)>' }],
   });
   assert.equal(dialog.hasActivePrices, true);

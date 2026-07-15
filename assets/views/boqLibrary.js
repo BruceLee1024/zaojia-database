@@ -15,13 +15,13 @@ export async function render(workspace = document.getElementById('workspace')) {
   if (route.selectedId) state.selectedId = route.selectedId;
   window.__boqLibrary = { select: id => select(workspace, id), create, edit, apply, remove, importExcel };
   workspace.innerHTML = `
-    <div class="page-frame h-full min-h-[700px] flex flex-col gap-4">
-      <section class="rounded-lg border border-slate-200 bg-white p-4">
-        <div class="flex items-center gap-3"><div><h1 class="text-xl font-semibold">我的清单库</h1><p class="mt-1 text-xs text-slate-500">独立于项目的通用清单库，套用后可在项目内独立调整。</p></div><div class="flex-1"></div><button id="libImport" class="h-10 px-4 brand-bg text-white text-sm">导入 Excel</button><button onclick="window.__boqLibrary.create()" class="h-10 px-4 bg-teal-700 text-white text-sm">新建清单</button><button id="libTemplate" class="h-10 px-4 border text-sm">下载模板</button></div>
-        <div class="mt-4 relative"><input id="libKeyword" value="${esc(state.keyword)}" placeholder="搜索清单编码 / 名称 / 项目特征" class="h-10 w-full border px-3 text-sm" /></div>
+    <div class="page-frame library-workbench h-full flex flex-col">
+      <section class="library-toolbar">
+        <div class="library-toolbar-main"><span class="library-toolbar-icon material-symbols-outlined">format_list_bulleted</span><div><h1 class="text-xl font-semibold text-slate-950">我的清单库</h1><p class="mt-1 text-xs text-slate-500">维护可复用的标准清单，套用后可在项目内独立调整。</p></div><div class="library-toolbar-actions"><button id="libTemplate" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button id="libImport" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__boqLibrary.create()" class="h-9 px-4 brand-bg text-white text-sm">新建清单</button></div></div>
+        <div class="library-filter-row"><div class="relative"><input id="libKeyword" value="${esc(state.keyword)}" placeholder="搜索清单编码 / 名称 / 项目特征" class="h-10 w-full border px-3 text-sm" /></div><div class="library-filter-controls"><span class="inline-flex h-10 items-center px-3 text-xs text-slate-500">从标准清单中选择查看详情</span></div></div>
       </section>
-      <div id="libraryMetrics" class="grid grid-cols-4 gap-4"></div>
-      <div class="grid grid-cols-[minmax(0,1fr)_400px] gap-4 flex-1 min-h-0"><section class="rounded-lg border bg-white overflow-auto"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50"><tr><th class="p-3 text-left">清单编码</th><th class="p-3 text-left">清单名称</th><th class="p-3 text-left">项目特征</th><th class="p-3 text-left">单位</th><th class="p-3 text-right">默认工程量</th><th class="p-3 text-center">关联定额</th></tr></thead><tbody id="libraryRows"></tbody></table></section><aside id="libraryDetail" class="rounded-lg border border-slate-200 bg-white overflow-hidden min-w-0"></aside></div>
+      <div id="libraryMetrics" class="library-summary-grid library-summary-grid--4"></div>
+      <div class="library-split"><section class="library-list-pane overflow-auto"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50"><tr><th class="p-3 text-left">清单编码</th><th class="p-3 text-left">清单名称</th><th class="p-3 text-left">项目特征</th><th class="p-3 text-left">单位</th><th class="p-3 text-right">默认工程量</th><th class="p-3 text-center">关联定额</th></tr></thead><tbody id="libraryRows"></tbody></table></section><aside id="libraryDetail" class="library-detail-pane"></aside></div>
     </div>`;
   const document = scopedDom(workspace);
   document.getElementById('libImport').onclick = importExcel;
@@ -64,7 +64,7 @@ export function buildLibraryMetricCards({ total = 0, water = 0, added = 0, refer
 
 function metric(card) {
   const tone = METRIC_TONES[card.tone] || METRIC_TONES.blue;
-  return `<div class="min-h-[138px] rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-[0_3px_12px_rgba(15,23,42,0.06)]"><div class="kpi-content-top flex h-full gap-4"><div class="icon-surface mt-0.5 ${tone.surface}"><span class="material-symbols-outlined icon-kpi">${card.icon}</span></div><div class="min-w-0"><div class="text-[17px] font-semibold text-slate-700">${esc(card.label)}</div><div class="mt-1 flex items-baseline gap-2"><span class="text-[34px] font-semibold leading-tight tracking-tight tabular-nums text-slate-950">${esc(card.value)}</span><span class="text-sm text-slate-500">${esc(card.unit)}</span></div><div class="mt-2 text-sm font-medium ${tone.note}">${esc(card.note)}</div></div></div></div>`;
+  return `<div class="library-metric-card px-4 py-3"><div class="kpi-content-top flex h-full gap-3"><div class="icon-surface ${tone.surface}"><span class="material-symbols-outlined icon-kpi">${card.icon}</span></div><div class="min-w-0"><div class="text-xs font-medium text-slate-500">${esc(card.label)}</div><div class="mt-1 flex items-baseline gap-2"><span class="text-2xl font-semibold leading-tight tabular-nums text-slate-950">${esc(card.value)}</span><span class="text-xs text-slate-500">${esc(card.unit)}</span></div><div class="mt-1 text-xs font-medium ${tone.note}">${esc(card.note)}</div></div></div></div>`;
 }
 function select(workspace, id) { state.selectedId = id; renderRows(workspace); }
 export function getLibraryDetailSummary(item = {}) {

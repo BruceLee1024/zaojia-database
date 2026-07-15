@@ -62,6 +62,25 @@ export const resourcePriceService = {
   },
 };
 
+export function isPriceEffective(price, today = localDateKey()) {
+  return Boolean(price
+    && price.status !== 'withdrawn'
+    && (!price.validFrom || price.validFrom <= today)
+    && (!price.validTo || price.validTo >= today));
+}
+
+export function assertPriceUsableForCosting(price, resource, { context = 'quota' } = {}) {
+  if (!price || price.resourceId !== resource?.id) throw new Error('价格记录不存在或不属于当前材料/设备');
+  if (!isPriceEffective(price)) throw new Error('所选价格尚未生效、已过期或已撤回，不能用于新计价');
+  if (context === 'quota' && price.priceBasis !== 'delivered') {
+    throw new Error('定额资源组成只能使用到场价');
+  }
+  if (context === 'equipment' && !['delivered', 'installed_composite'].includes(price.priceBasis)) {
+    throw new Error('设备项目包只能使用到场价或安装综合价');
+  }
+  return price;
+}
+
 async function withdrawPrice(id) {
   const price = await resourcePriceRepo.findById(id);
   if (!price) return null;
@@ -86,10 +105,10 @@ export function selectResourcePrice(resource, prices = [], today = localDateKey(
   if (!resource) return null;
   const resourcePrices = prices.filter(price => price.resourceId === resource.id && price.status !== 'withdrawn');
   const preferred = resourcePrices.find(price => price.id === resource.preferredPriceId);
-  if (preferred) return preferred;
+  if (preferred && (latestRegardlessOfValidity || isPriceEffective(preferred, today))) return preferred;
   if (latestRegardlessOfValidity) return resourcePrices.sort((a, b) => comparePriceDate(b, a))[0] || null;
   const latestValid = resourcePrices
-    .filter(price => !price.validTo || price.validTo >= today)
+    .filter(price => isPriceEffective(price, today))
     .sort((a, b) => comparePriceDate(b, a))[0] || null;
   return latestValid;
 }
