@@ -4,6 +4,7 @@ import { resourceService } from '../services/resourceService.js?v=1.0';
 import { projectRepo, quotaRepo } from '../data/repository.js?v=4.1';
 import { exportResourceTemplate } from '../data/excel.js?v=4.1';
 import { closeModal, esc, fmtMoney, openModal, toast } from '../utils/dom.js';
+import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=1.0';
 
 const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', rows: [], prices: new Map(), usage: null };
 const LABELS = {
@@ -42,7 +43,7 @@ async function refresh() {
   state.prices = new Map(await Promise.all(state.rows.map(async item => [item.id, await resourcePriceService.getCurrentPrice(item.id)])));
   state.usage = state.selectedId ? await resourceService.usage(state.selectedId) : null;
   paint();
-  if (state.selectedId) await loadPriceHistory(state.selectedId);
+  if (state.selectedId) await Promise.all([loadPriceHistory(state.selectedId), loadAttachmentPanel(state.selectedId)]);
 }
 
 function paint() {
@@ -98,7 +99,7 @@ function detailPanel(item, meta) {
     </div>
     <section class="p-4 border-b border-slate-200"><div class="flex items-center"><div><h3 class="font-semibold text-slate-900">价格历史</h3><p class="mt-1 text-xs text-slate-500">${current ? `当前价 ${fmtMoney(current.unitPrice)} · ${esc(current.priceDate)}` : '还没有价格快照'}</p></div><div class="flex-1"></div><button onclick="window.__resources.addPrice('${item.id}')" class="h-8 px-3 border border-teal-300 bg-white text-xs text-teal-700">新增价格</button></div><div id="resourcePriceHistory" class="mt-3 text-xs text-slate-400">正在读取价格历史…</div></section>
     <section class="p-4 border-b border-slate-200"><h3 class="font-semibold text-slate-900">使用位置</h3><div class="mt-3 grid grid-cols-2 gap-2">${metric('定额引用', usage.quotaUsageCount || 0)}${metric('项目清单', usage.projectLineCount || 0)}</div>${usage.total ? `<p class="mt-3 text-xs leading-5 text-slate-500">定额 ID：${esc((usage.quotaItemIds || []).join('、') || '-')}<br>项目 ID：${esc((usage.projectIds || []).join('、') || '-')}</p>` : '<p class="mt-3 text-xs text-slate-400">尚未被定额或项目清单引用。</p>'}</section>
-    <section class="p-4 border-b border-slate-200"><h3 class="font-semibold text-slate-900">附件</h3><div class="mt-3 border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-500">合同、报价单与图纸附件将在 Task 3 接入，本页暂不保存二进制文件。</div></section>
+    ${attachmentPanelShell()}
     <div class="p-4 flex flex-wrap gap-2">${state.resourceType === 'equipment' ? `<button onclick="window.__resources.addToProject('${item.id}')" ${current ? '' : 'disabled'} class="h-9 flex-1 brand-bg px-3 text-sm text-white disabled:opacity-40">加入项目</button>` : ''}<button onclick="window.__resources.edit('${item.id}')" class="h-9 px-3 border border-slate-300 bg-white text-sm">编辑</button><button onclick="window.__resources.remove('${item.id}')" class="h-9 px-3 border border-red-200 bg-white text-sm text-red-600">删除</button></div>
   </aside>`;
 }
@@ -109,7 +110,7 @@ function metric(label, value) { return `<div class="border border-slate-200 bg-s
 
 function exposeActions() {
   window.__resources = {
-    select: async id => { state.selectedId = id; state.usage = await resourceService.usage(id); paint(); await loadPriceHistory(id); },
+    select: async id => { state.selectedId = id; state.usage = await resourceService.usage(id); paint(); await Promise.all([loadPriceHistory(id), loadAttachmentPanel(id)]); },
     filter: (key, value) => { state[key] = value; clearTimeout(window.__resourceFilterTimer); window.__resourceFilterTimer = setTimeout(refresh, 150); },
     clearFilters: () => { state.keyword = ''; state.category = ''; state.status = ''; refresh(); },
     edit: showResourceEditor,

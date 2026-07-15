@@ -6,7 +6,9 @@ const DIRECTORY_HANDLE_KEY = '__costdb_directory_handle';
 const PENDING_SYNC_KEY = 'costdb_folder_pending_sync';
 const STORE_DIR = 'stores';
 const BACKUP_DIR = 'backups';
+const ATTACHMENT_DIR = 'attachments';
 const MANIFEST_FILE = 'manifest.json';
+const ATTACHMENT_KEY_PREFIX = '__costdb_attachment:';
 
 let writeQueue = Promise.resolve();
 
@@ -51,6 +53,58 @@ export async function storageSet(store, value) {
     }
   });
   return writeQueue;
+}
+
+export async function storageSetAttachment(meta, blob) {
+  const key = attachmentStorageKey(meta);
+  await idb.set(key, blob);
+  if (await getStorageMode() !== 'folder') return;
+  const handle = await getStoredDirectoryHandle();
+  if (!handle || !(await hasPermission(handle, 'readwrite'))) return;
+  try {
+    const { directory, fileName } = await attachmentFileTarget(handle, meta, true);
+    const fileHandle = await directory.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  } catch (error) {
+    await idb.del(key);
+    throw error;
+  }
+}
+
+export async function storageGetAttachment(meta) {
+  const key = attachmentStorageKey(meta);
+  if (await getStorageMode() === 'folder') {
+    const handle = await getStoredDirectoryHandle();
+    if (handle && await hasPermission(handle, 'read')) {
+      try {
+        const { directory, fileName } = await attachmentFileTarget(handle, meta, false);
+        const fileHandle = await directory.getFileHandle(fileName);
+        const file = await fileHandle.getFile();
+        if (file?.size) return file;
+      } catch (error) {
+        if (error?.name !== 'NotFoundError') console.warn('[storage] read folder attachment failed', error);
+      }
+    }
+  }
+  return await idb.get(key) || null;
+}
+
+export async function storageRemoveAttachment(meta) {
+  const key = attachmentStorageKey(meta);
+  if (await getStorageMode() === 'folder') {
+    const handle = await getStoredDirectoryHandle();
+    if (handle && await hasPermission(handle, 'readwrite')) {
+      try {
+        const { directory, fileName } = await attachmentFileTarget(handle, meta, false);
+        await directory.removeEntry(fileName);
+      } catch (error) {
+        if (error?.name !== 'NotFoundError') throw error;
+      }
+    }
+  }
+  await idb.del(key);
 }
 
 export async function getStorageStatus() {
@@ -147,6 +201,32 @@ async function writeStoreToDirectory(rootHandle, store, records) {
 async function ensureFolderLayout(rootHandle) {
   await rootHandle.getDirectoryHandle(STORE_DIR, { create: true });
   await rootHandle.getDirectoryHandle(BACKUP_DIR, { create: true });
+}
+
+function attachmentStorageKey(meta) {
+  const id = safePathSegment(meta?.id);
+  if (!id) throw new Error('附件 ID 无效。');
+  return `${ATTACHMENT_KEY_PREFIX}${id}`;
+}
+
+async function attachmentFileTarget(rootHandle, meta, create) {
+  const resourceId = safePathSegment(meta?.resourceId);
+  const id = safePathSegment(meta?.id);
+  const safeFileName = safeAttachmentFileName(meta?.safeFileName || meta?.fileName);
+  if (!resourceId || !id || !safeFileName) throw new Error('附件存储路径无效。');
+  const attachments = await rootHandle.getDirectoryHandle(ATTACHMENT_DIR, { create });
+  const directory = await attachments.getDirectoryHandle(resourceId, { create });
+  return { directory, fileName: `${id}-${safeFileName}` };
+}
+
+function safePathSegment(value) {
+  const text = String(value || '');
+  return /^[a-zA-Z0-9_-]+$/.test(text) ? text : '';
+}
+
+function safeAttachmentFileName(value) {
+  const text = String(value || '');
+  return text && !/[\\/]/.test(text) && !text.includes('..') ? text : '';
 }
 
 async function updateManifest(rootHandle, changedStores) {
