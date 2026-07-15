@@ -31,7 +31,7 @@ const experienceState = {
   caseSort: 'similarity',
 };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
   if (params.keyword != null) experienceState.keyword = params.keyword;
   if (params.selectedId) experienceState.selectedId = params.selectedId;
@@ -60,7 +60,7 @@ export async function render() {
   const projectRows = buildReviewProjectRows(projects, boq, versions, sessions, kb.items);
   const visibleProjects = filterReviewProjects(projectRows);
 
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-3">
       <section class="card p-4 shrink-0">
         <div class="flex flex-col lg:flex-row lg:items-center gap-4">

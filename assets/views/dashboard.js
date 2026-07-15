@@ -12,7 +12,7 @@ const chartState = {
   composition: null,
 };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const [quota, projects, boq, versions, engine, experience, resourceHealth] = await Promise.all([
     quotaRepo.all(),
     projectRepo.all(),
@@ -24,7 +24,7 @@ export async function render() {
   ]);
   const stats = buildDashboardStats({ quota, projects, boq, versions, engine, experience, resourceHealth });
 
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-3">
       ${dashboardTitle(stats)}
 
@@ -52,8 +52,8 @@ export async function render() {
     </div>
   `;
 
-  bindResourceHealthActions(stats.resourceHealth);
-  drawCharts(stats);
+  bindResourceHealthActions(stats.resourceHealth, workspace);
+  drawCharts(stats, workspace);
 }
 
 function buildDashboardStats({ quota, projects, boq, versions, engine, experience, resourceHealth }) {
@@ -156,8 +156,8 @@ function resourceHealthRow(key, issue, title, desc, icon) {
   </div>`;
 }
 
-function bindResourceHealthActions(health) {
-  document.querySelectorAll('[data-health-issue]').forEach(button => {
+function bindResourceHealthActions(health, workspace = document) {
+  workspace.querySelectorAll('[data-health-issue]').forEach(button => {
     button.onclick = () => {
       const issue = health[button.dataset.healthIssue];
       const type = button.dataset.healthType;
@@ -910,9 +910,9 @@ function emptyBlock(text) {
   return `<div class="h-full min-h-[120px] flex items-center justify-center text-sm text-slate-400">${text}</div>`;
 }
 
-function drawCharts(stats) {
+function drawCharts(stats, workspace = document) {
   if (stats.archivedTrend?.hasAnyInWindow) {
-    const trendCanvas = document.getElementById('costChart');
+    const trendCanvas = workspace.querySelector('#costChart');
     if (!trendCanvas) {
       if (chartState.trend) {
         chartState.trend.destroy();
@@ -1023,7 +1023,7 @@ function drawCharts(stats) {
   
 
   if (stats.projects.length) {
-    const typeCanvas = document.getElementById('typeChart');
+    const typeCanvas = workspace.querySelector('#typeChart');
     if (!typeCanvas) {
       if (chartState.composition) {
         chartState.composition.destroy();

@@ -62,7 +62,7 @@ function exposeQuotaActions() {
   };
 }
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
   if (params.keyword != null) filterState.keyword = params.keyword;
   if (params.priceStatus != null) filterState.priceStatus = params.priceStatus;
@@ -75,7 +75,7 @@ export async function render() {
     quotaService.list(),
   ]);
   exposeQuotaActions();
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame h-full min-h-[760px] flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white px-4 py-4 shrink-0">
         <div class="flex items-center gap-4">

@@ -45,29 +45,30 @@ const renderers = {
   materials: resources,
   equipment: resources,
   'resource-import': {
-    render: async () => {
+    render: async workspace => {
       const module = await import('./assets/views/resourceImport.js?v=6.2');
-      return module.render();
+      return module.render(workspace);
     },
   },
   'boq-library': {
-    render: async () => {
+    render: async workspace => {
       const module = await import('./assets/views/boqLibrary.js?v=6.2');
-      return module.render();
+      return module.render(workspace);
     },
   },
   'ai-import': {
-    render: async () => {
+    render: async workspace => {
       const module = await import('./assets/views/aiImportWizard.js?v=6.2');
-      return module.render();
+      return module.render(workspace);
     },
   },
 };
 let lastSearchResults = [];
 let routeGeneration = 0;
 const routeCoordinator = createLatestWorkspaceCoordinator({
-  snapshot: snapshotWorkspace,
-  restore: restoreWorkspace,
+  createRoot: createDetachedWorkspace,
+  commit: commitWorkspace,
+  dispose: root => root.remove(),
 });
 const searchCoordinator = createLatestCoordinator();
 
@@ -92,55 +93,54 @@ async function go(view, params = {}) {
 }
 
 async function renderWorkspace(generation = ++routeGeneration) {
-  return routeCoordinator.run(async () => {
+  const current = VIEWS.find(x => x.id === state.currentView) || VIEWS[0];
+  const v = state.currentView;
+  return routeCoordinator.run(async workspace => {
     if (generation !== routeGeneration) return false;
-    const current = VIEWS.find(x => x.id === state.currentView) || VIEWS[0];
-    document.getElementById('crumb').textContent = current.label || '';
-    const crumbIcon = document.getElementById('crumbIcon');
-    const crumbGroup = document.getElementById('crumbGroup');
-    const crumbDesc = document.getElementById('crumbDesc');
-    if (crumbIcon) crumbIcon.textContent = current.icon || 'dashboard';
-    if (crumbGroup) crumbGroup.textContent = current.group || '';
-    if (crumbDesc) crumbDesc.textContent = current.desc || '';
-    const v = state.currentView;
+    workspace.__routeMeta = current;
     if (v === 'ai') return ai.open();
     ai.close();
     const r = renderers[v];
     if (!r || !r.render) return;
     try {
-      await r.render();
+      await r.render(workspace);
     } catch (err) {
       if (generation !== routeGeneration) return false;
       console.error(`[render:${v}]`, err);
-      renderErrorState(current, err);
+      renderErrorState(current, err, workspace);
     }
     return generation === routeGeneration;
   });
 }
 
-function snapshotWorkspace() {
+function commitWorkspace(detachedWorkspace) {
   const workspace = document.getElementById('workspace');
-  return {
-    nodes: workspace ? [...workspace.childNodes] : [],
-    crumb: document.getElementById('crumb')?.textContent || '',
-    crumbIcon: document.getElementById('crumbIcon')?.textContent || '',
-    crumbGroup: document.getElementById('crumbGroup')?.textContent || '',
-    crumbDesc: document.getElementById('crumbDesc')?.textContent || '',
-  };
-}
-
-function restoreWorkspace(snapshot) {
-  const workspace = document.getElementById('workspace');
-  if (workspace) workspace.replaceChildren(...snapshot.nodes);
-  for (const [id, key] of [['crumb', 'crumb'], ['crumbIcon', 'crumbIcon'], ['crumbGroup', 'crumbGroup'], ['crumbDesc', 'crumbDesc']]) {
+  if (workspace) workspace.replaceChildren(...detachedWorkspace.childNodes);
+  const current = detachedWorkspace.__routeMeta || {};
+  const values = { crumb: current.label, crumbIcon: current.icon || 'dashboard', crumbGroup: current.group, crumbDesc: current.desc };
+  Object.entries(values).forEach(([id, value]) => {
     const element = document.getElementById(id);
-    if (element) element.textContent = snapshot[key];
-  }
+    if (element) element.textContent = value || '';
+  });
 }
 
-function renderErrorState(current, err) {
+function createDetachedWorkspace() {
+  let host = document.getElementById('workspaceStaging');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'workspaceStaging';
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position:fixed;left:-100000px;top:0;width:1440px;visibility:hidden;pointer-events:none;';
+    document.body.prepend(host);
+  }
+  const workspace = document.createElement('div');
+  host.prepend(workspace);
+  return workspace;
+}
+
+function renderErrorState(current, err, workspace = document.getElementById('workspace')) {
   const message = err?.message || String(err || '未知错误');
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="min-h-full flex items-center justify-center p-6">
       <section class="max-w-xl w-full rounded-lg border border-red-200 bg-white p-6 text-center">
         <div class="mx-auto h-12 w-12 rounded-lg border border-red-200 bg-red-50 text-red-600 flex items-center justify-center">

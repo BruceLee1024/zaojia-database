@@ -54,7 +54,7 @@ const state = {
   importMode: 'append',
 };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
   [state.projects, state.storageStatus] = await Promise.all([
     projectService.list(),
@@ -80,10 +80,10 @@ export async function render() {
   }
   if (state.mode === 'boq') {
     if (!state.rawRows.length) loadSample();
-    paint();
+    paint(workspace);
     return;
   }
-  renderHub();
+  renderHub(workspace);
 }
 
 function exposeImporterActions() {
@@ -262,14 +262,14 @@ function exposeImporterActions() {
   };
 }
 
-function renderHub() {
+function renderHub(workspace = document.getElementById('workspace')) {
   const projectCount = state.projects.length;
   const usingFolder = state.storageStatus.mode === 'folder';
   const storageLabel = usingFolder ? '本地文件夹' : '浏览器本地库';
   const storageDetail = usingFolder
     ? `当前数据同步到“${state.storageStatus.directoryName || '已选文件夹'}”，并保留浏览器镜像。`
     : '当前数据保存在此浏览器的 IndexedDB 中。';
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-5">
         <div class="flex flex-col lg:flex-row lg:items-end gap-4">
@@ -413,14 +413,14 @@ function flowStep(num, title, desc) {
   </div>`;
 }
 
-function paint() {
+function paint(workspace = document.getElementById('workspace')) {
   const project = currentProject();
   const mappedRows = getMappedRows();
   const quality = analyzeRows(mappedRows);
   const filteredRows = filterPreviewRows(mappedRows, quality);
   const hasUploaded = Boolean(state.fileName);
 
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame h-[calc(100dvh-112px)] min-h-[620px] flex flex-col">
       <div class="mb-3 flex items-center gap-3">
         <button onclick="window.__importer.showHub()" class="h-10 w-10 border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 flex items-center justify-center" title="返回导入中心" aria-label="返回导入中心">

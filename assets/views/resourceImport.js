@@ -4,7 +4,7 @@ import { esc, toast } from '../utils/dom.js?v=6.2';
 
 const state = { resourceType: 'material', fileName: '', preview: null, report: null, busy: false };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   state.resourceType = window.__app?.state?.routeParams?.resourceType === 'equipment' ? 'equipment' : 'material';
   state.fileName = '';
   state.preview = null;
@@ -39,7 +39,7 @@ function exposeActions() {
 function paint() {
   const label = state.resourceType === 'equipment' ? '设备' : '材料';
   const preview = state.preview;
-  document.getElementById('workspace').innerHTML = `<div class="page-frame min-h-full flex flex-col gap-4">
+  workspace.innerHTML = `<div class="page-frame min-h-full flex flex-col gap-4">
     <section class="rounded-lg border border-slate-200 bg-white p-5"><div class="flex flex-col gap-3 lg:flex-row lg:items-center"><button onclick="window.__resourceImport.back()" class="h-9 w-9 border border-slate-300 bg-white" aria-label="返回${label}库"><span class="material-symbols-outlined text-[18px]">arrow_back</span></button><div><h1 class="text-xl font-semibold text-slate-950">导入${label}库</h1><p class="mt-1 text-sm text-slate-500">先预览身份匹配和数据问题，确认后一次性保存主数据与价格快照。</p></div><div class="flex-1"></div><button onclick="window.__resourceImport.template()" class="h-9 px-3 border border-slate-300 bg-white text-sm">下载${label}模板</button></div></section>
     <section class="rounded-lg border border-slate-200 bg-white p-5"><input id="resourceImportFile" class="hidden" type="file" accept=".xlsx,.xls" onchange="window.__resourceImport.handle(this)"><div class="border border-dashed border-slate-300 bg-slate-50 px-6 py-8 text-center"><span class="material-symbols-outlined text-4xl text-slate-300">upload_file</span><h2 class="mt-2 font-semibold text-slate-800">${state.fileName ? esc(state.fileName) : `选择${label} Excel`}</h2><p class="mt-1 text-xs text-slate-500">支持 .xlsx / .xls，表头需包含名称和单位。</p><button onclick="window.__resourceImport.pick()" ${state.busy ? 'disabled' : ''} class="mt-4 h-9 px-4 brand-bg text-white text-sm disabled:opacity-40">${state.busy ? '正在处理…' : '选择文件'}</button></div></section>
     ${preview ? previewMarkup(preview, label) : ''}${state.report ? reportMarkup(state.report) : ''}

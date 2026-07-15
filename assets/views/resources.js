@@ -13,12 +13,12 @@ const LABELS = {
   equipment: { singular: '设备', plural: '设备库', icon: 'precision_manufacturing', route: 'equipment' },
 };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const route = window.__app?.state?.currentView;
   const params = window.__app?.state?.routeParams || {};
   Object.assign(state, nextResourceViewState(state, route, params));
   exposeActions();
-  await refresh();
+  await refresh(workspace);
 }
 
 export function nextResourceViewState(current = {}, route = 'materials', params = {}) {
@@ -73,23 +73,23 @@ const selectResource = createLatestResourceSelection({
   },
 });
 
-async function refresh() {
+async function refresh(workspace = document.getElementById('workspace')) {
   state.rows = await resourceService.list({ resourceType: state.resourceType, keyword: state.keyword, category: state.category, status: state.status });
   if (state.resourceIds.length) state.rows = state.rows.filter(item => state.resourceIds.includes(item.id));
   if (state.selectedId && !state.rows.some(item => item.id === state.selectedId)) state.selectedId = '';
   if (!state.selectedId && state.rows.length) state.selectedId = state.rows[0].id;
   state.prices = new Map(await Promise.all(state.rows.map(async item => [item.id, await resourcePriceService.getCurrentPrice(item.id)])));
   state.usage = state.selectedId ? await resourceService.usage(state.selectedId) : null;
-  const generation = paint();
+  const generation = paint(workspace);
   if (state.selectedId) await Promise.all([loadPriceHistory(state.selectedId), loadAttachmentPanel(state.selectedId, generation)]);
 }
 
-function paint() {
+function paint(workspace = document.getElementById('workspace')) {
   const generation = String(++attachmentRenderGeneration);
   const meta = LABELS[state.resourceType];
   const selected = state.rows.find(item => item.id === state.selectedId);
   const categories = [...new Set(state.rows.map(item => item.category).filter(Boolean))];
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -115,7 +115,7 @@ function paint() {
         ${selected ? detailPanel(selected, meta, generation) : emptyDetail(meta)}
       </div>
       </div>`;
-  bindResourceIdActions(document.getElementById('workspace'));
+  bindResourceIdActions(workspace);
   return generation;
 }
 

@@ -63,3 +63,17 @@
 - Equipment project popup escapes project, price, and quota option values, excludes withdrawn prices, and renders an accessible disabled state when none remain.
 - `resourcePriceService.withdraw(id)` is the primary lifecycle API; `remove(id)` remains only as a deprecated compatibility alias, and UI actions call `withdraw`.
 - Final verification after the second review: `node tests/run.mjs` -> `All tests passed`; `git diff --check` and changed-file `node --check` passed.
+
+## Third final review fix: isolated route commits
+
+### RED
+
+- The three-request route race failed against the prior coordinator contract because renderers received no independent root. A slow A could finish after B, while latest C had already written a shell and was awaiting data; restoring a snapshot of the real workspace could replace or pollute C with B.
+- The route renderer audit showed that the app and view entry points still targeted the real `#workspace` directly instead of accepting a per-request workspace root.
+
+### GREEN
+
+- Every route request now renders into its own isolated staging root. Only the latest coordinator generation atomically moves that root's children into the real workspace and commits its breadcrumb metadata; stale roots are discarded without reading, snapshotting, or restoring the real workspace.
+- All 12 top-level view renderers accept the workspace root, including the three dynamic-import adapters. Initial nested paint/refresh paths in importer and resources receive the same root.
+- The regression test covers slow A, completed B, and latest C writing a shell before awaiting. Late A is rejected, B remains visible while C is pending, and only C's final content commits. It also asserts all three requests receive distinct roots.
+- Final verification after this review: `node tests/run.mjs` -> `All tests passed`; `git diff --check` and changed-file `node --check` passed.

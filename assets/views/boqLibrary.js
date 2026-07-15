@@ -9,12 +9,12 @@ import { ICONS } from '../utils/icons.js?v=6.2';
 const state = { keyword: '', selectedId: '' };
 let items = [];
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const route = window.__app && window.__app.state ? window.__app.state.routeParams || {} : {};
   if (route.keyword != null) state.keyword = route.keyword;
   if (route.selectedId) state.selectedId = route.selectedId;
   window.__boqLibrary = { select, create, edit, apply, remove, importExcel };
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame h-full min-h-[700px] flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="flex items-center gap-3"><div><h1 class="text-xl font-semibold">我的清单库</h1><p class="mt-1 text-xs text-slate-500">独立于项目的通用清单库，套用后可在项目内独立调整。</p></div><div class="flex-1"></div><button id="libImport" class="h-10 px-4 brand-bg text-white text-sm">导入 Excel</button><button onclick="window.__boqLibrary.create()" class="h-10 px-4 bg-teal-700 text-white text-sm">新建清单</button><button id="libTemplate" class="h-10 px-4 border text-sm">下载模板</button></div>

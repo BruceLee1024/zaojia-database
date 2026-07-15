@@ -10,6 +10,7 @@ export async function testFinalFixes() {
   await testLatestCoordinator();
   await testSerializedCoordinator();
   await testLatestWorkspaceCoordinator();
+  await testRouteRenderersAcceptWorkspace();
   await testCoherentModuleVersionGraph();
   await testNoInlineUntrustedIdInterpolation();
   testMaliciousIdRendering();
@@ -17,29 +18,54 @@ export async function testFinalFixes() {
 }
 
 async function testLatestWorkspaceCoordinator() {
-  const workspace = {
-    childNodes: [],
-    replaceChildren(...nodes) { this.childNodes = nodes; },
-  };
+  const workspace = { content: '' };
+  const roots = [];
   const coordinator = createLatestWorkspaceCoordinator({
-    snapshot: () => [...workspace.childNodes],
-    restore: nodes => workspace.replaceChildren(...nodes),
+    createRoot: () => {
+      const root = { content: '' };
+      roots.push(root);
+      return root;
+    },
+    commit: root => { workspace.content = root.content; },
   });
-  const nodeA = { text: 'A' };
-  const nodeB = { text: 'B', click: () => 'listener-preserved' };
   let releaseA;
-  const slowA = coordinator.run(async () => {
+  const slowA = coordinator.run(async root => {
     await new Promise(resolve => { releaseA = resolve; });
-    workspace.replaceChildren(nodeA);
+    root.content = 'A';
   });
   await Promise.resolve();
-  const fastB = coordinator.run(async () => { workspace.replaceChildren(nodeB); });
+  const fastB = coordinator.run(async root => { root.content = 'B'; });
   assert.notEqual(await Promise.race([fastB.then(() => 'B-done'), new Promise(resolve => setTimeout(() => resolve('blocked'), 10))]), 'blocked');
-  assert.equal(workspace.childNodes[0], nodeB);
+  assert.equal(workspace.content, 'B');
+
+  let releaseC;
+  const latestC = coordinator.run(async root => {
+    root.content = 'C-shell';
+    await new Promise(resolve => { releaseC = resolve; });
+    root.content = 'C-final';
+  });
+  await Promise.resolve();
+  assert.equal(workspace.content, 'B');
   releaseA();
   assert.equal(await slowA, false);
-  assert.equal(workspace.childNodes[0], nodeB);
-  assert.equal(workspace.childNodes[0].click(), 'listener-preserved');
+  assert.equal(workspace.content, 'B');
+  releaseC();
+  assert.equal(await latestC, true);
+  assert.equal(workspace.content, 'C-final');
+  assert.equal(new Set(roots).size, 3);
+}
+
+async function testRouteRenderersAcceptWorkspace() {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const views = ['dashboard', 'importer', 'quota', 'projects', 'boq', 'indicators', 'experience', 'settings', 'resources', 'resourceImport', 'boqLibrary', 'aiImportWizard'];
+  for (const view of views) {
+    const source = await readFile(join(root, 'assets', 'views', `${view}.js`), 'utf8');
+    assert.match(source, /export async function render\(workspace\b/, `${view} must accept an isolated workspace root`);
+  }
+  const app = await readFile(join(root, 'app.js'), 'utf8');
+  assert.equal(app.includes('snapshotWorkspace'), false);
+  assert.equal(app.includes('restoreWorkspace'), false);
+  assert.match(app, /await r\.render\(workspace\)/);
 }
 
 function testEquipmentDialogSafetyAndWithdrawal() {

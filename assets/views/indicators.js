@@ -22,7 +22,7 @@ let cache = { indicators: [], projects: [], archived: [], benchmark: null, queue
 const chartState = { confidence: null, year: null };
 const favoriteKeys = new Set(readFavorites());
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
   if (params.keyword != null) state.keyword = params.keyword;
   if (params.selectedFamily) state.selectedFamily = params.selectedFamily;
@@ -43,7 +43,7 @@ export async function render() {
   cache.estimate = await indicatorService.estimate(state.filters, state.estimate);
 
   expose();
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-3">
       ${decisionHeader()}
       ${trustExplainer()}

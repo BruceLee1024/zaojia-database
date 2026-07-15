@@ -67,11 +67,11 @@ function startBoqResize(e) {
   window.addEventListener('pointerup', up);
 }
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const projects = await projectRepo.all();
   const proj = projects.find(p => p.id === window.__app.state.currentProjectId) || projects[0];
   if (!proj) {
-    document.getElementById('workspace').innerHTML = `<div class="page-frame"><div class="card p-10 text-center text-gray-400">还没有项目，先去 <a class="text-teal-700 underline" onclick="window.__app.go('projects')">新建项目</a></div></div>`;
+    workspace.innerHTML = `<div class="page-frame"><div class="card p-10 text-center text-gray-400">还没有项目，先去 <a class="text-teal-700 underline" onclick="window.__app.go('projects')">新建项目</a></div></div>`;
     return;
   }
   window.__app.state.currentProjectId = proj.id;
@@ -118,7 +118,7 @@ export async function render() {
   const categories = groupByCategory(boq);
   const workbench = boqWorkbenchStatus(proj, boq, versions, { selectedCount, selectedTotal, imported: routeParams.imported && (!routeParams.projectId || routeParams.projectId === proj.id) });
 
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame h-full min-h-0 flex flex-col gap-3">
       ${boqWorkbenchHeader(proj, projects, workbench)}
       ${boqWorkflowStrip(workbench)}

@@ -33,27 +33,29 @@ export function createSerializedKeyCoordinator() {
   };
 }
 
-export function createLatestWorkspaceCoordinator({ snapshot, restore }) {
+export function createLatestWorkspaceCoordinator({ createRoot, commit, dispose = () => {} }) {
   let generation = 0;
-  let latestSnapshot;
   return {
     async run(render) {
       const request = ++generation;
+      const root = createRoot();
       try {
-        await render();
+        await render(root);
       } catch (error) {
         if (request !== generation) {
-          if (latestSnapshot !== undefined) restore(latestSnapshot);
+          dispose(root);
           return false;
         }
+        dispose(root);
         throw error;
       }
-      if (request === generation) {
-        latestSnapshot = snapshot();
-        return true;
+      if (request !== generation) {
+        dispose(root);
+        return false;
       }
-      if (latestSnapshot !== undefined) restore(latestSnapshot);
-      return false;
+      commit(root);
+      dispose(root);
+      return true;
     },
   };
 }

@@ -31,7 +31,7 @@ const backupAdapter = {
   runCacheOnly: withFolderMirrorSuspended,
 };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const cfg = getAIConfig();
   const providers = listProviders();
   const [engine, experience, storageStatus, storageEstimate] = await Promise.all([
@@ -41,7 +41,7 @@ export async function render() {
     getBrowserStorageEstimate(),
   ]);
   const ctx = { cfg, providers, engine, experience, storageStatus, storageEstimate };
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame space-y-4">
       ${settingsTabs()}
       ${renderActiveTab(ctx)}
