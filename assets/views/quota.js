@@ -4,7 +4,7 @@ import { boqService } from '../services/boqService.js?v=4.0';
 import { fmtMoney, esc, $, openModal, closeModal, toast } from '../utils/dom.js';
 import { exportQuotaTemplate } from '../data/excel.js?v=4.0';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown } from './quotaResourceComposition.js?v=4.2';
+import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=4.2';
 import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=4.2';
 
 const BREAKDOWN_COLORS = ['bg-blue-600', 'bg-emerald-500', 'bg-cyan-600', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-rose-400'];
@@ -502,12 +502,12 @@ function syncAppliedCompositionToForm(updated) {
 }
 
 function captureQuotaFormBreakdown() {
-  const breakdown = {};
+  const rawValues = {};
   BREAKDOWN_KEYS.forEach(key => {
     const input = document.querySelector(`#qf_bd input[data-bd="${key}"]`);
-    breakdown[key] = Number(input?.value || 0);
+    rawValues[key] = input?.value ?? '';
   });
-  return normalizeBreakdown(breakdown);
+  return parseQuotaBreakdownInputValues(rawValues);
 }
 
 function quotaForm(it) {

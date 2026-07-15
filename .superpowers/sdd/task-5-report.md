@@ -101,3 +101,15 @@ All Task 5 review findings were addressed with focused regression tests before i
 ### Follow-up concerns
 
 - No new unresolved Task 5 concern was found. The pre-existing preferred-expired-price selection policy remains intentionally unchanged and is now made visible by audit and UI warnings.
+
+## Final review follow-up
+
+- Added a shared `localDateKey()` helper based on `getFullYear()`, `getMonth()` and `getDate()`. BOQ service audit and BOQ resource expiry badges now compare against the same browser-local calendar date rather than a UTC date slice.
+- Added strict pure parsing for the seven quota breakdown form values. Non-finite raw values are rejected with the affected cost item named before normalization or any composition service call; the active panel action runner surfaces the error through its toast path.
+- Tightened asynchronous error presentation so render and mutation failures are shown only while the original panel is still connected, remains the current modal root, and still matches the captured render generation and resource selection. Failures from detached/replaced/stale panels are silent.
+
+### Final follow-up TDD evidence
+
+- RED: the suite first failed because the requested local calendar helper module did not exist.
+- GREEN: focused tests now prove an Asia/Shanghai local `2026-07-15 00:30` date keeps the local key `2026-07-15` even though its UTC key is `2026-07-14`.
+- Focused tests also cover Infinity/NaN-like raw breakdown values, verify composition application is never called after validation failure, and exercise every panel-currentness dimension: connection, root identity, generation and resource ID.

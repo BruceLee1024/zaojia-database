@@ -12,18 +12,52 @@ export async function applyCompositionFromPanel({ quota, getBaseBreakdown, servi
   return updated;
 }
 
+export function isCurrentQuotaResourcePanel({
+  container,
+  currentContainer,
+  expectedGeneration,
+  currentGeneration,
+  expectedResourceId = '',
+  currentResourceId = '',
+}) {
+  return Boolean(container?.isConnected
+    && currentContainer === container
+    && expectedGeneration === currentGeneration
+    && expectedResourceId === currentResourceId);
+}
+
 export async function mountQuotaResourceComposition(quota, { onApplied, getBaseBreakdown } = {}) {
   const container = document.getElementById('quotaResourceComposition');
   if (!container || !quota?.id) return;
-  const state = { keyword: '', selectedResourceId: '' };
+  const state = { keyword: '', selectedResourceId: '', renderGeneration: 0 };
   const renderGuard = createLatestRequestGuard();
+  let activeAction = null;
+  const isCurrentContext = context => isCurrentQuotaResourcePanel({
+    container,
+    currentContainer: document.getElementById('quotaResourceComposition'),
+    expectedGeneration: context.generation,
+    currentGeneration: state.renderGeneration,
+    expectedResourceId: context.resourceId,
+    currentResourceId: state.selectedResourceId,
+  });
   const actionRunner = createBusyActionRunner({
     onBusy: busy => setPanelBusy(container, busy),
-    onError: error => toast(error.message || '资源组成操作失败', 'error'),
+    onError: error => {
+      if (activeAction && isCurrentContext(activeAction)) toast(error.message || '资源组成操作失败', 'error');
+    },
   });
+  const runAction = async action => {
+    if (actionRunner.busy) return actionRunner.run(action);
+    activeAction = { generation: state.renderGeneration, resourceId: state.selectedResourceId };
+    try {
+      return await actionRunner.run(action);
+    } finally {
+      activeAction = null;
+    }
+  };
 
   const render = async () => {
-    const request = { keyword: state.keyword, selectedResourceId: state.selectedResourceId };
+    const request = { keyword: state.keyword, selectedResourceId: state.selectedResourceId, generation: ++state.renderGeneration };
     try {
       return await renderGuard.run(async () => {
         const [comparisons, resources] = await Promise.all([
@@ -38,12 +72,15 @@ export async function mountQuotaResourceComposition(quota, { onApplied, getBaseB
       }, model => {
         if (!container.isConnected || document.getElementById('quotaResourceComposition') !== container) return;
         container.innerHTML = panelHtml(model);
-        bindPanel(container, { quota, state, render, preview: model.preview, usages: model.comparisons.map(item => item.usage), onApplied, getBaseBreakdown, actionRunner });
+        bindPanel(container, { quota, state, render, preview: model.preview, usages: model.comparisons.map(item => item.usage), onApplied, getBaseBreakdown, actionRunner, runAction });
         setPanelBusy(container, actionRunner.busy);
       });
     } catch (error) {
-      if (container.isConnected) container.innerHTML = `<div class="rounded border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">资源组成读取失败：${esc(error.message)}</div>`;
-      toast(error.message || '资源组成读取失败', 'error');
+      const current = isCurrentContext({ generation: request.generation, resourceId: request.selectedResourceId });
+      if (current) {
+        container.innerHTML = `<div class="rounded border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">资源组成读取失败：${esc(error.message)}</div>`;
+        toast(error.message || '资源组成读取失败', 'error');
+      }
       return { stale: false, error };
     }
   };
@@ -98,16 +135,16 @@ function bindPanel(container, context) {
   container.querySelector('#quotaResourceSearchBtn')?.addEventListener('click', search);
   container.querySelector('#quotaResourceSearch')?.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); search(); } });
   container.querySelectorAll('[data-select-resource]').forEach(button => button.addEventListener('click', () => { context.state.selectedResourceId = button.dataset.selectResource; context.render(); }));
-  container.querySelector('#quotaResourceLink')?.addEventListener('click', () => context.actionRunner.run(() => linkUsage(container, context)));
-  container.querySelectorAll('[data-remove-usage]').forEach(button => button.addEventListener('click', () => context.actionRunner.run(async () => {
+  container.querySelector('#quotaResourceLink')?.addEventListener('click', () => context.runAction(() => linkUsage(container, context)));
+  container.querySelectorAll('[data-remove-usage]').forEach(button => button.addEventListener('click', () => context.runAction(async () => {
     if (!confirm('确定从当前定额组成中移除该资源？')) return;
     await quotaResourceService.removeUsage(button.dataset.removeUsage); await context.render();
   })));
-  container.querySelectorAll('[data-refresh-usage]').forEach(button => button.addEventListener('click', () => context.actionRunner.run(async () => {
+  container.querySelectorAll('[data-refresh-usage]').forEach(button => button.addEventListener('click', () => context.runAction(async () => {
     if (!confirm('刷新会用当前价格替换原价格快照，不可自动撤销。确定继续？')) return;
     await quotaResourceService.refreshUsageSnapshot(button.dataset.refreshUsage); await context.render();
   })));
-  container.querySelector('#quotaCompositionApply')?.addEventListener('click', () => context.actionRunner.run(async () => {
+  container.querySelector('#quotaCompositionApply')?.addEventListener('click', () => context.runAction(async () => {
     const livePreview = buildCompositionPreview({ ...context.quota, breakdown: context.getBaseBreakdown?.() || context.quota.breakdown }, context.usages);
     if (!confirm(`应用后仅更新材料费和设备费，其他分项保持不变。总价变化 ${signedMoney(livePreview.delta.total)}，确定应用？`)) return;
     const updated = await applyCompositionFromPanel(context); await context.onApplied?.(updated); toast('资源组成已应用', 'success'); await context.render();

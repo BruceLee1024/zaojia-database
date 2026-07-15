@@ -3,11 +3,12 @@ import { STORES, quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceR
 import { quotaResourceService } from '../assets/services/quotaResourceService.js';
 import { boqService } from '../assets/services/boqService.js';
 import { versionService } from '../assets/services/versionService.js';
-import { buildCompositionPreview, buildUsageComparisonViewModel, compositionPanelShell, normalizeBreakdown } from '../assets/views/quotaResourceComposition.js';
-import { applyCompositionFromPanel } from '../assets/views/quotaResourceCompositionPanel.js';
+import { BREAKDOWN_KEYS, buildCompositionPreview, buildUsageComparisonViewModel, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from '../assets/views/quotaResourceComposition.js';
+import { applyCompositionFromPanel, isCurrentQuotaResourcePanel } from '../assets/views/quotaResourceCompositionPanel.js';
 import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from '../assets/views/boqResourceReference.js';
 import { buildQuoteAuditViewModel, loadQuoteAuditViewModel, renderQuoteAuditViewModel } from '../assets/views/boqAuditViewModel.js';
 import { createBusyActionRunner, createLatestRequestGuard } from '../assets/utils/asyncInteraction.js';
+import { localDateKey } from '../assets/utils/localDate.js';
 
 export async function testQuotaBoqIntegration() {
   const originalStorage = globalThis.localStorage;
@@ -25,7 +26,9 @@ export async function testQuotaBoqIntegration() {
     await reset();
     await testDuplicateInstallationMatchesExactEquipmentLine();
     await testPanelApplyCapturesUnsavedBreakdown();
+    await testQuotaBreakdownInputValidation();
     await testAsyncInteractionGuards();
+    testLocalCalendarDateAndPanelContext();
     testPureResourceViewModels();
     await testVisibleQuoteAuditViewModel();
   } finally {
@@ -174,6 +177,46 @@ async function testPanelApplyCapturesUnsavedBreakdown() {
   assert.deepEqual(calls, [['quota-caller', { baseBreakdown: unsaved }]]);
   assert.equal(result.breakdown.人工, 81);
   assert.equal(quota.breakdown.机械, 31);
+}
+
+async function testQuotaBreakdownInputValidation() {
+  const valid = Object.fromEntries(BREAKDOWN_KEYS.map((key, index) => [key, String(index + 1)]));
+  assert.deepEqual(parseQuotaBreakdownInputValues(valid), { 人工: 1, 材料: 2, 设备: 3, 机械: 4, 管理费: 5, 利润: 6, 风险: 7 });
+  assert.throws(() => parseQuotaBreakdownInputValues({ ...valid, 人工: 'Infinity' }), /人工.*有效数字/);
+  assert.throws(() => parseQuotaBreakdownInputValues({ ...valid, 机械: 'not-a-number' }), /机械.*有效数字/);
+
+  let applyCalls = 0;
+  await assert.rejects(
+    () => applyCompositionFromPanel({
+      quota: { id: 'quota-invalid-input' },
+      getBaseBreakdown: () => parseQuotaBreakdownInputValues({ ...valid, 风险: 'NaN' }),
+      service: { applyComposition: async () => { applyCalls += 1; } },
+    }),
+    /风险.*有效数字/,
+  );
+  assert.equal(applyCalls, 0, '非法输入不得调用组成应用服务');
+}
+
+function testLocalCalendarDateAndPanelContext() {
+  const localMidnight = new Date(2026, 6, 15, 0, 30, 0);
+  assert.equal(localDateKey(localMidnight), '2026-07-15');
+  assert.equal(localMidnight.toISOString().slice(0, 10), '2026-07-14', 'Asia/Shanghai 本地日期应与 UTC 日期不同');
+  assert.equal(localDateKey(new Date(Number.NaN)), '');
+
+  const connected = { isConnected: true };
+  const base = {
+    container: connected,
+    currentContainer: connected,
+    expectedGeneration: 4,
+    currentGeneration: 4,
+    expectedResourceId: 'resource-a',
+    currentResourceId: 'resource-a',
+  };
+  assert.equal(isCurrentQuotaResourcePanel(base), true);
+  assert.equal(isCurrentQuotaResourcePanel({ ...base, container: { isConnected: false }, currentContainer: connected }), false);
+  assert.equal(isCurrentQuotaResourcePanel({ ...base, currentContainer: {} }), false);
+  assert.equal(isCurrentQuotaResourcePanel({ ...base, currentGeneration: 5 }), false);
+  assert.equal(isCurrentQuotaResourcePanel({ ...base, currentResourceId: 'resource-b' }), false);
 }
 
 async function testAsyncInteractionGuards() {

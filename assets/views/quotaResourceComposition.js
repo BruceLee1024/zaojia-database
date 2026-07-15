@@ -23,6 +23,17 @@ export function normalizeBreakdown(breakdown = {}) {
   return normalizeQuotaBreakdown(breakdown);
 }
 
+export function parseQuotaBreakdownInputValues(rawValues = {}) {
+  const breakdown = {};
+  BREAKDOWN_KEYS.forEach(key => {
+    const rawValue = rawValues[key];
+    const value = Number(rawValue == null || rawValue === '' ? 0 : rawValue);
+    if (!Number.isFinite(value)) throw new Error(`${key}必须填写有效数字`);
+    breakdown[key] = value;
+  });
+  return normalizeBreakdown(breakdown);
+}
+
 export function buildCompositionPreview(quota = {}, usages = []) {
   const oldBreakdown = normalizeBreakdown(quota.breakdown);
   const material = roundCost(usages

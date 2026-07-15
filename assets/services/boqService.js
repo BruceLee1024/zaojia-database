@@ -4,6 +4,7 @@ import { uid } from '../utils/dom.js';
 import { pickBestQuota, categoryGuess } from '../utils/stats.js';
 import { calculateAmount } from '../utils/costing.js?v=3.9';
 import { hasMissingPrice } from '../utils/costing.js?v=3.9';
+import { localDateKey } from '../utils/localDate.js?v=4.2';
 
 export const boqService = {
   async listByProject(projectId) {
@@ -272,7 +273,7 @@ export const boqService = {
     const quotaIds = new Set(quotas.map(item => item.id));
     const resourceIds = new Set(resources.map(item => item.id));
     const resourcePriceMap = new Map(resourcePrices.map(item => [item.id, item]));
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateKey();
     const duplicateMap = new Map();
     lines.forEach(line => {
       const key = [line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|');
