@@ -2,16 +2,62 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createLatestCoordinator, createSerializedKeyCoordinator } from '../assets/utils/requestCoordinator.js?v=6.2';
-import { resourceRowHtml } from '../assets/views/resources.js?v=6.2';
+import { createLatestCoordinator, createLatestWorkspaceCoordinator, createSerializedKeyCoordinator } from '../assets/utils/requestCoordinator.js?v=6.2';
+import { buildEquipmentPackageDialog, resourceRowHtml } from '../assets/views/resources.js?v=6.2';
 import { quotaResourceChoiceHtml } from '../assets/views/quotaResourceCompositionPanel.js?v=6.2';
 
 export async function testFinalFixes() {
   await testLatestCoordinator();
   await testSerializedCoordinator();
+  await testLatestWorkspaceCoordinator();
   await testCoherentModuleVersionGraph();
   await testNoInlineUntrustedIdInterpolation();
   testMaliciousIdRendering();
+  testEquipmentDialogSafetyAndWithdrawal();
+}
+
+async function testLatestWorkspaceCoordinator() {
+  const workspace = {
+    childNodes: [],
+    replaceChildren(...nodes) { this.childNodes = nodes; },
+  };
+  const coordinator = createLatestWorkspaceCoordinator({
+    snapshot: () => [...workspace.childNodes],
+    restore: nodes => workspace.replaceChildren(...nodes),
+  });
+  const nodeA = { text: 'A' };
+  const nodeB = { text: 'B', click: () => 'listener-preserved' };
+  let releaseA;
+  const slowA = coordinator.run(async () => {
+    await new Promise(resolve => { releaseA = resolve; });
+    workspace.replaceChildren(nodeA);
+  });
+  await Promise.resolve();
+  const fastB = coordinator.run(async () => { workspace.replaceChildren(nodeB); });
+  assert.notEqual(await Promise.race([fastB.then(() => 'B-done'), new Promise(resolve => setTimeout(() => resolve('blocked'), 10))]), 'blocked');
+  assert.equal(workspace.childNodes[0], nodeB);
+  releaseA();
+  assert.equal(await slowA, false);
+  assert.equal(workspace.childNodes[0], nodeB);
+  assert.equal(workspace.childNodes[0].click(), 'listener-preserved');
+}
+
+function testEquipmentDialogSafetyAndWithdrawal() {
+  const hostile = 'x\" onclick=\"alert(1)<script>';
+  const dialog = buildEquipmentPackageDialog({
+    projects: [{ id: hostile, name: '<img src=x>' }],
+    prices: [{ id: 'withdrawn', status: 'withdrawn', unitPrice: 1 }, { id: hostile, status: 'active', unitPrice: 2 }],
+    quotas: [{ id: hostile, name: '<svg onload=alert(1)>' }],
+  });
+  assert.equal(dialog.hasActivePrices, true);
+  assert.equal(dialog.body.includes('value="withdrawn"'), false);
+  assert.equal(dialog.body.includes('<script>'), false);
+  assert.equal(dialog.body.includes('onclick="alert'), false);
+  assert.equal(dialog.body.includes('&quot;'), true);
+  const empty = buildEquipmentPackageDialog({ projects: [{ id: 'p1', name: 'P' }], prices: [{ id: 'w1', status: 'withdrawn' }], quotas: [] });
+  assert.equal(empty.hasActivePrices, false);
+  assert.equal(empty.footer.includes('disabled'), true);
+  assert.equal(empty.body.includes('没有可用的未撤回价格'), true);
 }
 
 function testMaliciousIdRendering() {

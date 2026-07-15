@@ -162,7 +162,7 @@ function exposeActions() {
     remove: removeResource,
     addPrice: showPriceEditor,
     preferPrice: async (resourceId, priceId) => { await resourceService.setPreferredPrice(resourceId, priceId); toast('已设为首选价格', 'success'); await refresh(); await loadPriceHistory(resourceId); },
-    removePrice: async (resourceId, priceId) => { if (!confirm('撤回这条价格快照？历史记录和附件仍保留。')) return; await resourcePriceService.remove(priceId); await refresh(); await loadPriceHistory(resourceId); },
+    withdrawPrice: async (resourceId, priceId) => { if (!confirm('撤回这条价格快照？历史记录和附件仍保留。')) return; await resourcePriceService.withdraw(priceId); await refresh(); await loadPriceHistory(resourceId); },
     addToProject: showAddToProject,
     importExcel: () => window.__app.go('resource-import', { resourceType: state.resourceType }),
     downloadTemplate: () => exportResourceTemplate(state.resourceType),
@@ -175,7 +175,7 @@ async function loadPriceHistory(resourceId) {
   const [resource, prices] = await Promise.all([resourceService.get(resourceId), resourcePriceService.listByResource(resourceId)]);
   host.innerHTML = prices.length ? `<div class="space-y-2">${prices.map(price => `<div class="border ${price.id === resource.preferredPriceId ? 'border-teal-300 bg-teal-50/50' : 'border-slate-200'} p-2"><div class="flex items-center gap-2"><span class="font-semibold text-slate-900">${fmtMoney(price.unitPrice)}</span>${price.id === resource.preferredPriceId ? '<span class="badge badge-green">首选</span>' : ''}${price.status === 'withdrawn' ? '<span class="badge badge-gray">已撤回</span>' : ''}<span class="ml-auto text-slate-500">${esc(price.priceDate)}</span></div><div class="mt-1 text-slate-500">${esc(price.region?.province || '')}${esc(price.region?.city || '')} · ${sourceLabel(price.sourceType)} · ${basisLabel(price.priceBasis)}${price.supplier ? ` · ${esc(price.supplier)}` : ''}</div><div class="mt-2 flex gap-3">${price.status === 'withdrawn' ? '' : `<button data-price-action="prefer" data-resource-id="${esc(resourceId)}" data-price-id="${esc(price.id)}" class="text-teal-700">设为首选</button><button data-price-action="withdraw" data-resource-id="${esc(resourceId)}" data-price-id="${esc(price.id)}" class="text-red-600">撤回</button>`}</div></div>`).join('')}</div>` : '<div class="border border-dashed border-slate-200 p-4 text-center">暂无价格历史。</div>';
   host.querySelectorAll('[data-price-action]').forEach(button => button.addEventListener('click', () => {
-    const action = button.dataset.priceAction === 'prefer' ? 'preferPrice' : 'removePrice';
+    const action = button.dataset.priceAction === 'prefer' ? 'preferPrice' : 'withdrawPrice';
     window.__resources[action](button.dataset.resourceId, button.dataset.priceId);
   }));
 }
@@ -222,8 +222,24 @@ async function removeResource(id) {
 async function showAddToProject(resourceId) {
   const [projects, prices, quotas] = await Promise.all([projectRepo.all(), resourcePriceService.listByResource(resourceId), quotaRepo.all()]);
   if (!projects.length) return toast('请先建立项目');
-  openModal('设备加入项目', `<form id="equipmentPackageForm" class="space-y-3 text-sm"><label class="block">目标项目<select name="projectId" class="mt-1 h-9 w-full border border-slate-300 bg-white px-2">${projects.map(item => `<option value="${item.id}">${esc(item.name)}</option>`).join('')}</select></label><label class="block">价格快照<select name="priceId" class="mt-1 h-9 w-full border border-slate-300 bg-white px-2">${prices.map(price => `<option value="${price.id}">${fmtMoney(price.unitPrice)} · ${esc(price.priceDate)} · ${basisLabel(price.priceBasis)}</option>`).join('')}</select></label>${input('数量', 'qty', '1', '', true, 'number')}<label class="block">安装定额（可选）<select name="installQuotaId" class="mt-1 h-9 w-full border border-slate-300 bg-white px-2"><option value="">不另加安装定额</option>${quotas.map(item => `<option value="${item.id}">${esc(item.name)} · ${fmtMoney(item.priceTotal)}</option>`).join('')}</select></label></form>`, `<button onclick="window.__modalClose()" class="h-9 px-3 border border-slate-300 bg-white text-sm">取消</button><button id="addEquipmentPackageButton" class="h-9 px-4 brand-bg text-white text-sm">加入项目清单</button>`);
+  const dialog = buildEquipmentPackageDialog({ projects, prices, quotas });
+  openModal('设备加入项目', dialog.body, dialog.footer);
+  if (!dialog.hasActivePrices) return;
   document.getElementById('addEquipmentPackageButton').onclick = async () => { const data = Object.fromEntries(new FormData(document.getElementById('equipmentPackageForm'))); await boqService.addEquipmentPackage(data.projectId, resourceId, data.priceId, Number(data.qty), { installQuotaId: data.installQuotaId || undefined }); closeModal(); toast('设备已加入项目清单', 'success'); };
+}
+
+export function buildEquipmentPackageDialog({ projects = [], prices = [], quotas = [] } = {}) {
+  const activePrices = prices.filter(price => price.status !== 'withdrawn');
+  const hasActivePrices = activePrices.length > 0;
+  const body = `<form id="equipmentPackageForm" class="space-y-3 text-sm">
+    <label class="block">目标项目<select name="projectId" class="mt-1 h-9 w-full border border-slate-300 bg-white px-2">${projects.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select></label>
+    <label class="block">价格快照<select name="priceId" ${hasActivePrices ? '' : 'disabled'} class="mt-1 h-9 w-full border border-slate-300 bg-white px-2">${activePrices.map(price => `<option value="${esc(price.id)}">${fmtMoney(price.unitPrice)} · ${esc(price.priceDate)} · ${basisLabel(price.priceBasis)}</option>`).join('')}</select></label>
+    ${hasActivePrices ? '' : '<div role="alert" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">没有可用的未撤回价格，请先新增价格快照。</div>'}
+    ${input('数量', 'qty', '1', '', true, 'number')}
+    <label class="block">安装定额（可选）<select name="installQuotaId" class="mt-1 h-9 w-full border border-slate-300 bg-white px-2"><option value="">不另加安装定额</option>${quotas.map(item => `<option value="${esc(item.id)}">${esc(item.name)} · ${fmtMoney(item.priceTotal)}</option>`).join('')}</select></label>
+  </form>`;
+  const footer = `<button onclick="window.__modalClose()" class="h-9 px-3 border border-slate-300 bg-white text-sm">取消</button><button id="addEquipmentPackageButton" ${hasActivePrices ? '' : 'disabled'} class="h-9 px-4 brand-bg text-white text-sm disabled:cursor-not-allowed disabled:opacity-40">加入项目清单</button>`;
+  return { body, footer, hasActivePrices };
 }
 
 function input(label, name, value = '', wrapper = '', required = false, type = 'text') { return `<label class="${wrapper}">${label}<input name="${name}" value="${esc(value || '')}" type="${type}" ${required ? 'required' : ''} class="mt-1 h-9 w-full border border-slate-300 bg-white px-2"></label>`; }

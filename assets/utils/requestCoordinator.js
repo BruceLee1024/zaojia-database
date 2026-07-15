@@ -32,3 +32,28 @@ export function createSerializedKeyCoordinator() {
     },
   };
 }
+
+export function createLatestWorkspaceCoordinator({ snapshot, restore }) {
+  let generation = 0;
+  let latestSnapshot;
+  return {
+    async run(render) {
+      const request = ++generation;
+      try {
+        await render();
+      } catch (error) {
+        if (request !== generation) {
+          if (latestSnapshot !== undefined) restore(latestSnapshot);
+          return false;
+        }
+        throw error;
+      }
+      if (request === generation) {
+        latestSnapshot = snapshot();
+        return true;
+      }
+      if (latestSnapshot !== undefined) restore(latestSnapshot);
+      return false;
+    },
+  };
+}

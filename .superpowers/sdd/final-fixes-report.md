@@ -43,3 +43,23 @@
 - Verified withdrawn prices cannot be preferred, linked into quota composition, or inserted into a project package.
 - Verified rollback queues recover after failures and partial recovery reports the failed rollback causes.
 - Secret-pattern scan found no newly embedded credential.
+
+## Second final review fixes
+
+### RED
+
+- Equipment dialog contract failed at module instantiation because `buildEquipmentPackageDialog` did not exist; the pre-fix popup also rendered withdrawn prices and raw project/price/quota option values.
+- Latest workspace contract failed at module instantiation because `createLatestWorkspaceCoordinator` did not exist; the prior per-route serialized queue made fast B wait for slow A.
+- Cross-project equipment tests reproduced whole-table lost updates and proved a failed project transaction could roll back over another project's successful insertion while queues were keyed per project.
+- Backup semantic cases initially accepted hostile `projects.id`, hostile `quota_items.id`, hostile `project_boq.projectId`, and preferred prices that were missing, belonged to another resource, or were withdrawn.
+- Price lifecycle contract initially had no public `withdraw(id)` method.
+
+### GREEN
+
+- Equipment package `replaceAll` transactions now share one global `project_boq` queue. Tests cover concurrent success across two projects and a failed A whose full rollback completes before successful B, without overwriting B.
+- Latest workspace renders now start concurrently. Fast B settles without waiting for slow A; a late A is rejected and the latest committed workspace nodes are atomically reattached, preserving B's DOM event listeners and route chrome.
+- Every business-store record now requires a canonical ID. Known scalar/array foreign keys, including nested version lines, use the same grammar and length boundary before export/restore mutation.
+- Backup validation rejects missing, cross-resource, and withdrawn preferred prices.
+- Equipment project popup escapes project, price, and quota option values, excludes withdrawn prices, and renders an accessible disabled state when none remain.
+- `resourcePriceService.withdraw(id)` is the primary lifecycle API; `remove(id)` remains only as a deprecated compatibility alias, and UI actions call `withdraw`.
+- Final verification after the second review: `node tests/run.mjs` -> `All tests passed`; `git diff --check` and changed-file `node --check` passed.

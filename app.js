@@ -16,7 +16,7 @@ import { getStorageStatus } from './assets/data/storage.js?v=6.2';
 import { openModal, closeModal, esc } from './assets/utils/dom.js?v=6.2';
 import { ICONS } from './assets/utils/icons.js?v=6.2';
 import { navigationItemHtml } from './assets/views/navigation.js?v=6.2';
-import { createLatestCoordinator, createSerializedKeyCoordinator } from './assets/utils/requestCoordinator.js?v=6.2';
+import { createLatestCoordinator, createLatestWorkspaceCoordinator } from './assets/utils/requestCoordinator.js?v=6.2';
 
 const VIEWS = [
   { id: 'dashboard',  label: '我的概览',   icon: ICONS.navigation.overview, group: '我的工作台', desc: '继续最近工作' },
@@ -65,7 +65,10 @@ const renderers = {
 };
 let lastSearchResults = [];
 let routeGeneration = 0;
-const routeCoordinator = createSerializedKeyCoordinator();
+const routeCoordinator = createLatestWorkspaceCoordinator({
+  snapshot: snapshotWorkspace,
+  restore: restoreWorkspace,
+});
 const searchCoordinator = createLatestCoordinator();
 
 function renderNav() {
@@ -89,7 +92,7 @@ async function go(view, params = {}) {
 }
 
 async function renderWorkspace(generation = ++routeGeneration) {
-  return routeCoordinator.run('workspace', async () => {
+  return routeCoordinator.run(async () => {
     if (generation !== routeGeneration) return false;
     const current = VIEWS.find(x => x.id === state.currentView) || VIEWS[0];
     document.getElementById('crumb').textContent = current.label || '';
@@ -113,6 +116,26 @@ async function renderWorkspace(generation = ++routeGeneration) {
     }
     return generation === routeGeneration;
   });
+}
+
+function snapshotWorkspace() {
+  const workspace = document.getElementById('workspace');
+  return {
+    nodes: workspace ? [...workspace.childNodes] : [],
+    crumb: document.getElementById('crumb')?.textContent || '',
+    crumbIcon: document.getElementById('crumbIcon')?.textContent || '',
+    crumbGroup: document.getElementById('crumbGroup')?.textContent || '',
+    crumbDesc: document.getElementById('crumbDesc')?.textContent || '',
+  };
+}
+
+function restoreWorkspace(snapshot) {
+  const workspace = document.getElementById('workspace');
+  if (workspace) workspace.replaceChildren(...snapshot.nodes);
+  for (const [id, key] of [['crumb', 'crumb'], ['crumbIcon', 'crumbIcon'], ['crumbGroup', 'crumbGroup'], ['crumbDesc', 'crumbDesc']]) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = snapshot[key];
+  }
 }
 
 function renderErrorState(current, err) {

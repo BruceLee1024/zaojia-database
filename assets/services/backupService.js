@@ -255,15 +255,12 @@ function validateBusinessSemantics(stores) {
   for (const [store, records] of Object.entries(stores)) {
     const seen = new Set();
     for (const record of records) {
-      if (record.id == null || record.id === '') continue;
+      if (record.id == null || record.id === '') throw backupError('BACKUP_SEMANTIC_INVALID', `数据表 ${store} 包含缺少 ID 的记录。`);
       const id = String(record.id);
+      validateCanonicalId(id, `数据表 ${store} 的 ID`);
       if (seen.has(id)) throw backupError('BACKUP_SEMANTIC_INVALID', `数据表 ${store} 包含重复 ID：${id}`);
       seen.add(id);
-    }
-  }
-  for (const store of [STORES.resource_items, STORES.resource_prices, STORES.quota_resource_usages, STORES.resource_attachments]) {
-    if (stores[store].some(record => record.id == null || record.id === '')) {
-      throw backupError('BACKUP_SEMANTIC_INVALID', `数据表 ${store} 包含缺少 ID 的记录。`);
+      validateRecordReferences(record, `数据表 ${store}`);
     }
   }
   for (const record of stores.resource_items) validateCanonicalId(record.id, '资源 ID');
@@ -285,6 +282,13 @@ function validateBusinessSemantics(stores) {
   const resourceIds = new Set(stores.resource_items.map(record => record.id));
   const quotaIds = new Set(stores.quota_items.map(record => record.id));
   const prices = new Map(stores.resource_prices.map(record => [record.id, record]));
+  for (const resource of stores.resource_items) {
+    if (!resource.preferredPriceId) continue;
+    const preferred = prices.get(resource.preferredPriceId);
+    if (!preferred || preferred.resourceId !== resource.id || preferred.status === 'withdrawn') {
+      throw backupError('BACKUP_SEMANTIC_INVALID', `资源 ${resource.id} 的首选价格引用无效。`);
+    }
+  }
   for (const price of stores.resource_prices) {
     if (!resourceIds.has(price.resourceId)) throw backupError('BACKUP_SEMANTIC_INVALID', `资源价格 ${price.id} 引用了不存在的资源。`);
   }
@@ -311,6 +315,28 @@ function validateBusinessSemantics(stores) {
     if (attachmentPaths.has(path)) throw backupError('BACKUP_SEMANTIC_INVALID', `附件包含重复路径：${path}`);
     attachmentPaths.add(path);
   }
+}
+
+const REFERENCE_FIELDS = new Set([
+  'projectId', 'quotaItemId', 'resourceId', 'resourceItemId', 'resourcePriceId', 'selectedPriceId', 'priceId',
+  'linkedResourceItemId', 'linkedEquipmentLineId', 'installationResourceItemId', 'manualInstallationResourceId',
+  'versionId', 'indicatorId', 'sessionId', 'cardId', 'jobId', 'reportId', 'preferredPriceId',
+]);
+const REFERENCE_ARRAY_FIELDS = new Set(['projectIds', 'quotaItemIds', 'resourceIds', 'priceIds', 'versionIds']);
+
+function validateRecordReferences(record, label) {
+  for (const [field, value] of Object.entries(record)) {
+    if (REFERENCE_FIELDS.has(field) && value != null && value !== '') validateCanonicalId(value, `${label} 的 ${field}`);
+    if (REFERENCE_ARRAY_FIELDS.has(field) && value != null) {
+      if (!Array.isArray(value)) throw backupError('BACKUP_SEMANTIC_INVALID', `${label} 的 ${field} 必须是数组。`);
+      value.forEach(item => validateCanonicalId(item, `${label} 的 ${field}`));
+    }
+  }
+  if (Array.isArray(record.lines)) record.lines.forEach(line => {
+    if (!isRecord(line)) throw backupError('BACKUP_SEMANTIC_INVALID', `${label} 的版本行无效。`);
+    if (line.id) validateCanonicalId(line.id, `${label} 的版本行 ID`);
+    validateRecordReferences(line, `${label} 的版本行`);
+  });
 }
 
 function validateAttachmentMetadata(meta) {

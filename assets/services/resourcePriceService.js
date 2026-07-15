@@ -47,20 +47,13 @@ export const resourcePriceService = {
     return price;
   },
 
+  async withdraw(id) {
+    return withdrawPrice(id);
+  },
+
+  /** @deprecated Use withdraw(id). */
   async remove(id) {
-    const price = await resourcePriceRepo.findById(id);
-    if (!price) return null;
-    const withdrawn = {
-      ...price,
-      status: 'withdrawn',
-      withdrawnAt: price.withdrawnAt || new Date().toISOString(),
-    };
-    await resourcePriceRepo.upsert(withdrawn);
-    const resource = await resourceRepo.findById(price.resourceId);
-    if (resource?.preferredPriceId === id) {
-      await resourceRepo.update(resource.id, { preferredPriceId: '', updatedAt: new Date().toISOString() });
-    }
-    return withdrawn;
+    return withdrawPrice(id);
   },
 
   async getCurrentPrice(resourceId) {
@@ -68,6 +61,22 @@ export const resourcePriceService = {
     return selectCurrentResourcePrice(resource, prices, localDateKey());
   },
 };
+
+async function withdrawPrice(id) {
+  const price = await resourcePriceRepo.findById(id);
+  if (!price) return null;
+  const withdrawn = {
+    ...price,
+    status: 'withdrawn',
+    withdrawnAt: price.withdrawnAt || new Date().toISOString(),
+  };
+  await resourcePriceRepo.upsert(withdrawn);
+  const resource = await resourceRepo.findById(price.resourceId);
+  if (resource?.preferredPriceId === id) {
+    await resourceRepo.update(resource.id, { preferredPriceId: '', updatedAt: new Date().toISOString() });
+  }
+  return withdrawn;
+}
 
 export function selectCurrentResourcePrice(resource, prices = [], today = localDateKey()) {
   return selectResourcePrice(resource, prices, today);

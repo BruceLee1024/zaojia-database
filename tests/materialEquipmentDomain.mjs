@@ -21,10 +21,37 @@ export async function testMaterialEquipmentDomain() {
     await testQuotaCompositionAndLegacyBreakdown();
     await resetDomainStores();
     await testEquipmentPackageAndRollback(storage);
+    await resetDomainStores();
+    await testCrossProjectEquipmentPackageIsolation(storage);
   } finally {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+async function testCrossProjectEquipmentPackageIsolation(storage) {
+  const equipment = await resourceService.save({ resourceType: 'equipment', name: '跨项目水泵', unit: '台' });
+  const price = await resourcePriceService.save({ resourceId: equipment.id, sourceType: 'official', priceBasis: 'delivered', unitPrice: 1000, region: { city: '成都' }, priceDate: '2026-07-15' });
+  await globalStoreSet(STORES.projects, [{ id: 'project-a', totalCost: 0 }, { id: 'project-b', totalCost: 0 }]);
+  await Promise.all([
+    boqService.addEquipmentPackage('project-a', equipment.id, price.id, 1),
+    boqService.addEquipmentPackage('project-b', equipment.id, price.id, 1),
+  ]);
+  let lines = await globalStoreGet(STORES.project_boq);
+  assert.deepEqual(new Set(lines.map(line => line.projectId)), new Set(['project-a', 'project-b']));
+
+  await globalStoreSet(STORES.project_boq, []);
+  await globalStoreSet(STORES.projects, [{ id: 'project-a', totalCost: 0 }, { id: 'project-b', totalCost: 0 }]);
+  storage.failNextSet(STORES.projects);
+  const [failedA, successfulB] = await Promise.allSettled([
+    boqService.addEquipmentPackage('project-a', equipment.id, price.id, 1),
+    boqService.addEquipmentPackage('project-b', equipment.id, price.id, 1),
+  ]);
+  assert.equal(failedA.status, 'rejected');
+  assert.equal(failedA.reason.code, 'EQUIPMENT_PACKAGE_ROLLED_BACK');
+  assert.equal(successfulB.status, 'fulfilled');
+  lines = await globalStoreGet(STORES.project_boq);
+  assert.deepEqual(lines.map(line => line.projectId), ['project-b']);
 }
 
 async function testRepositories() {
@@ -91,7 +118,8 @@ async function testAppendOnlyPricesAndCurrentSelection() {
   assert.equal((await resourcePriceService.getCurrentPrice(equipment.id)).id, oldPrice.id);
   await assert.rejects(() => resourcePriceService.save({ ...latest, unitPrice: 1 }), err => err.code === 'PRICE_IMMUTABLE');
   await resourceAttachmentRepo.upsert({ id: 'price-evidence', resourceId: equipment.id, priceId: oldPrice.id, status: 'available' });
-  await resourcePriceService.remove(oldPrice.id);
+  assert.equal(typeof resourcePriceService.withdraw, 'function');
+  await resourcePriceService.withdraw(oldPrice.id);
   assert.equal((await resourceService.get(equipment.id)).preferredPriceId, '');
   const withdrawn = await resourcePriceRepo.findById(oldPrice.id);
   assert.equal(withdrawn.status, 'withdrawn');

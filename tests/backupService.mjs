@@ -186,6 +186,12 @@ export async function testBackupService() {
     { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'missing', resourceId: 'r1' }] },
     { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'q1', resourceId: 'missing' }] },
     { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'q1', resourceId: 'r1', selectedPriceId: 'missing' }] },
+    { ...semanticBase, projects: [{ id: 'p\" onclick=alert(1)' }] },
+    { ...semanticBase, quota_items: [{ id: '../quota' }], quota_resource_usages: [] },
+    { ...semanticBase, projects: [{ id: 'p1' }], project_boq: [{ id: 'line1', projectId: '<script>' }] },
+    { ...semanticBase, resource_items: [{ id: 'r1', preferredPriceId: 'missing' }, { id: 'r2' }] },
+    { ...semanticBase, resource_items: [{ id: 'r1', preferredPriceId: 'p2' }, { id: 'r2' }], resource_prices: [{ id: 'p1', resourceId: 'r1' }, { id: 'p2', resourceId: 'r2' }] },
+    { ...semanticBase, resource_items: [{ id: 'r1', preferredPriceId: 'p1' }, { id: 'r2' }], resource_prices: [{ id: 'p1', resourceId: 'r1', status: 'withdrawn' }] },
   ];
   for (const invalid of invalidSemanticBackups) {
     await assert.rejects(() => restoreLegacyJsonBackup(invalid, semanticTarget), error => error.code === 'BACKUP_SEMANTIC_INVALID');

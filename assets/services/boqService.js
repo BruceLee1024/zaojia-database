@@ -50,14 +50,14 @@ export const boqService = {
   },
 
   async addEquipmentPackage(projectId, resourceId, priceId, qty, { installQuotaId } = {}) {
-    return equipmentPackageCoordinator.run(projectId, async () => {
-    const [project, resource, price, installQuota] = await Promise.all([
+    return equipmentPackageCoordinator.run('project_boq', async () => {
+      const [project, resource, price, installQuota] = await Promise.all([
       projectRepo.findById(projectId),
       resourceRepo.findById(resourceId),
       resourcePriceRepo.findById(priceId),
       installQuotaId ? quotaRepo.findById(installQuotaId) : null,
-    ]);
-    if (!project) throw new Error('项目不存在');
+      ]);
+      if (!project) throw new Error('项目不存在');
     if (!resource || resource.resourceType !== 'equipment') throw new Error('只能将设备加入项目');
     if (!price || price.resourceId !== resourceId) throw new Error('设备价格不存在或不属于当前设备');
     if (price.status === 'withdrawn') throw new Error('已撤回价格不能加入项目');
