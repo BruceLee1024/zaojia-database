@@ -12,6 +12,7 @@ import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/exc
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
 import { categoryGuess } from '../utils/stats.js';
 import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=1.0';
+import { buildBoqResourceViewModel, renderBoqResourceReference } from './boqResourceReference.js?v=4.2';
 
 const BOQ_PAGE_SIZE = 500;
 const boqState = {
@@ -552,6 +553,9 @@ function boqToolbar(selectedCount) {
         <option value="factorRisk" ${boqState.riskStatus === 'factorRisk' ? 'selected' : ''}>系数异常</option>
         <option value="unmatchedQuota" ${boqState.riskStatus === 'unmatchedQuota' ? 'selected' : ''}>未匹配定额</option>
         <option value="invalidQuotaReference" ${boqState.riskStatus === 'invalidQuotaReference' ? 'selected' : ''}>关联定额已删除</option>
+        <option value="invalidResourceReference" ${boqState.riskStatus === 'invalidResourceReference' ? 'selected' : ''}>资源引用失效</option>
+        <option value="expiredResourcePrice" ${boqState.riskStatus === 'expiredResourcePrice' ? 'selected' : ''}>资源价格过期</option>
+        <option value="missingResourcePriceBasis" ${boqState.riskStatus === 'missingResourcePriceBasis' ? 'selected' : ''}>缺价格口径</option>
       </select>
       ${toolbarGroup('数据', [
         ['btnAdd', 'add', '添加清单', 'primary'],
@@ -739,12 +743,18 @@ function lineRisks(line) {
   if (Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8) risks.push({ id: 'factorRisk', label: '系数异常', cls: 'badge-red' });
   if (!line.quotaItemId) risks.push({ id: 'unmatchedQuota', label: '未匹配', cls: 'badge-gray' });
   if (line.quotaReferenceStatus === 'missing') risks.push({ id: 'invalidQuotaReference', label: '定额已删除', cls: 'badge-red' });
+  const resourceView = buildBoqResourceViewModel(line);
+  resourceView.badges.forEach(label => risks.push({
+    id: label === '引用失效' ? 'invalidResourceReference' : label === '价格过期' ? 'expiredResourcePrice' : 'missingResourcePriceBasis',
+    label,
+    cls: label === '引用失效' ? 'badge-red' : 'badge-yellow',
+  }));
   return risks;
 }
 
 function riskBadges(line) {
   const risks = lineRisks(line);
-  return risks.length ? `<div class="flex flex-wrap gap-1">${risks.slice(0, 2).map(r => `<span class="badge ${r.cls}">${r.label}</span>`).join('')}</div>` : '<span class="badge badge-green">正常</span>';
+  return risks.length ? `<div class="flex flex-wrap gap-1">${risks.slice(0, 4).map(r => `<span class="badge ${r.cls}">${r.label}</span>`).join('')}</div>` : '<span class="badge badge-green">正常</span>';
 }
 
 function groupByCategory(lines) {
@@ -845,6 +855,7 @@ function detailPanel(line, recommendations = [], librarySource = null) {
               <div class="text-xs text-slate-500">合价</div>
               <div class="mt-1 text-xl font-semibold tabular-nums text-slate-900">${fmtMoney(line.amount || 0)}</div>
             </div>
+            ${renderBoqResourceReference(buildBoqResourceViewModel(line))}
             <div class="col-span-2 rounded border border-slate-200 bg-white p-3">
               <div class="mb-2 flex items-center justify-between">
                 <div>

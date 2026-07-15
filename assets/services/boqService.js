@@ -261,13 +261,18 @@ export const boqService = {
   },
 
   async audit(projectId) {
-    const [project, lines, versions, quotas] = await Promise.all([
+    const [project, lines, versions, quotas, resources, resourcePrices] = await Promise.all([
       projectRepo.findById(projectId),
       boqRepo.byProject(projectId),
       versionRepo.byProject(projectId),
       quotaRepo.all(),
+      resourceRepo.all(),
+      resourcePriceRepo.all(),
     ]);
     const quotaIds = new Set(quotas.map(item => item.id));
+    const resourceIds = new Set(resources.map(item => item.id));
+    const resourcePriceMap = new Map(resourcePrices.map(item => [item.id, item]));
+    const today = new Date().toISOString().slice(0, 10);
     const duplicateMap = new Map();
     lines.forEach(line => {
       const key = [line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|');
@@ -280,6 +285,10 @@ export const boqService = {
       unmatchedQuota: lines.filter(line => !line.quotaItemId),
       invalidQuotaReference: lines.filter(line => line.quotaReferenceStatus === 'missing' || (line.quotaItemId && !quotaIds.has(line.quotaItemId))),
       duplicate: lines.filter(line => duplicateMap.get([line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|')) > 1),
+      invalidResourceReference: lines.filter(line => hasInvalidResourceReference(line, resourceIds)),
+      expiredResourcePrice: lines.filter(line => isExpiredResourcePrice(line, resourcePriceMap, today)),
+      missingResourcePriceBasis: lines.filter(line => hasResourcePrice(line) && !resourcePriceForLine(line, resourcePriceMap)?.priceBasis),
+      duplicateEquipmentInstallation: duplicateEquipmentInstallationLines(lines, resourcePriceMap),
       noVersion: versions.length ? [] : [project].filter(Boolean),
     };
     const score = Math.max(0, 100
@@ -289,6 +298,10 @@ export const boqService = {
       - issues.unmatchedQuota.length * 4
       - issues.invalidQuotaReference.length * 8
       - issues.duplicate.length * 3
+      - issues.invalidResourceReference.length * 8
+      - issues.expiredResourcePrice.length * 5
+      - issues.missingResourcePriceBasis.length * 5
+      - issues.duplicateEquipmentInstallation.length * 8
       - (versions.length ? 0 : 10));
     return {
       project,
@@ -328,4 +341,35 @@ function cloneSnapshot(value) {
   return typeof structuredClone === 'function'
     ? structuredClone(value)
     : JSON.parse(JSON.stringify(value));
+}
+
+function hasInvalidResourceReference(line, resourceIds) {
+  if (line.resourceReferenceStatus === 'missing' || line.linkedResourceReferenceStatus === 'missing') return true;
+  const ids = [line.resourceItemId, line.linkedResourceItemId].filter(Boolean);
+  return ids.some(id => !resourceIds.has(id));
+}
+
+function hasResourcePrice(line) {
+  return Boolean(line.resourceItemId || line.resourcePriceId || line.resourcePriceSnapshot);
+}
+
+function resourcePriceForLine(line, resourcePriceMap) {
+  return line.resourcePriceSnapshot || resourcePriceMap.get(line.resourcePriceId) || null;
+}
+
+function isExpiredResourcePrice(line, resourcePriceMap, today) {
+  if (!hasResourcePrice(line)) return false;
+  const price = resourcePriceForLine(line, resourcePriceMap);
+  return Boolean(price?.validTo && price.validTo < today);
+}
+
+function duplicateEquipmentInstallationLines(lines, resourcePriceMap) {
+  const compositeResourceIds = new Set(lines
+    .filter(line => line.resourceItemId && resourcePriceForLine(line, resourcePriceMap)?.priceBasis === 'installed_composite')
+    .map(line => line.resourceItemId));
+  const duplicatedIds = new Set(lines
+    .map(line => line.linkedResourceItemId || line.installationResourceItemId || line.manualInstallationResourceId)
+    .filter(resourceId => resourceId && compositeResourceIds.has(resourceId)));
+  return lines.filter(line => duplicatedIds.has(line.resourceItemId)
+    || duplicatedIds.has(line.linkedResourceItemId || line.installationResourceItemId || line.manualInstallationResourceId));
 }

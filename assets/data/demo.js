@@ -216,7 +216,7 @@ export async function loadDemoData() {
           if (seen.has(k)) continue;
           seen.add(k);
           item.id = uid();
-          item.breakdown = { 人工: 0, 材料: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 };
+          item.breakdown = { 人工: 0, 材料: 0, 设备: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 };
           item.useBreakdown = false;
           item.tags = [];
           item.updatedAt = new Date().toISOString();
@@ -257,7 +257,7 @@ export async function loadDemoData() {
               rule: '',
               unit: line.unit,
               priceTotal: line.unitPrice,
-              breakdown: { 人工: 0, 材料: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
+              breakdown: { 人工: 0, 材料: 0, 设备: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
               useBreakdown: false,
               tags: [],
               updatedAt: new Date().toISOString(),
@@ -323,7 +323,7 @@ async function ensureBuiltinDemoData() {
       priceTotal,
       priceMissing: false,
       structureGroup,
-      breakdown: { 人工: 0, 材料: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
+      breakdown: { 人工: 0, 材料: 0, 设备: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
       useBreakdown: false,
       tags: [category.replace(/与.*/, ''), structureGroup],
       updatedAt: now,

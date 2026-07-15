@@ -14,6 +14,7 @@ import { testMaterialEquipmentDomain } from './materialEquipmentDomain.mjs';
 import { testResourceWorkbench } from './resourceWorkbench.mjs';
 import { testResourceAttachments } from './resourceAttachments.mjs';
 import { testBackupService } from './backupService.mjs';
+import { testQuotaBoqIntegration } from './quotaBoqIntegration.mjs';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -510,6 +511,7 @@ await testMaterialEquipmentDomain();
 await testResourceWorkbench();
 await testResourceAttachments();
 await testBackupService();
+await testQuotaBoqIntegration();
 console.log('All tests passed');
 
 async function testLocalFolderJsonStorage() {
