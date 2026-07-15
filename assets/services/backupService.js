@@ -11,13 +11,15 @@ export const ALLOWED_ATTACHMENT_MIMES = new Set([
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
+const BACKUP_APP = 'wastewater-cost-db';
+const BACKUP_SCHEMA_VERSION = 2;
 
 export function createRepositoryBackupAdapter({ getStore, setStore, getAttachment, setAttachment, removeAttachment }) {
   return { getStore, setStore, getAttachment, setAttachment, removeAttachment };
 }
 
 export async function createLegacyJsonBackup(adapter, aiConfig = {}) {
-  const data = {};
+  const data = { app: BACKUP_APP, schemaVersion: BACKUP_SCHEMA_VERSION };
   for (const store of BACKUP_STORES) data[store] = await adapter.getStore(store);
   data.ai_config = toBackupSafeAIConfig(aiConfig);
   return data;
@@ -40,7 +42,7 @@ export async function restoreLegacyJsonBackup(data, adapter, options = {}) {
 }
 
 export async function createZipBackup(adapter, aiConfig = {}, options = {}) {
-  const zip = requireZip(options.zip);
+  const zip = requireZip(options.zip, 'zip');
   const backup = await createLegacyJsonBackup(adapter, aiConfig);
   const files = {};
   const attachmentEntries = [];
@@ -64,22 +66,24 @@ export async function createZipBackup(adapter, aiConfig = {}, options = {}) {
   }
   files['backup.json'] = textEncoder.encode(JSON.stringify(backup, null, 2));
   files['manifest.json'] = textEncoder.encode(JSON.stringify({
-    app: 'wastewater-cost-db', schemaVersion: 2, createdAt: new Date().toISOString(),
+    app: BACKUP_APP, schemaVersion: BACKUP_SCHEMA_VERSION, createdAt: new Date().toISOString(),
     attachments: attachmentEntries,
   }, null, 2));
   total += files['backup.json'].byteLength + files['manifest.json'].byteLength;
   if (total > MAX_BACKUP_SIZE) throw backupError('BACKUP_TOO_LARGE', '备份未压缩内容超过 500MB。');
-  return new Blob([zip.zipSync(files, { level: 6 })], { type: 'application/zip' });
+  const archive = await zipFiles(zip, files);
+  if (archive.byteLength > (options.maxArchiveSize ?? MAX_BACKUP_SIZE)) throw backupError('BACKUP_TOO_LARGE', '压缩后备份文件超过 500MB。');
+  return new Blob([archive], { type: 'application/zip' });
 }
 
 export async function restoreZipBackup(file, adapter, options = {}) {
   if (!(file instanceof Blob)) throw backupError('BACKUP_FILE_INVALID', '请选择 ZIP 备份文件。');
   if (file.size > MAX_BACKUP_SIZE) throw backupError('BACKUP_TOO_LARGE', '备份文件不能超过 500MB。');
-  const zip = requireZip(options.zip);
+  const zip = requireZip(options.zip, 'unzip');
   const archiveBytes = new Uint8Array(await file.arrayBuffer());
   validateArchiveDirectory(archiveBytes);
   let entries;
-  try { entries = zip.unzipSync(archiveBytes); }
+  try { entries = await unzipFiles(zip, archiveBytes); }
   catch { throw backupError('BACKUP_ZIP_INVALID', 'ZIP 备份无法解析。'); }
   const parsed = await validateZipEntries(entries);
   await replaceWithRollback(normalizeStores(parsed.backup), parsed.blobs, adapter, restoreAIHooks(parsed.backup, options));
@@ -124,7 +128,10 @@ async function validateZipEntries(entries) {
   const backup = parseJsonEntry(entries['backup.json'], 'backup.json');
   const manifest = parseJsonEntry(entries['manifest.json'], 'manifest.json');
   validateBackupJson(backup);
-  if (!isRecord(manifest) || manifest.schemaVersion !== 2 || !Array.isArray(manifest.attachments)) {
+  if (backup.app !== BACKUP_APP || backup.schemaVersion !== BACKUP_SCHEMA_VERSION) {
+    throw backupError('BACKUP_SCHEMA_INVALID', 'backup.json 的应用标识或 schemaVersion 无效。');
+  }
+  if (!isRecord(manifest) || manifest.app !== BACKUP_APP || manifest.schemaVersion !== BACKUP_SCHEMA_VERSION || !Array.isArray(manifest.attachments)) {
     throw backupError('BACKUP_SCHEMA_INVALID', 'manifest.json 必须使用 schemaVersion 2。');
   }
   const metadata = new Map(backup.resource_attachments.map(meta => [meta.id, meta]));
@@ -202,11 +209,55 @@ function normalizeStores(data) {
 
 function validateBackupJson(data) {
   if (!isRecord(data)) throw backupError('BACKUP_SCHEMA_INVALID', '备份根对象无效。');
+  if ((data.app != null && data.app !== BACKUP_APP) || (data.schemaVersion != null && data.schemaVersion !== BACKUP_SCHEMA_VERSION)) {
+    throw backupError('BACKUP_SCHEMA_INVALID', '备份的应用标识或 schemaVersion 无效。');
+  }
   for (const store of BACKUP_STORES) {
     if (data[store] != null && !Array.isArray(data[store])) throw backupError('BACKUP_STORE_INVALID', `数据表 ${store} 必须是数组。`);
     if (Array.isArray(data[store]) && data[store].some(item => !isRecord(item))) throw backupError('BACKUP_STORE_INVALID', `数据表 ${store} 包含无效记录。`);
   }
   if (data.ai_config != null && !isRecord(data.ai_config)) throw backupError('BACKUP_SCHEMA_INVALID', 'AI 配置格式无效。');
+  validateBusinessSemantics(normalizeStores(data));
+}
+
+function validateBusinessSemantics(stores) {
+  for (const [store, records] of Object.entries(stores)) {
+    const seen = new Set();
+    for (const record of records) {
+      if (record.id == null || record.id === '') continue;
+      const id = String(record.id);
+      if (seen.has(id)) throw backupError('BACKUP_SEMANTIC_INVALID', `数据表 ${store} 包含重复 ID：${id}`);
+      seen.add(id);
+    }
+  }
+  for (const store of [STORES.resource_items, STORES.resource_prices, STORES.quota_resource_usages, STORES.resource_attachments]) {
+    if (stores[store].some(record => record.id == null || record.id === '')) {
+      throw backupError('BACKUP_SEMANTIC_INVALID', `数据表 ${store} 包含缺少 ID 的记录。`);
+    }
+  }
+  const resourceIds = new Set(stores.resource_items.map(record => record.id));
+  const quotaIds = new Set(stores.quota_items.map(record => record.id));
+  const prices = new Map(stores.resource_prices.map(record => [record.id, record]));
+  for (const price of stores.resource_prices) {
+    if (!resourceIds.has(price.resourceId)) throw backupError('BACKUP_SEMANTIC_INVALID', `资源价格 ${price.id} 引用了不存在的资源。`);
+  }
+  for (const usage of stores.quota_resource_usages) {
+    if (!resourceIds.has(usage.resourceId) || !quotaIds.has(usage.quotaItemId)) {
+      throw backupError('BACKUP_SEMANTIC_INVALID', `定额资源用量 ${usage.id} 存在无效引用。`);
+    }
+  }
+  const attachmentPaths = new Set();
+  for (const meta of stores.resource_attachments) {
+    validateAttachmentMetadata(meta);
+    if (!resourceIds.has(meta.resourceId)) throw backupError('BACKUP_SEMANTIC_INVALID', `附件 ${meta.id} 引用了不存在的资源。`);
+    if (meta.priceId) {
+      const price = prices.get(meta.priceId);
+      if (!price || price.resourceId !== meta.resourceId) throw backupError('BACKUP_SEMANTIC_INVALID', `附件 ${meta.id} 的价格引用无效。`);
+    }
+    const path = attachmentPath(meta);
+    if (attachmentPaths.has(path)) throw backupError('BACKUP_SEMANTIC_INVALID', `附件包含重复路径：${path}`);
+    attachmentPaths.add(path);
+  }
 }
 
 function validateAttachmentMetadata(meta) {
@@ -271,6 +322,19 @@ function safeFileName(value) { const text = String(value || ''); return Boolean(
 function isSafeEntry(name) { return !name.startsWith('/') && !name.includes('\\') && !name.split('/').some(part => part === '..' || part === '.'); }
 function isRecord(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 function parseJsonEntry(bytes, name) { try { return JSON.parse(textDecoder.decode(bytes)); } catch { throw backupError('BACKUP_JSON_INVALID', `${name} 无法解析。`); } }
-function requireZip(injected) { const zip = injected || globalThis.fflate; if (!zip?.zipSync || !zip?.unzipSync) throw backupError('BACKUP_ZIP_UNAVAILABLE', 'ZIP 组件未加载。'); return zip; }
+function requireZip(injected, operation) {
+  const zip = injected || globalThis.fflate;
+  const available = operation === 'zip' ? (zip?.zip || zip?.zipSync) : (zip?.unzip || zip?.unzipSync);
+  if (!available) throw backupError('BACKUP_ZIP_UNAVAILABLE', 'ZIP 组件未加载。');
+  return zip;
+}
+function zipFiles(zip, files) {
+  if (zip.zip) return new Promise((resolve, reject) => zip.zip(files, { level: 6 }, (error, bytes) => error ? reject(error) : resolve(bytes)));
+  return Promise.resolve(zip.zipSync(files, { level: 6 }));
+}
+function unzipFiles(zip, bytes) {
+  if (zip.unzip) return new Promise((resolve, reject) => zip.unzip(bytes, (error, files) => error ? reject(error) : resolve(files)));
+  return Promise.resolve(zip.unzipSync(bytes));
+}
 async function sha256(bytes) { const digest = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join(''); }
 function backupError(code, message) { return Object.assign(new Error(message), { code }); }

@@ -55,6 +55,45 @@ export async function storageSet(store, value) {
   return writeQueue;
 }
 
+// 备份恢复/清理专用：文件夹模式下必须同时写成 store、manifest 和 IDB，任一失败即回滚并向上抛出。
+// 普通 CRUD 继续使用 storageSet 的最终一致/待同步语义。
+export async function storageSetStrict(store, value) {
+  const operation = writeQueue.catch(() => {}).then(async () => {
+    const previousIdb = await idb.get(store);
+    if (await getStorageMode() !== 'folder') {
+      await idb.set(store, value);
+      return;
+    }
+    const handle = await getStoredDirectoryHandle();
+    if (!handle || !(await hasPermission(handle, 'readwrite'))) {
+      markPendingSync(true);
+      throw strictStorageError('STORAGE_STRICT_WRITE_FAILED', '本地数据文件夹未授权读写。');
+    }
+    const storesDir = await handle.getDirectoryHandle(STORE_DIR, { create: true });
+    const previousStoreFile = await readOptionalFile(storesDir, `${store}.json`);
+    const previousManifestFile = await readOptionalFile(handle, MANIFEST_FILE);
+    try {
+      await writeStoreToDirectory(handle, store, value);
+      await updateManifest(handle, [store]);
+      await idb.set(store, value);
+      markPendingSync(false);
+    } catch (cause) {
+      markPendingSync(true);
+      try {
+        await restoreOptionalFile(storesDir, `${store}.json`, previousStoreFile);
+        await restoreOptionalFile(handle, MANIFEST_FILE, previousManifestFile);
+        if (previousIdb === undefined) await idb.del(store);
+        else await idb.set(store, previousIdb);
+      } catch (rollbackCause) {
+        throw Object.assign(strictStorageError('STORAGE_STRICT_RECOVERY_PARTIAL', '严格写入失败，且文件夹与浏览器镜像未能完全恢复。'), { cause, rollbackCause });
+      }
+      throw Object.assign(strictStorageError('STORAGE_STRICT_WRITE_FAILED', '严格写入失败，原数据已恢复。'), { cause });
+    }
+  });
+  writeQueue = operation.catch(() => {});
+  return operation;
+}
+
 export async function storageSetAttachment(meta, blob) {
   const key = attachmentStorageKey(meta);
   const handle = await attachmentWritableFolderHandle();
@@ -332,6 +371,30 @@ async function writeJsonFile(directoryHandle, name, data) {
   const writable = await fileHandle.createWritable();
   await writable.write(JSON.stringify(data, null, 2));
   await writable.close();
+}
+
+async function readOptionalFile(directoryHandle, name) {
+  try {
+    return await (await directoryHandle.getFileHandle(name)).getFile();
+  } catch (error) {
+    if (error?.name === 'NotFoundError') return null;
+    throw error;
+  }
+}
+
+async function restoreOptionalFile(directoryHandle, name, blob) {
+  if (!blob) {
+    try { await directoryHandle.removeEntry(name); }
+    catch (error) { if (error?.name !== 'NotFoundError') throw error; }
+    return;
+  }
+  const writable = await (await directoryHandle.getFileHandle(name, { create: true })).createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+function strictStorageError(code, message) {
+  return Object.assign(new Error(message), { code });
 }
 
 async function getStoredDirectoryHandle() {

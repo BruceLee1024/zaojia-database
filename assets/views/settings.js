@@ -4,8 +4,8 @@ import { generateSystemPromptDraft } from '../services/aiPromptService.js?v=1.0'
 import { testAIConnection } from '../services/aiAssistService.js?v=1.1';
 import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { experienceService } from '../services/experienceService.js?v=3.9';
-import { STORES, dbGetAll, dbSetAll } from '../data/repository.js?v=1.0';
-import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, storageGetAttachment, storageRemoveAttachment, storageSetAttachment, switchToBrowserStorage, syncBrowserCacheToLocalFolder } from '../data/storage.js?v=1.0';
+import { STORES, dbGetAll } from '../data/repository.js?v=1.0';
+import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, storageGetAttachment, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder } from '../data/storage.js?v=1.0';
 import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=1.0';
 import { ensureDemoData } from '../data/demo.js?v=3.9';
 import { esc, toast, fmt } from '../utils/dom.js';
@@ -23,7 +23,7 @@ export const BACKUP_IMPORT_ACCEPT = '.json,.zip,application/json,application/zip
 
 const backupAdapter = {
   getStore: dbGetAll,
-  setStore: dbSetAll,
+  setStore: storageSetStrict,
   getAttachment: storageGetAttachment,
   setAttachment: storageSetAttachment,
   removeAttachment: storageRemoveAttachment,
@@ -658,16 +658,27 @@ async function loadDemo() {
 
 async function resetDemo() {
   if (!confirm('将先清空当前业务数据，再重新加载演示数据。此操作不可撤销，确定继续？')) return;
-  await ensureDemoData({ force: true });
-  toast('演示数据已重置', 'success');
-  window.__app.go('dashboard');
+  await runDestructiveDataAction({
+    action: '重置演示数据',
+    clear: clearBusinessData,
+    afterClear: async () => {
+      await ensureDemoData({ force: true });
+      toast('演示数据已重置', 'success');
+      window.__app.go('dashboard');
+    },
+    notify: toast,
+  });
 }
 
 async function clearAll() {
   const typed = prompt('此操作会清空所有业务数据和附件原文件；不会删除 AI 配置。请输入“清空全部”确认。');
   if (typed !== '清空全部') return;
-  await clearBusinessData();
-  location.reload();
+  await runDestructiveDataAction({
+    action: '清空全部数据',
+    clear: clearBusinessData,
+    afterClear: () => location.reload(),
+    notify: toast,
+  });
 }
 
 function storageRailGroup(icon, title, rows) {
@@ -886,27 +897,48 @@ async function clearBusinessData() {
 async function exportAll() {
   const data = await createLegacyJsonBackup(backupAdapter, getAIConfig());
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `造价数据库备份-${Date.now()}.json`;
-  a.click();
+  downloadBackupBlob(blob, `造价数据库备份-${Date.now()}.json`);
 }
 
 async function exportZip() {
   try {
-    downloadBlob(await createZipBackup(backupAdapter, getAIConfig()), `造价数据库完整备份-${Date.now()}.zip`);
+    downloadBackupBlob(await createZipBackup(backupAdapter, getAIConfig()), `造价数据库完整备份-${Date.now()}.zip`);
   } catch (err) {
     toast(`ZIP 导出失败：${err?.message || '未知错误'}`, 'error');
   }
 }
 
-function downloadBlob(blob, fileName) {
-  const a = document.createElement('a');
-  const url = URL.createObjectURL(blob);
+export function downloadBackupBlob(blob, fileName, dependencies = {}) {
+  const documentApi = dependencies.document || document;
+  const urlApi = dependencies.URL || URL;
+  const schedule = dependencies.schedule || (callback => setTimeout(callback, 0));
+  const a = documentApi.createElement('a');
+  const url = urlApi.createObjectURL(blob);
   a.href = url;
   a.download = fileName;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  schedule(() => urlApi.revokeObjectURL(url));
+}
+
+export function backupOperationErrorMessage(error, action) {
+  if (error?.code === 'BACKUP_RECOVERY_PARTIAL' || error?.code === 'STORAGE_STRICT_RECOVERY_PARTIAL') {
+    return `${action}失败：补偿未完成，数据可能仅部分恢复。请立即停止操作并检查备份。`;
+  }
+  if (error?.code === 'BACKUP_CLEAR_FAILED' || error?.code === 'BACKUP_RESTORE_FAILED' || error?.code === 'STORAGE_STRICT_WRITE_FAILED') {
+    return `${action}失败：原数据已恢复。`;
+  }
+  return `${action}失败：${error?.message || '未知错误'}`;
+}
+
+export async function runDestructiveDataAction({ action, clear, afterClear, notify }) {
+  try {
+    await clear();
+    await afterClear();
+    return true;
+  } catch (error) {
+    notify(backupOperationErrorMessage(error, action), 'error');
+    return false;
+  }
 }
 
 async function collectBusinessData() {

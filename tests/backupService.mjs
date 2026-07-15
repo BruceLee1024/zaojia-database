@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const zip = require('../assets/vendor/fflate/fflate.cjs');
 
 export async function testBackupService() {
-  const { BACKUP_IMPORT_ACCEPT } = await import('../assets/views/settings.js');
+  const { BACKUP_IMPORT_ACCEPT, backupOperationErrorMessage, downloadBackupBlob, runDestructiveDataAction } = await import('../assets/views/settings.js');
   assert.equal(BACKUP_IMPORT_ACCEPT.includes('.json'), true);
   assert.equal(BACKUP_IMPORT_ACCEPT.includes('.zip'), true);
   const {
@@ -16,6 +16,38 @@ export async function testBackupService() {
     restoreLegacyJsonBackup,
     restoreZipBackup,
   } = await import('../assets/services/backupService.js');
+
+  assert.equal(backupOperationErrorMessage({ code: 'BACKUP_CLEAR_FAILED' }, '清空').includes('原数据已恢复'), true);
+  assert.equal(backupOperationErrorMessage({ code: 'BACKUP_RECOVERY_PARTIAL' }, '重置').includes('部分恢复'), true);
+  const urlCalls = [];
+  let clicked = false;
+  downloadBackupBlob(new Blob(['x']), 'x.json', {
+    document: { createElement: () => ({ click: () => { clicked = true; } }) },
+    URL: { createObjectURL: () => 'blob:test', revokeObjectURL: url => urlCalls.push(url) },
+    schedule: callback => callback(),
+  });
+  assert.equal(clicked, true);
+  assert.deepEqual(urlCalls, ['blob:test']);
+  const destructiveCalls = [];
+  const clearResult = await runDestructiveDataAction({
+    action: '清空',
+    clear: async () => { throw Object.assign(new Error('failed'), { code: 'BACKUP_CLEAR_FAILED' }); },
+    afterClear: async () => destructiveCalls.push('reload'),
+    notify: (message, type) => destructiveCalls.push([message, type]),
+  });
+  assert.equal(clearResult, false);
+  assert.equal(destructiveCalls.includes('reload'), false);
+  assert.equal(destructiveCalls[0][0].includes('原数据已恢复'), true);
+  const resetCalls = [];
+  const resetResult = await runDestructiveDataAction({
+    action: '重置',
+    clear: async () => { throw Object.assign(new Error('partial'), { code: 'BACKUP_RECOVERY_PARTIAL' }); },
+    afterClear: async () => resetCalls.push('load-demo'),
+    notify: message => resetCalls.push(message),
+  });
+  assert.equal(resetResult, false);
+  assert.equal(resetCalls.includes('load-demo'), false);
+  assert.equal(resetCalls[0].includes('部分恢复'), true);
 
   await assert.rejects(() => parseLegacyJsonBackupFile(new Blob(['{}']), 1), error => error.code === 'BACKUP_TOO_LARGE');
   assert.deepEqual(await parseLegacyJsonBackupFile(new Blob(['{"quota_items":[]}'])), { quota_items: [] });
@@ -65,6 +97,22 @@ export async function testBackupService() {
   assert.equal(manifest.schemaVersion, 2);
   assert.equal(manifest.attachments[0].sha256, attachment().sha256);
 
+  let asyncZipCalled = false;
+  let asyncUnzipCalled = false;
+  const asyncZip = {
+    zip(files, options, callback) { asyncZipCalled = true; callback(null, zip.zipSync(files, options)); },
+    unzip(bytes, callback) { asyncUnzipCalled = true; callback(null, zip.unzipSync(bytes)); },
+  };
+  const asyncArchive = await createZipBackup(adapter, {}, { zip: asyncZip });
+  await restoreZipBackup(asyncArchive, memoryAdapter(), { zip: asyncZip });
+  assert.equal(asyncZipCalled, true);
+  assert.equal(asyncUnzipCalled, true);
+
+  await assert.rejects(() => createZipBackup(adapter, {}, {
+    zip: { zip(_files, _options, callback) { callback(null, new Uint8Array(2)); } },
+    maxArchiveSize: 1,
+  }), error => error.code === 'BACKUP_TOO_LARGE');
+
   const target = memoryAdapter({ quota_items: [{ id: 'before' }] }, new Map());
   await restoreZipBackup(archive, target, { zip, currentAI: { api_key: 'device' } });
   assert.deepEqual(await target.getStore('resource_items'), [{ id: 'r1' }]);
@@ -79,10 +127,49 @@ export async function testBackupService() {
   await assert.rejects(() => restoreZipBackup(new Blob([badPath]), target, { zip }), error => error.code === 'BACKUP_ENTRY_INVALID');
   assert.deepEqual(await target.getStore('resource_items'), before);
 
+  const wrongApp = cloneEntries(entries);
+  const wrongAppManifest = JSON.parse(new TextDecoder().decode(wrongApp['manifest.json']));
+  wrongAppManifest.app = 'other-app';
+  wrongApp['manifest.json'] = new TextEncoder().encode(JSON.stringify(wrongAppManifest));
+  await assert.rejects(() => restoreZipBackup(new Blob([zip.zipSync(wrongApp)]), target, { zip }), error => error.code === 'BACKUP_SCHEMA_INVALID');
+  assert.deepEqual(await target.getStore('resource_items'), before);
+
+  const wrongBackupIdentity = cloneEntries(entries);
+  const wrongBackup = JSON.parse(new TextDecoder().decode(wrongBackupIdentity['backup.json']));
+  wrongBackup.schemaVersion = 1;
+  wrongBackupIdentity['backup.json'] = new TextEncoder().encode(JSON.stringify(wrongBackup));
+  await assert.rejects(() => restoreZipBackup(new Blob([zip.zipSync(wrongBackupIdentity)]), target, { zip }), error => error.code === 'BACKUP_SCHEMA_INVALID');
+  assert.deepEqual(await target.getStore('resource_items'), before);
+
   const badSchemaEntries = cloneEntries(entries);
   badSchemaEntries['backup.json'] = new TextEncoder().encode(JSON.stringify({ quota_items: {} }));
   await assert.rejects(() => restoreZipBackup(new Blob([zip.zipSync(badSchemaEntries)]), target, { zip }), error => error.code === 'BACKUP_STORE_INVALID');
   assert.deepEqual(await target.getStore('resource_items'), before);
+
+  const semanticTarget = memoryAdapter({ quota_items: [{ id: 'untouched' }] });
+  const semanticBase = {
+    quota_items: [{ id: 'q1' }],
+    resource_items: [{ id: 'r1' }, { id: 'r2' }],
+    resource_prices: [{ id: 'p1', resourceId: 'r1' }],
+    quota_resource_usages: [{ id: 'u1', quotaItemId: 'q1', resourceId: 'r1' }],
+    resource_attachments: [{ ...attachment(), status: 'missing', priceId: 'p1' }],
+  };
+  const invalidSemanticBackups = [
+    { ...semanticBase, resource_items: [{ id: 'r1' }, { id: 'r1' }] },
+    { ...semanticBase, resource_prices: [{ id: 'p1', resourceId: 'r1' }, { id: 'p1', resourceId: 'r1' }] },
+    { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'q1', resourceId: 'r1' }, { id: 'u1', quotaItemId: 'q1', resourceId: 'r1' }] },
+    { ...semanticBase, resource_attachments: [{ ...attachment(), status: 'missing' }, { ...attachment(), status: 'missing' }] },
+    { ...semanticBase, resource_prices: [{ id: 'p1', resourceId: 'missing' }] },
+    { ...semanticBase, resource_attachments: [{ ...attachment(), status: 'missing', resourceId: 'missing', storagePath: 'attachments/missing/a1-quote.pdf' }] },
+    { ...semanticBase, resource_attachments: [{ ...attachment(), status: 'missing', resourceId: 'r2', priceId: 'p1', storagePath: 'attachments/r2/a1-quote.pdf' }] },
+    { ...semanticBase, resource_attachments: [{ ...attachment(), status: 'missing', priceId: 'missing' }] },
+    { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'missing', resourceId: 'r1' }] },
+    { ...semanticBase, quota_resource_usages: [{ id: 'u1', quotaItemId: 'q1', resourceId: 'missing' }] },
+  ];
+  for (const invalid of invalidSemanticBackups) {
+    await assert.rejects(() => restoreLegacyJsonBackup(invalid, semanticTarget), error => error.code === 'BACKUP_SEMANTIC_INVALID');
+    assert.deepEqual(await semanticTarget.getStore('quota_items'), [{ id: 'untouched' }]);
+  }
 
   const missingEntries = cloneEntries(entries);
   delete missingEntries['attachments/r1/a1-quote.pdf'];

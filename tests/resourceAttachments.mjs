@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js';
-import { storageGetAttachment, storageRemoveAttachment, storageSetAttachment } from '../assets/data/storage.js';
+import { storageGet, storageGetAttachment, storageRemoveAttachment, storageSetAttachment, storageSetStrict, writeStoresToDirectory } from '../assets/data/storage.js';
+import { restoreLegacyJsonBackup } from '../assets/services/backupService.js';
 import { resourceAttachmentService } from '../assets/services/resourceAttachmentService.js';
 import { attachmentListHtml, attachmentPanelShell, loadAttachmentPanel, shouldDownloadAttachment } from '../assets/views/resourceAttachments.js';
 
@@ -28,6 +29,8 @@ export async function testResourceAttachments() {
     await resetStores();
     await testFolderMirrorAndFallback(idb);
     await resetStores();
+    await testStrictFolderStoreWrites(idb);
+    await resetStores();
     await testRevokedFolderPermission(idb);
     await resetStores();
     await testMissingBlobDegradation(idb);
@@ -40,6 +43,34 @@ export async function testResourceAttachments() {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+async function testStrictFolderStoreWrites(idb) {
+  const root = memoryDirectory('strict-root');
+  await idb.set('__costdb_directory_handle', root);
+  await idb.set('__costdb_storage_mode', 'folder');
+  await idb.set('quota_items', [{ id: 'old' }]);
+  await writeStoresToDirectory(root, { quota_items: [{ id: 'old' }] });
+
+  root.failWriteOnce('manifest.json');
+  await assert.rejects(() => storageSetStrict('quota_items', [{ id: 'new' }]), error => error.code === 'STORAGE_STRICT_WRITE_FAILED');
+  assert.deepEqual(await idb.get('quota_items'), [{ id: 'old' }]);
+  assert.deepEqual(JSON.parse(await root.read('stores/quota_items.json').text()).records, [{ id: 'old' }]);
+
+  root.failWriteOnce('stores/quota_items.json');
+  await assert.rejects(() => storageSetStrict('quota_items', [{ id: 'newer' }]), error => error.code === 'STORAGE_STRICT_WRITE_FAILED');
+  assert.deepEqual(await idb.get('quota_items'), [{ id: 'old' }]);
+
+  root.failWriteOnce('manifest.json');
+  await assert.rejects(() => restoreLegacyJsonBackup({ quota_items: [{ id: 'restore-attempt' }] }, {
+    getStore: storageGet,
+    setStore: storageSetStrict,
+    getAttachment: async () => null,
+    setAttachment: async () => {},
+    removeAttachment: async () => {},
+  }), error => error.code === 'BACKUP_RESTORE_FAILED');
+  assert.deepEqual(await idb.get('quota_items'), [{ id: 'old' }]);
+  assert.deepEqual(JSON.parse(await root.read('stores/quota_items.json').text()).records, [{ id: 'old' }]);
 }
 
 async function testRevokedFolderPermission(idb) {
@@ -298,11 +329,13 @@ function memoryLocalStorage() {
 function memoryDirectory(name) {
   const entries = new Map();
   const directories = new Set(['']);
+  const failingWrites = new Map();
   let permission = 'granted';
   const root = directory(name, '');
   root.read = path => entries.get(path);
   root.delete = path => entries.delete(path);
   root.setPermission = value => { permission = value; };
+  root.failWriteOnce = path => failingWrites.set(path, 1);
   return root;
 
   function directory(directoryName, prefix) {
@@ -324,7 +357,14 @@ function memoryDirectory(name) {
           async getFile() { return entries.get(path); },
           async createWritable() {
             return {
-              async write(value) { entries.set(path, value instanceof Blob ? value : new Blob([value])); },
+              async write(value) {
+                const remaining = failingWrites.get(path) || 0;
+                if (remaining > 0) {
+                  failingWrites.set(path, remaining - 1);
+                  throw new Error(`simulated folder write failure: ${path}`);
+                }
+                entries.set(path, value instanceof Blob ? value : new Blob([value]));
+              },
               async close() {},
             };
           },

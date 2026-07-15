@@ -57,3 +57,30 @@ Tests cover JSON compatibility and API-key preservation, JSON size limits and me
 ## Concern
 
 The repository has no real-browser automation harness. The service and in-memory folder behavior are automated, and static loading was smoke-tested; final keyboard/download-picker behavior should still be included in the normal Chrome/Edge manual release smoke test.
+
+## Review follow-up
+
+Addressed all Task 4 review findings after commit `4742d97`.
+
+### Focused TDD evidence
+
+1. Added strict-folder tests first and observed the missing `storageSetStrict` export. Implemented a backup-only strict path that snapshots the current store file, manifest, and IDB value; writes folder store + manifest before IDB; restores all three on failure; and propagates `STORAGE_STRICT_WRITE_FAILED` or `STORAGE_STRICT_RECOVERY_PARTIAL`. Normal `storageSet` remains best-effort.
+2. Added an integration test that injects a manifest failure while `restoreLegacyJsonBackup` uses the real strict storage adapter. It verifies `BACKUP_RESTORE_FAILED`, unchanged IDB, and unchanged folder JSON, preventing false success/divergence.
+3. Added failing wished-for settings helper tests, then implemented distinct clear/partial-recovery messages, destructive-flow orchestration that suppresses reload/demo load after failure, and deterministic object-URL cleanup.
+4. Added schema/app and semantic rejection tests before mutation: duplicate IDs in all four new resource stores, missing resource references, missing/cross-resource attachment price references, and missing quota/resource usage references.
+5. Added async ZIP adapter and compressed-output-boundary tests. ZIP creation/restoration now prefer fflate `zip`/`unzip` callbacks, retain sync fallback only for deterministic injected adapters, and reject generated archives over 500MB after compression.
+
+### Review-fix behavior
+
+- Settings backup transactions now use `storageSetStrict` for apply and compensation; ordinary CRUD behavior is unchanged.
+- ZIP `backup.json` and `manifest.json` both identify `wastewater-cost-db` schema 2; import requires both identities.
+- Duplicate IDs are rejected in every ID-bearing store. New resource stores additionally require IDs and validate ownership/reference integrity before mutation.
+- Reset-demo clears all 16 stores and all referenced attachment blobs through `clearBackupData` before loading demo records.
+- Clear and reset-demo catch and distinguish fully compensated failures from partial recovery, and do not continue to reload/navigation/demo loading after failure.
+- Legacy JSON and ZIP downloads both revoke their object URLs.
+
+### Follow-up verification
+
+- `node tests/run.mjs` — all tests passed, including strict store/manifest failure integration and focused review regression cases.
+- Syntax checks for `storage.js`, `backupService.js`, and `settings.js` — passed.
+- `git diff --check` — passed.
