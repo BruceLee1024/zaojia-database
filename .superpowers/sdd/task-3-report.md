@@ -63,3 +63,32 @@ Complete. Resource attachments now persist as private IndexedDB blobs, mirror to
 
 - XLSX validation confirms its ZIP magic bytes plus extension/MIME, but does not unzip and structurally inspect workbook entries; Task 4's pinned ZIP work can add archive-entry validation during backup/import.
 - A real Chrome/Edge upload interaction and File System Access permission prompt were not available in this environment; browser-facing logic is covered with memory handles and static-server smoke checks.
+
+## Review fixes
+
+- Folder-mode attachment writes and deletes now preflight the saved directory handle and granted `readwrite` permission before any binary mutation. Missing/revoked permission throws `ATTACHMENT_FOLDER_PERMISSION`; add does not commit metadata/Blob, and delete preserves the folder copy, IndexedDB Blob, and metadata.
+- File System Access failures named `NotAllowedError` or `SecurityError` are normalized to the same controlled attachment permission error. IndexedDB mode retains its previous behavior.
+- Resource attachment adds are serialized per resource, so concurrent equal SHA-256 uploads deterministically produce one success and one `ATTACHMENT_DUPLICATE` result.
+- Attachment panel shells carry escaped resource and render-generation data attributes. Every post-await render, binding, loading-state mutation, upload completion, and reload validates the same connected root/resource/generation.
+- Initial attachment loading catches service failures, always clears `aria-busy`, renders an accessible `role="alert"` with retry, and returns `false` instead of rejecting through resource selection.
+- Memory directory handles now honor `{ create: false }` with `NotFoundError` and expose revocable permission state.
+
+### Review-fix TDD evidence
+
+1. RED — revoked folder permission
+   - Command: `node tests/run.mjs`
+   - Expected failure: `Missing expected rejection` because folder-mode add silently succeeded with denied `readwrite` permission.
+   - GREEN: controlled permission rejection; tests verify no new metadata/Blob on add and no folder/Blob/metadata removal on delete.
+2. RED — stale panel and load rejection
+   - Command: `node tests/run.mjs`
+   - Expected failure: `ReferenceError: document is not defined` from the unscoped loader, after permission behavior was green.
+   - GREEN: dependency-scoped loader with root/resource/generation guards; delayed A cannot mutate/bind after B renders, and rejected loads settle into a retry state.
+3. GREEN — concurrent duplicate regression
+   - Two simultaneous identical uploads now assert exactly one fulfilled result, one `ATTACHMENT_DUPLICATE`, and one metadata row.
+
+### Review-fix verification
+
+- `node tests/run.mjs` -> `All tests passed`.
+- `git diff --check` -> passed.
+- `node --check` for `storage.js`, `resourceAttachmentService.js`, `resourceAttachments.js`, and `resources.js` -> passed.
+- Static server returned HTTP 200 for `/`, the attachment UI module, and the attachment service module after review fixes.

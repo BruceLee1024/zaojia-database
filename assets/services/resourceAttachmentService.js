@@ -12,51 +12,8 @@ const FILE_TYPES = {
 };
 
 export const resourceAttachmentService = {
-  async add({ resourceId, priceId = '', file }) {
-    const resource = await resourceRepo.findById(resourceId);
-    if (!resource) throw attachmentError('ATTACHMENT_RESOURCE_MISSING', '关联的材料或设备不存在。');
-    if (priceId) {
-      const price = await resourcePriceRepo.findById(priceId);
-      if (!price || price.resourceId !== resourceId) {
-        throw attachmentError('ATTACHMENT_PRICE_MISMATCH', '附件关联的价格快照不属于该资源。');
-      }
-    }
-    const validated = await validateAttachment(file);
-    const existing = (await resourceAttachmentRepo.byResource(resourceId))
-      .find(item => item.sha256 === validated.sha256);
-    if (existing) {
-      const error = attachmentError('ATTACHMENT_DUPLICATE', '该附件已上传。');
-      error.attachmentId = existing.id;
-      throw error;
-    }
-    const id = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 12);
-    const createdAt = new Date().toISOString();
-    const metadata = {
-      id,
-      resourceId,
-      priceId: priceId || '',
-      fileName: String(file.name || ''),
-      safeFileName: validated.safeFileName,
-      mimeType: validated.mimeType,
-      extension: validated.extension,
-      size: file.size,
-      sha256: validated.sha256,
-      storagePath: `attachments/${resourceId}/${id}-${validated.safeFileName}`,
-      status: 'available',
-      createdAt,
-      updatedAt: createdAt,
-    };
-    try {
-      await storageSetAttachment(metadata, file);
-      await resourceAttachmentRepo.upsert(metadata);
-      return metadata;
-    } catch (cause) {
-      try { await storageRemoveAttachment(metadata); } catch {}
-      try { await resourceAttachmentRepo.remove(metadata.id); } catch {}
-      const error = attachmentError('ATTACHMENT_SAVE_FAILED', '附件保存失败，未保留不完整数据。');
-      error.cause = cause;
-      throw error;
-    }
+  add(input) {
+    return serializeAttachmentAdd(input?.resourceId, () => addAttachment(input));
   },
 
   async listByResource(resourceId) {
@@ -89,6 +46,7 @@ export const resourceAttachmentService = {
       await resourceAttachmentRepo.remove(id);
       return true;
     } catch (cause) {
+      if (cause?.code === 'ATTACHMENT_FOLDER_PERMISSION') throw cause;
       if (blob?.size) {
         try { await storageSetAttachment(metadata, blob); } catch {}
       }
@@ -98,6 +56,66 @@ export const resourceAttachmentService = {
     }
   },
 };
+
+const attachmentAddQueues = new Map();
+
+async function addAttachment({ resourceId, priceId = '', file }) {
+  const resource = await resourceRepo.findById(resourceId);
+  if (!resource) throw attachmentError('ATTACHMENT_RESOURCE_MISSING', '关联的材料或设备不存在。');
+  if (priceId) {
+    const price = await resourcePriceRepo.findById(priceId);
+    if (!price || price.resourceId !== resourceId) {
+      throw attachmentError('ATTACHMENT_PRICE_MISMATCH', '附件关联的价格快照不属于该资源。');
+    }
+  }
+  const validated = await validateAttachment(file);
+  const existing = (await resourceAttachmentRepo.byResource(resourceId))
+    .find(item => item.sha256 === validated.sha256);
+  if (existing) {
+    const error = attachmentError('ATTACHMENT_DUPLICATE', '该附件已上传。');
+    error.attachmentId = existing.id;
+    throw error;
+  }
+  const id = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 12);
+  const createdAt = new Date().toISOString();
+  const metadata = {
+    id,
+    resourceId,
+    priceId: priceId || '',
+    fileName: String(file.name || ''),
+    safeFileName: validated.safeFileName,
+    mimeType: validated.mimeType,
+    extension: validated.extension,
+    size: file.size,
+    sha256: validated.sha256,
+    storagePath: `attachments/${resourceId}/${id}-${validated.safeFileName}`,
+    status: 'available',
+    createdAt,
+    updatedAt: createdAt,
+  };
+  try {
+    await storageSetAttachment(metadata, file);
+    await resourceAttachmentRepo.upsert(metadata);
+    return metadata;
+  } catch (cause) {
+    if (cause?.code === 'ATTACHMENT_FOLDER_PERMISSION') throw cause;
+    try { await storageRemoveAttachment(metadata); } catch {}
+    try { await resourceAttachmentRepo.remove(metadata.id); } catch {}
+    const error = attachmentError('ATTACHMENT_SAVE_FAILED', '附件保存失败，未保留不完整数据。');
+    error.cause = cause;
+    throw error;
+  }
+}
+
+function serializeAttachmentAdd(resourceId, operation) {
+  const key = String(resourceId || '');
+  const previous = attachmentAddQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  attachmentAddQueues.set(key, current);
+  return current.finally(() => {
+    if (attachmentAddQueues.get(key) === current) attachmentAddQueues.delete(key);
+  });
+}
 
 async function validateAttachment(file) {
   if (!(file instanceof Blob) || typeof file.name !== 'string') {

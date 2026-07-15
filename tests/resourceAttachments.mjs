@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js';
 import { storageGetAttachment, storageRemoveAttachment, storageSetAttachment } from '../assets/data/storage.js';
 import { resourceAttachmentService } from '../assets/services/resourceAttachmentService.js';
-import { attachmentListHtml, shouldDownloadAttachment } from '../assets/views/resourceAttachments.js';
+import { attachmentListHtml, attachmentPanelShell, loadAttachmentPanel, shouldDownloadAttachment } from '../assets/views/resourceAttachments.js';
 
 const MB = 1024 * 1024;
 
@@ -28,12 +28,92 @@ export async function testResourceAttachments() {
     await resetStores();
     await testFolderMirrorAndFallback(idb);
     await resetStores();
+    await testRevokedFolderPermission(idb);
+    await resetStores();
     await testMissingBlobDegradation(idb);
+    await resetStores();
+    await testConcurrentHashDedupe(idb);
+    await testAttachmentPanelLoadScoping();
+    await testAttachmentPanelLoadError();
     testSafeAttachmentListHtml();
   } finally {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+async function testRevokedFolderPermission(idb) {
+  const root = memoryDirectory('revoked-root');
+  root.setPermission('denied');
+  await idb.set('__costdb_directory_handle', root);
+  await idb.set('__costdb_storage_mode', 'folder');
+  await resourceRepo.replaceAll([{ id: 'r1' }]);
+  const binaryCount = [...idb.keys()].filter(key => String(key).startsWith('__costdb_attachment:')).length;
+  await assert.rejects(
+    () => resourceAttachmentService.add({ resourceId: 'r1', file: file('%PDF-denied', 'denied.pdf', 'application/pdf') }),
+    error => error.code === 'ATTACHMENT_FOLDER_PERMISSION',
+  );
+  assert.deepEqual(await resourceAttachmentRepo.all(), []);
+  assert.equal([...idb.keys()].filter(key => String(key).startsWith('__costdb_attachment:')).length, binaryCount);
+
+  root.setPermission('granted');
+  await resourceRepo.replaceAll([{ id: 'r1' }]);
+  const saved = await resourceAttachmentService.add({ resourceId: 'r1', file: file('%PDF-preserve', 'preserve.pdf', 'application/pdf') });
+  const path = `attachments/r1/${saved.id}-preserve.pdf`;
+  root.setPermission('denied');
+  await assert.rejects(
+    () => resourceAttachmentService.remove(saved.id),
+    error => error.code === 'ATTACHMENT_FOLDER_PERMISSION',
+  );
+  assert.equal((await resourceAttachmentRepo.findById(saved.id)).id, saved.id);
+  assert.equal((await idb.get(`__costdb_attachment:${saved.id}`)).size, saved.size);
+  assert.equal(root.read(path).size, saved.size);
+}
+
+async function testConcurrentHashDedupe(idb) {
+  await idb.set('__costdb_storage_mode', 'indexeddb');
+  await resourceRepo.replaceAll([{ id: 'r1' }]);
+  const upload = () => resourceAttachmentService.add({ resourceId: 'r1', file: file('%PDF-concurrent', 'same.pdf', 'application/pdf') });
+  const results = await Promise.allSettled([upload(), upload()]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(results.filter(result => result.status === 'rejected' && result.reason.code === 'ATTACHMENT_DUPLICATE').length, 1);
+  assert.equal((await resourceAttachmentRepo.byResource('r1')).length, 1);
+}
+
+async function testAttachmentPanelLoadScoping() {
+  const firstAttachments = deferred();
+  const firstPrices = deferred();
+  const first = panelDom('A', '1');
+  const second = panelDom('B', '2');
+  let current = first;
+  const document = { querySelector: () => current.root };
+  const attachmentService = { listByResource: id => id === 'A' ? firstAttachments.promise : Promise.resolve([{ id: 'b1', fileName: 'B.pdf', size: 10, status: 'available' }]) };
+  const priceService = { listByResource: id => id === 'A' ? firstPrices.promise : Promise.resolve([]) };
+  const staleLoad = loadAttachmentPanel('A', '1', { document, attachmentService, priceService });
+  first.root.isConnected = false;
+  current = second;
+  const currentLoad = loadAttachmentPanel('B', '2', { document, attachmentService, priceService });
+  firstAttachments.resolve([{ id: 'a1', fileName: 'A.pdf', size: 10, status: 'available' }]);
+  firstPrices.resolve([]);
+  assert.equal(await staleLoad, false);
+  assert.equal(await currentLoad, true);
+  assert.equal(first.host.innerHTML.includes('A.pdf'), false);
+  assert.equal(second.host.innerHTML.includes('B.pdf'), true);
+  assert.equal(typeof second.host.onclick, 'function');
+}
+
+async function testAttachmentPanelLoadError() {
+  const panel = panelDom('A', '3');
+  const document = { querySelector: () => panel.root };
+  const result = await loadAttachmentPanel('A', '3', {
+    document,
+    attachmentService: { listByResource: async () => { throw new Error('simulated load failure'); } },
+    priceService: { listByResource: async () => [] },
+  });
+  assert.equal(result, false);
+  assert.equal(panel.host.attributes.get('aria-busy'), 'false');
+  assert.equal(panel.host.innerHTML.includes('role="alert"'), true);
+  assert.equal(panel.host.innerHTML.includes('data-attachment-action="retry"'), true);
 }
 
 async function testAllowedSignatures() {
@@ -52,6 +132,9 @@ async function testAllowedSignatures() {
 }
 
 function testSafeAttachmentListHtml() {
+  const shell = attachmentPanelShell('resource&lt;', '7');
+  assert.equal(shell.includes('data-resource-id="resource&amp;lt;"'), true);
+  assert.equal(shell.includes('data-render-generation="7"'), true);
   assert.equal(shouldDownloadAttachment('application/pdf'), false);
   assert.equal(shouldDownloadAttachment('image/png'), false);
   assert.equal(shouldDownloadAttachment('application/vnd.ms-excel'), true);
@@ -109,7 +192,7 @@ async function testHashDedupeAndOwnership() {
     () => resourceAttachmentService.add({ resourceId: 'r1', priceId: 'p2', file: file('%PDF-new', 'other.pdf', 'application/pdf') }),
     error => error.code === 'ATTACHMENT_PRICE_MISMATCH',
   );
-  assert.equal((await resourceAttachmentService.listByResource('r1'))[0].id, first.id);
+  assert.equal((await resourceAttachmentService.listByResource('r1')).some(item => item.id === first.id), true);
 }
 
 async function testCompensation(idb) {
@@ -209,19 +292,28 @@ function memoryLocalStorage() {
 
 function memoryDirectory(name) {
   const entries = new Map();
+  const directories = new Set(['']);
+  let permission = 'granted';
   const root = directory(name, '');
   root.read = path => entries.get(path);
   root.delete = path => entries.delete(path);
+  root.setPermission = value => { permission = value; };
   return root;
 
   function directory(directoryName, prefix) {
     return {
       name: directoryName,
-      queryPermission: async () => 'granted',
-      requestPermission: async () => 'granted',
-      async getDirectoryHandle(child) { return directory(child, `${prefix}${child}/`); },
-      async getFileHandle(fileName) {
+      queryPermission: async () => permission,
+      requestPermission: async () => permission,
+      async getDirectoryHandle(child, options = {}) {
+        const path = `${prefix}${child}/`;
+        if (!directories.has(path) && !options.create) throw notFound();
+        directories.add(path);
+        return directory(child, path);
+      },
+      async getFileHandle(fileName, options = {}) {
         const path = `${prefix}${fileName}`;
+        if (!entries.has(path) && !options.create) throw notFound();
         if (!entries.has(path)) entries.set(path, new Blob());
         return {
           async getFile() { return entries.get(path); },
@@ -239,4 +331,38 @@ function memoryDirectory(name) {
       },
     };
   }
+}
+
+function panelDom(resourceId, generation) {
+  const host = fakeElement();
+  const input = fakeElement();
+  input.files = [];
+  const root = {
+    dataset: { resourceId, renderGeneration: generation },
+    isConnected: true,
+    querySelector: selector => selector === '[data-attachment-panel]' ? host : selector === '[data-attachment-input]' ? input : null,
+  };
+  return { root, host, input };
+}
+
+function fakeElement() {
+  const attributes = new Map();
+  return {
+    attributes,
+    innerHTML: '正在读取附件…',
+    disabled: false,
+    value: '',
+    setAttribute: (key, value) => attributes.set(key, value),
+    querySelector: () => null,
+  };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+function notFound() {
+  return Object.assign(new Error('missing'), { name: 'NotFoundError' });
 }

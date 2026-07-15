@@ -57,10 +57,9 @@ export async function storageSet(store, value) {
 
 export async function storageSetAttachment(meta, blob) {
   const key = attachmentStorageKey(meta);
+  const handle = await attachmentWritableFolderHandle();
   await idb.set(key, blob);
-  if (await getStorageMode() !== 'folder') return;
-  const handle = await getStoredDirectoryHandle();
-  if (!handle || !(await hasPermission(handle, 'readwrite'))) return;
+  if (!handle) return;
   try {
     const { directory, fileName } = await attachmentFileTarget(handle, meta, true);
     const fileHandle = await directory.getFileHandle(fileName, { create: true });
@@ -69,7 +68,7 @@ export async function storageSetAttachment(meta, blob) {
     await writable.close();
   } catch (error) {
     await idb.del(key);
-    throw error;
+    throw normalizeAttachmentFolderError(error);
   }
 }
 
@@ -93,15 +92,13 @@ export async function storageGetAttachment(meta) {
 
 export async function storageRemoveAttachment(meta) {
   const key = attachmentStorageKey(meta);
-  if (await getStorageMode() === 'folder') {
-    const handle = await getStoredDirectoryHandle();
-    if (handle && await hasPermission(handle, 'readwrite')) {
-      try {
-        const { directory, fileName } = await attachmentFileTarget(handle, meta, false);
-        await directory.removeEntry(fileName);
-      } catch (error) {
-        if (error?.name !== 'NotFoundError') throw error;
-      }
+  const handle = await attachmentWritableFolderHandle();
+  if (handle) {
+    try {
+      const { directory, fileName } = await attachmentFileTarget(handle, meta, false);
+      await directory.removeEntry(fileName);
+    } catch (error) {
+      if (error?.name !== 'NotFoundError') throw normalizeAttachmentFolderError(error);
     }
   }
   await idb.del(key);
@@ -207,6 +204,28 @@ function attachmentStorageKey(meta) {
   const id = safePathSegment(meta?.id);
   if (!id) throw new Error('附件 ID 无效。');
   return `${ATTACHMENT_KEY_PREFIX}${id}`;
+}
+
+async function attachmentWritableFolderHandle() {
+  if (await getStorageMode() !== 'folder') return null;
+  const handle = await getStoredDirectoryHandle();
+  if (!handle || !(await hasPermission(handle, 'readwrite'))) {
+    markPendingSync(true);
+    throw attachmentFolderPermissionError();
+  }
+  return handle;
+}
+
+function normalizeAttachmentFolderError(error) {
+  if (error?.code === 'ATTACHMENT_FOLDER_PERMISSION') return error;
+  if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') return attachmentFolderPermissionError();
+  return error;
+}
+
+function attachmentFolderPermissionError() {
+  return Object.assign(new Error('本地数据文件夹未授权读写，请先在设置中重新连接。'), {
+    code: 'ATTACHMENT_FOLDER_PERMISSION',
+  });
 }
 
 async function attachmentFileTarget(rootHandle, meta, create) {
