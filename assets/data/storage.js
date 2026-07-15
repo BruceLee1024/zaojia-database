@@ -66,6 +66,7 @@ export async function storageSetAttachment(meta, blob) {
     const writable = await fileHandle.createWritable();
     await writable.write(blob);
     await writable.close();
+    await updateAttachmentManifest(handle, meta, false);
   } catch (error) {
     await idb.del(key);
     throw normalizeAttachmentFolderError(error);
@@ -100,6 +101,7 @@ export async function storageRemoveAttachment(meta) {
     } catch (error) {
       if (error?.name !== 'NotFoundError') throw normalizeAttachmentFolderError(error);
     }
+    await updateAttachmentManifest(handle, meta, true);
   }
   await idb.del(key);
 }
@@ -249,37 +251,59 @@ function safeAttachmentFileName(value) {
 }
 
 async function updateManifest(rootHandle, changedStores) {
-  let manifest = {};
-  try {
-    const fileHandle = await rootHandle.getFileHandle(MANIFEST_FILE);
-    const text = await (await fileHandle.getFile()).text();
-    manifest = text.trim() ? JSON.parse(text) : {};
-  } catch (err) {
-    if (err?.name !== 'NotFoundError') throw err;
-  }
+  const manifest = await readManifest(rootHandle);
   const stores = { ...(manifest.stores || {}) };
   for (const store of changedStores) {
     stores[store] = { file: `${STORE_DIR}/${store}.json`, revision: Date.now() };
   }
-  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(Object.keys(stores), stores));
+  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(Object.keys(stores), stores, manifest.attachments));
 }
 
 async function writeManifest(rootHandle, storeNames) {
+  const manifest = await readManifest(rootHandle);
   const stores = {};
   for (const store of storeNames) {
     stores[store] = { file: `${STORE_DIR}/${store}.json`, revision: Date.now() };
   }
-  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(storeNames, stores));
+  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(storeNames, stores, manifest.attachments));
 }
 
-function buildManifest(storeNames, stores) {
+async function updateAttachmentManifest(rootHandle, meta, remove) {
+  const manifest = await readManifest(rootHandle);
+  const attachments = { ...(manifest.attachments || {}) };
+  if (remove) delete attachments[meta.id];
+  else attachments[meta.id] = {
+    path: `attachments/${meta.resourceId}/${meta.id}-${meta.safeFileName}`,
+    resourceId: meta.resourceId,
+    size: meta.size,
+    mime: meta.mimeType,
+    sha256: meta.sha256,
+    revision: Date.now(),
+  };
+  const stores = { ...(manifest.stores || {}) };
+  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(Object.keys(stores), stores, attachments));
+}
+
+async function readManifest(rootHandle) {
+  try {
+    const fileHandle = await rootHandle.getFileHandle(MANIFEST_FILE);
+    const text = await (await fileHandle.getFile()).text();
+    return text.trim() ? JSON.parse(text) : {};
+  } catch (err) {
+    if (err?.name === 'NotFoundError') return {};
+    throw err;
+  }
+}
+
+function buildManifest(storeNames, stores, attachments = {}) {
   return {
     app: 'wastewater-cost-db',
-    schemaVersion: 1,
+    schemaVersion: 2,
     storage: 'local-folder-json',
     updatedAt: new Date().toISOString(),
     storeCount: storeNames.length,
     stores,
+    attachments: attachments && typeof attachments === 'object' ? attachments : {},
   };
 }
 

@@ -225,12 +225,17 @@ async function testFolderMirrorAndFallback(idb) {
     resourceId: 'folder-resource', file: file('%PDF-folder', 'site/../quote?.pdf', 'application/pdf'),
   });
   assert.equal(root.read(`attachments/folder-resource/${saved.id}-quote_.pdf`).size, saved.size);
+  const addedManifest = JSON.parse(await root.read('manifest.json').text());
+  assert.equal(addedManifest.schemaVersion, 2);
+  assert.equal(addedManifest.attachments[saved.id].path, saved.storagePath);
   root.delete(`attachments/folder-resource/${saved.id}-quote_.pdf`);
   const opened = await resourceAttachmentService.open(saved.id);
   assert.equal(await opened.blob.text(), '%PDF-folder');
   await resourceAttachmentService.remove(saved.id);
   assert.equal(await resourceAttachmentRepo.findById(saved.id), null);
   assert.equal(await storageGetAttachment(saved), null);
+  const removedManifest = JSON.parse(await root.read('manifest.json').text());
+  assert.equal(removedManifest.attachments[saved.id], undefined);
 }
 
 async function testMissingBlobDegradation(idb) {

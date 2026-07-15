@@ -13,6 +13,7 @@ import { buildSystemPromptGenerationMessages, parseSystemPromptDraft } from '../
 import { testMaterialEquipmentDomain } from './materialEquipmentDomain.mjs';
 import { testResourceWorkbench } from './resourceWorkbench.mjs';
 import { testResourceAttachments } from './resourceAttachments.mjs';
+import { testBackupService } from './backupService.mjs';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -508,6 +509,7 @@ await testBuiltinDemoData();
 await testMaterialEquipmentDomain();
 await testResourceWorkbench();
 await testResourceAttachments();
+await testBackupService();
 console.log('All tests passed');
 
 async function testLocalFolderJsonStorage() {
