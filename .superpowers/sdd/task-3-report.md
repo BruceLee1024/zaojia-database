@@ -92,3 +92,16 @@ Complete. Resource attachments now persist as private IndexedDB blobs, mirror to
 - `git diff --check` -> passed.
 - `node --check` for `storage.js`, `resourceAttachmentService.js`, `resourceAttachments.js`, and `resources.js` -> passed.
 - Static server returned HTTP 200 for `/`, the attachment UI module, and the attachment service module after review fixes.
+
+## Final selection-race fix
+
+- `resources.js` now uses a module-level latest-selection coordinator around `resourceService.usage(id)`.
+- Each selection increments a request generation and captures the requested resource ID. After usage resolves, both the generation and current `state.selectedId` must still match before usage state, paint, price history, or attachment loading can run.
+- The module-level lifetime ensures pending callbacks from an earlier render cannot acquire a fresh token scope and commit late.
+
+### Final-fix TDD evidence
+
+- RED command: `node tests/run.mjs`.
+- Expected failure: `resources.js` did not export the requested latest-selection coordinator, reproducing the missing caller-level guard before implementation.
+- GREEN: the focused test starts A then B, resolves B usage first and A last, and asserts B usage remains active, only B is painted/loaded, `selectedId` remains B, and late A returns without commit.
+- Full verification: `node tests/run.mjs` -> `All tests passed`; `git diff --check` and `node --check assets/views/resources.js` passed.

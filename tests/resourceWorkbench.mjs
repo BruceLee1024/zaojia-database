@@ -4,7 +4,7 @@ import { resourceImportService } from '../assets/services/resourceImportService.
 import { resourceService } from '../assets/services/resourceService.js';
 import { searchAll, searchGroups } from '../assets/services/globalSearchService.js';
 import { getResourceTemplateData } from '../assets/data/excel.js';
-import { nextResourceViewState } from '../assets/views/resources.js';
+import { createLatestResourceSelection, nextResourceViewState } from '../assets/views/resources.js';
 import { buildImportReportRows, buildImportReportViewModel } from '../assets/views/resourceImport.js';
 
 export async function testResourceWorkbench() {
@@ -26,6 +26,7 @@ export async function testResourceWorkbench() {
     await testCopyStatusAndResourceSearchRouting();
     await reset();
     await testResourceSearchCapsTypesIndependently();
+    await testLatestResourceSelectionWins();
     testResourceRouteStateIsolation();
     testImportReportRows();
     testResourceTemplates();
@@ -33,6 +34,32 @@ export async function testResourceWorkbench() {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+async function testLatestResourceSelectionWins() {
+  const usageA = deferred();
+  const usageB = deferred();
+  const state = { selectedId: '', usage: null };
+  const paintedPanels = [];
+  const select = createLatestResourceSelection({
+    setSelectedId: id => { state.selectedId = id; },
+    getSelectedId: () => state.selectedId,
+    loadUsage: id => id === 'A' ? usageA.promise : usageB.promise,
+    commit: async ({ id, usage }) => {
+      state.usage = usage;
+      paintedPanels.push(id);
+    },
+  });
+
+  const selectA = select('A');
+  const selectB = select('B');
+  usageB.resolve({ total: 2, resourceId: 'B' });
+  assert.equal(await selectB, true);
+  usageA.resolve({ total: 1, resourceId: 'A' });
+  assert.equal(await selectA, false);
+  assert.deepEqual(state.usage, { total: 2, resourceId: 'B' });
+  assert.deepEqual(paintedPanels, ['B']);
+  assert.equal(state.selectedId, 'B');
 }
 
 async function testImportPriceInvariants() {
@@ -251,4 +278,10 @@ function memoryStorage() {
     failNextSet(key) { failingKeys = [key]; },
     failSequence(...keys) { failingKeys = [...keys]; },
   };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
 }

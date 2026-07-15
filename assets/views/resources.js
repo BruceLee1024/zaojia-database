@@ -37,6 +37,30 @@ export function nextResourceViewState(current = {}, route = 'materials', params 
   return next;
 }
 
+export function createLatestResourceSelection({ setSelectedId, getSelectedId, loadUsage, commit }) {
+  let requestGeneration = 0;
+  return async id => {
+    const resourceId = String(id || '');
+    const request = ++requestGeneration;
+    setSelectedId(resourceId);
+    const usage = await loadUsage(resourceId);
+    if (request !== requestGeneration || getSelectedId() !== resourceId) return false;
+    await commit({ id: resourceId, usage, request });
+    return true;
+  };
+}
+
+const selectResource = createLatestResourceSelection({
+  setSelectedId: id => { state.selectedId = id; },
+  getSelectedId: () => state.selectedId,
+  loadUsage: id => resourceService.usage(id),
+  commit: async ({ id, usage }) => {
+    state.usage = usage;
+    const generation = paint();
+    await Promise.all([loadPriceHistory(id), loadAttachmentPanel(id, generation)]);
+  },
+});
+
 async function refresh() {
   state.rows = await resourceService.list({ resourceType: state.resourceType, keyword: state.keyword, category: state.category, status: state.status });
   if (state.selectedId && !state.rows.some(item => item.id === state.selectedId)) state.selectedId = '';
@@ -113,7 +137,7 @@ function metric(label, value) { return `<div class="border border-slate-200 bg-s
 
 function exposeActions() {
   window.__resources = {
-    select: async id => { state.selectedId = id; state.usage = await resourceService.usage(id); const generation = paint(); await Promise.all([loadPriceHistory(id), loadAttachmentPanel(id, generation)]); },
+    select: selectResource,
     filter: (key, value) => { state[key] = value; clearTimeout(window.__resourceFilterTimer); window.__resourceFilterTimer = setTimeout(refresh, 150); },
     clearFilters: () => { state.keyword = ''; state.category = ''; state.status = ''; refresh(); },
     edit: showResourceEditor,
