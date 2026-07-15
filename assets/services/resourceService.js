@@ -37,6 +37,11 @@ export const resourceService = {
     validateResource(payload);
     const existing = payload.id ? await resourceRepo.findById(payload.id) : null;
     if (payload.id && !existing) throw new Error('材料或设备不存在');
+    if (payload.preferredPriceId) {
+      const preferredPrice = await resourcePriceRepo.findById(payload.preferredPriceId);
+      if (!preferredPrice) throw new Error('首选价格不存在');
+      if (!existing || preferredPrice.resourceId !== existing.id) throw new Error('首选价格不属于当前材料或设备');
+    }
     const now = new Date().toISOString();
     const item = {
       id: existing?.id || uid(),
@@ -74,7 +79,7 @@ export const resourceService = {
       quotaResourceUsageRepo.byResource(id),
       boqRepo.all(),
     ]);
-    const lines = projectLines.filter(line => line.resourceItemId === id);
+    const lines = projectLines.filter(line => line.resourceItemId === id || line.linkedResourceItemId === id);
     return {
       quotaUsageCount: quotaUsages.length,
       quotaItemIds: [...new Set(quotaUsages.map(item => item.quotaItemId).filter(Boolean))],
@@ -96,11 +101,24 @@ export const resourceService = {
       const [usages, lines] = await Promise.all([quotaResourceUsageRepo.all(), boqRepo.all()]);
       await Promise.all([
         quotaResourceUsageRepo.replaceAll(usages.filter(item => item.resourceId !== id)),
-        boqRepo.replaceAll(lines.map(line => line.resourceItemId === id ? {
-          ...line,
-          resourceReferenceStatus: 'missing',
-          resourceReferenceNote: '关联材料或设备已删除，当前价格快照仍保留。',
-        } : line)),
+        boqRepo.replaceAll(lines.map(line => {
+          let next = line;
+          if (line.resourceItemId === id) {
+            next = {
+              ...next,
+              resourceReferenceStatus: 'missing',
+              resourceReferenceNote: '关联材料或设备已删除，当前价格快照仍保留。',
+            };
+          }
+          if (line.linkedResourceItemId === id) {
+            next = {
+              ...next,
+              linkedResourceReferenceStatus: 'missing',
+              linkedResourceReferenceNote: '关联设备已删除，安装定额与设备快照仍保留。',
+            };
+          }
+          return next;
+        })),
       ]);
     }
     await resourceRepo.remove(id);

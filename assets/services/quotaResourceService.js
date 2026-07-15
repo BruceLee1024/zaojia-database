@@ -33,7 +33,7 @@ export const quotaResourceService = {
       id: payload.id || uid(),
       quotaItemId: payload.quotaItemId,
       resourceId: payload.resourceId,
-      resourceType: payload.resourceType || resource.resourceType,
+      resourceType: resource.resourceType,
       quantityPerUnit,
       lossRate,
       selectedPriceId: price.id,

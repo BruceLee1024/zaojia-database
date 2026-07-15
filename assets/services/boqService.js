@@ -90,6 +90,7 @@ export const boqService = {
         projectId,
         quotaItemId: installQuota.id,
         linkedResourceItemId: resource.id,
+        linkedResourceSnapshot: cloneSnapshot(resource),
         linkedEquipmentLineId: equipmentLine.id,
         code: '',
         name: installQuota.name,
