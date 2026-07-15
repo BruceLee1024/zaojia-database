@@ -5,7 +5,7 @@ import { resourceService } from '../assets/services/resourceService.js';
 import { searchAll, searchGroups } from '../assets/services/globalSearchService.js';
 import { getResourceTemplateData } from '../assets/data/excel.js';
 import { nextResourceViewState } from '../assets/views/resources.js';
-import { buildImportReportRows } from '../assets/views/resourceImport.js';
+import { buildImportReportRows, buildImportReportViewModel } from '../assets/views/resourceImport.js';
 
 export async function testResourceWorkbench() {
   const originalStorage = globalThis.localStorage;
@@ -79,6 +79,35 @@ function testImportReportRows() {
   assert.equal(rows[0].message.includes('价格快照已新增'), true);
   assert.equal(rows[1].message.includes('价格已存在'), true);
   assert.equal(rows[2].message, '税率必须在 0 到 100 之间');
+
+  const rolledBackReport = {
+    outcome: 'rolled_back',
+    failureCode: 'RESOURCE_IMPORT_ROLLED_BACK',
+    counts: { resourcesCreated: 0, resourcesUpdated: 0, resourcesSkipped: 0, pricesCreated: 0, pricesSkipped: 0, errors: 0 },
+    attemptedCounts: { resourcesCreated: 1, resourcesUpdated: 0, resourcesSkipped: 0, pricesCreated: 1, pricesSkipped: 0, errors: 0 },
+    rows: [{ index: 0, status: 'rolled_back', attemptedStatus: 'created', priceStatus: 'not_written', attemptedPriceStatus: 'created', errors: [] }],
+  };
+  const rolledBack = buildImportReportRows(rolledBackReport);
+  assert.equal(rolledBack[0].statusLabel, '已回滚');
+  assert.equal(rolledBack[0].message.includes('主数据尝试新增'), true);
+  assert.equal(rolledBack[0].message.includes('未写入'), true);
+  const rolledBackVm = buildImportReportViewModel(rolledBackReport);
+  assert.equal(rolledBackVm.tone, 'warning');
+  assert.equal(rolledBackVm.title, '导入已回滚');
+  assert.equal(rolledBackVm.metrics[0].label.startsWith('尝试'), true);
+
+  const partialReport = {
+    ...rolledBackReport,
+    outcome: 'partial_recovery',
+    failureCode: 'RESOURCE_IMPORT_PARTIAL_RECOVERY',
+    rows: [{ index: 0, status: 'uncertain', attemptedStatus: 'created', priceStatus: 'uncertain', attemptedPriceStatus: 'created', errors: [] }],
+  };
+  const partial = buildImportReportRows(partialReport);
+  assert.equal(partial[0].statusLabel, '需人工核对');
+  assert.equal(partial[0].message.includes('写入状态不确定'), true);
+  const partialVm = buildImportReportViewModel(partialReport);
+  assert.equal(partialVm.tone, 'danger');
+  assert.equal(partialVm.title, '导入状态不确定');
 }
 
 function testResourceTemplates() {
@@ -142,16 +171,30 @@ async function testCommitRollsBackBothStores(storage) {
     { 编码: 'M-9', 名称: '沙石', 单位: 't', 单价: 88, 价格日期: '2026-07-01', 省: '四川' },
   ], 'material');
   storage.failNextSet(STORES.resource_prices);
-  await assert.rejects(() => resourceImportService.commit(preview, {}), err => err.code === 'RESOURCE_IMPORT_ROLLED_BACK');
+  const rolledBackError = await captureRejection(() => resourceImportService.commit(preview, {}));
+  assert.equal(rolledBackError.code, 'RESOURCE_IMPORT_ROLLED_BACK');
+  assert.equal(rolledBackError.report.outcome, 'rolled_back');
+  assert.equal(rolledBackError.report.persistenceState, 'not_persisted');
+  assert.equal(rolledBackError.report.counts.resourcesCreated, 0);
+  assert.equal(rolledBackError.report.counts.pricesCreated, 0);
+  assert.equal(rolledBackError.report.attemptedCounts.resourcesCreated, 1);
+  assert.equal(rolledBackError.report.attemptedCounts.pricesCreated, 1);
+  assert.equal(rolledBackError.report.rows[0].status, 'rolled_back');
+  assert.equal(rolledBackError.report.rows[0].priceStatus, 'not_written');
   assert.deepEqual(await resourceRepo.all(), [seed]);
   assert.deepEqual(await resourcePriceRepo.all(), []);
 
   storage.failSequence(STORES.resource_prices, STORES.resource_items);
-  await assert.rejects(() => resourceImportService.commit(preview, {}), err => (
-    err.code === 'RESOURCE_IMPORT_PARTIAL_RECOVERY'
-      && /未能完全回滚/.test(err.message)
-      && Boolean(err.rollbackCause)
-  ));
+  const partialError = await captureRejection(() => resourceImportService.commit(preview, {}));
+  assert.equal(partialError.code, 'RESOURCE_IMPORT_PARTIAL_RECOVERY');
+  assert.equal(partialError.report.outcome, 'partial_recovery');
+  assert.equal(partialError.report.persistenceState, 'unknown');
+  assert.equal(partialError.report.counts.resourcesCreated, null);
+  assert.equal(partialError.report.attemptedCounts.resourcesCreated, 1);
+  assert.equal(partialError.report.rows[0].status, 'uncertain');
+  assert.equal(partialError.report.rows[0].priceStatus, 'uncertain');
+  assert.equal(/未能完全回滚/.test(partialError.message), true);
+  assert.equal(Boolean(partialError.rollbackCause), true);
 }
 
 async function testCopyStatusAndResourceSearchRouting() {
@@ -181,6 +224,15 @@ async function reset() {
   for (const store of Object.values(STORES)) globalThis.localStorage.setItem(store, '[]');
   await resourceRepo.replaceAll([]);
   await resourcePriceRepo.replaceAll([]);
+}
+
+async function captureRejection(operation) {
+  try {
+    await operation();
+  } catch (error) {
+    return error;
+  }
+  assert.fail('Expected operation to reject');
 }
 
 function memoryStorage() {

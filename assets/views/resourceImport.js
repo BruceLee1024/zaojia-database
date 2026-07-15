@@ -51,23 +51,57 @@ function previewMarkup(preview, label) {
 }
 
 function reportMarkup(report) {
-  const c = report.counts;
+  const view = buildImportReportViewModel(report);
   const rows = buildImportReportRows(report);
-  return `<section class="rounded-lg border border-teal-200 bg-teal-50 p-4"><h2 class="font-semibold text-teal-900">导入报告</h2><div class="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">${reportMetric('新增主数据', c.resourcesCreated)}${reportMetric('更新主数据', c.resourcesUpdated)}${reportMetric('跳过主数据', c.resourcesSkipped)}${reportMetric('新增价格', c.pricesCreated)}${reportMetric('跳过价格', c.pricesSkipped)}${reportMetric('错误', c.errors)}</div><div class="mt-4 overflow-auto max-h-64 border border-teal-200 bg-white"><table class="w-full text-xs"><thead class="sticky top-0 bg-teal-50 text-teal-800"><tr><th class="px-3 py-2 text-left">行</th><th class="px-3 text-left">状态</th><th class="px-3 text-left">处理详情</th></tr></thead><tbody class="divide-y divide-teal-100">${rows.map(row => `<tr><td class="px-3 py-2 tabular-nums">${row.rowNumber}</td><td class="px-3 font-medium ${row.status === 'error' ? 'text-red-600' : 'text-teal-800'}">${esc(row.statusLabel)}</td><td class="px-3 text-slate-600">${esc(row.message)}</td></tr>`).join('')}</tbody></table></div><button onclick="window.__resourceImport.back()" class="mt-4 h-9 px-4 bg-teal-700 text-white text-sm">返回查看${state.resourceType === 'equipment' ? '设备' : '材料'}库</button></section>`;
+  const tones = view.tone === 'danger'
+    ? { shell: 'border-red-300 bg-red-50', title: 'text-red-900', notice: 'border-red-200 bg-white text-red-800', table: 'border-red-200', head: 'bg-red-50 text-red-800', divide: 'divide-red-100', status: 'text-red-700', button: 'bg-red-700' }
+    : view.tone === 'warning'
+      ? { shell: 'border-amber-300 bg-amber-50', title: 'text-amber-900', notice: 'border-amber-200 bg-white text-amber-800', table: 'border-amber-200', head: 'bg-amber-50 text-amber-800', divide: 'divide-amber-100', status: 'text-amber-700', button: 'bg-amber-700' }
+      : { shell: 'border-teal-200 bg-teal-50', title: 'text-teal-900', notice: 'border-teal-200 bg-white text-teal-800', table: 'border-teal-200', head: 'bg-teal-50 text-teal-800', divide: 'divide-teal-100', status: 'text-teal-800', button: 'bg-teal-700' };
+  return `<section class="rounded-lg border ${tones.shell} p-4"><h2 class="font-semibold ${tones.title}">${esc(view.title)}</h2>${view.notice ? `<div role="alert" class="mt-3 border ${tones.notice} px-3 py-2 text-sm">${esc(view.notice)}</div>` : ''}<div class="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">${view.metrics.map(metric => reportMetric(metric.label, metric.value)).join('')}</div><div class="mt-4 overflow-auto max-h-64 border ${tones.table} bg-white"><table class="w-full text-xs"><thead class="sticky top-0 ${tones.head}"><tr><th class="px-3 py-2 text-left">行</th><th class="px-3 text-left">状态</th><th class="px-3 text-left">处理详情</th></tr></thead><tbody class="divide-y ${tones.divide}">${rows.map(row => `<tr><td class="px-3 py-2 tabular-nums">${row.rowNumber}</td><td class="px-3 font-medium ${row.status === 'error' || row.status === 'uncertain' ? 'text-red-600' : tones.status}">${esc(row.statusLabel)}</td><td class="px-3 text-slate-600">${esc(row.message)}</td></tr>`).join('')}</tbody></table></div><button onclick="window.__resourceImport.back()" class="mt-4 h-9 px-4 ${tones.button} text-white text-sm">返回查看${state.resourceType === 'equipment' ? '设备' : '材料'}库</button></section>`;
 }
 
 export function buildImportReportRows(report = {}) {
   return (report.rows || []).map(row => {
-    const statusLabel = ({ created: '已新增', updated: '已更新', skipped: '已跳过', error: '失败' })[row.status] || '已处理';
+    const statusLabel = ({ created: '已新增', updated: '已更新', skipped: '已跳过', error: '失败', rolled_back: '已回滚', uncertain: '需人工核对' })[row.status] || '已处理';
     const priceMessage = row.priceStatus === 'created' ? '价格快照已新增' : row.priceStatus === 'skipped' ? '价格已存在，未重复写入' : '无价格快照';
     const resourceMessage = row.status === 'created' ? '主数据已新增' : row.status === 'updated' ? '主数据已更新' : row.status === 'skipped' ? '主数据已跳过' : '';
+    const attemptedResource = ({ created: '主数据尝试新增', updated: '主数据尝试更新', skipped: '主数据尝试跳过' })[row.attemptedStatus] || '主数据尝试处理';
+    const attemptedPrice = ({ created: '价格尝试新增', skipped: '价格尝试跳过', none: '无价格快照' })[row.attemptedPriceStatus] || '价格尝试处理';
     return {
       rowNumber: Number(row.index || 0) + 1,
       status: row.status,
       statusLabel,
-      message: row.status === 'error' ? (row.errors || []).join('；') || '未知错误' : `${resourceMessage}；${priceMessage}`,
+      message: row.status === 'error'
+        ? (row.errors || []).join('；') || '未知错误'
+        : row.status === 'rolled_back'
+          ? `${attemptedResource}；${attemptedPrice}；已回滚，未写入`
+          : row.status === 'uncertain'
+            ? `${attemptedResource}；${attemptedPrice}；写入状态不确定，需人工核对`
+            : `${resourceMessage}；${priceMessage}`,
     };
   });
+}
+
+export function buildImportReportViewModel(report = {}) {
+  const failed = report.outcome === 'rolled_back' || report.outcome === 'partial_recovery';
+  const counts = failed ? (report.attemptedCounts || {}) : (report.counts || {});
+  const prefix = failed ? '尝试' : '';
+  return {
+    tone: report.outcome === 'partial_recovery' ? 'danger' : report.outcome === 'rolled_back' ? 'warning' : 'success',
+    title: report.outcome === 'partial_recovery' ? '导入状态不确定' : report.outcome === 'rolled_back' ? '导入已回滚' : '导入报告',
+    notice: report.outcome === 'partial_recovery'
+      ? '回滚未完全成功，以下仅为尝试操作，实际写入状态需人工核对。'
+      : report.outcome === 'rolled_back' ? '本次尝试操作已全部回滚，未写入主数据或价格。' : '',
+    metrics: [
+      { label: `${prefix}新增主数据`, value: counts.resourcesCreated || 0 },
+      { label: `${prefix}更新主数据`, value: counts.resourcesUpdated || 0 },
+      { label: `${prefix}跳过主数据`, value: counts.resourcesSkipped || 0 },
+      { label: `${prefix}新增价格`, value: counts.pricesCreated || 0 },
+      { label: `${prefix}跳过价格`, value: counts.pricesSkipped || 0 },
+      { label: '错误', value: counts.errors || 0 },
+    ],
+  };
 }
 
 function actionBadge(action) { const map = { create: ['badge-green', '新增'], update: ['badge-blue', '更新'], duplicate: ['badge-gray', '重复'], invalid: ['badge-red', '无效'] }; const [tone, label] = map[action] || map.invalid; return `<span class="badge ${tone}">${label}</span>`; }

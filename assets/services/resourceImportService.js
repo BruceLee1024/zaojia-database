@@ -165,12 +165,44 @@ export const resourceImportService = {
       error.code = rollbackCause ? 'RESOURCE_IMPORT_PARTIAL_RECOVERY' : 'RESOURCE_IMPORT_ROLLED_BACK';
       error.cause = cause;
       if (rollbackCause) error.rollbackCause = rollbackCause;
-      error.report = report;
+      error.report = buildFailureReport(report, error.code, error.message);
       throw error;
     }
     return report;
   },
 };
+
+export function buildFailureReport(report, failureCode, failureMessage = '') {
+  const partial = failureCode === 'RESOURCE_IMPORT_PARTIAL_RECOVERY';
+  const attemptedCounts = { ...(report.counts || {}) };
+  const counts = {
+    resourcesCreated: partial ? null : 0,
+    resourcesUpdated: partial ? null : 0,
+    resourcesSkipped: partial ? null : 0,
+    pricesCreated: partial ? null : 0,
+    pricesSkipped: partial ? null : 0,
+    errors: attemptedCounts.errors || 0,
+  };
+  return {
+    ...report,
+    outcome: partial ? 'partial_recovery' : 'rolled_back',
+    persistenceState: partial ? 'unknown' : 'not_persisted',
+    failureCode,
+    failureMessage,
+    attemptedCounts,
+    counts,
+    rows: (report.rows || []).map(row => {
+      if (row.status === 'error') return { ...row, attemptedStatus: 'error' };
+      return {
+        ...row,
+        attemptedStatus: row.status,
+        attemptedPriceStatus: row.priceStatus,
+        status: partial ? 'uncertain' : 'rolled_back',
+        priceStatus: partial ? 'uncertain' : 'not_written',
+      };
+    }),
+  };
+}
 
 export function resourceRowsFromMatrix(matrix = []) {
   const rows = matrix.map(row => Array.isArray(row) ? row : []);
