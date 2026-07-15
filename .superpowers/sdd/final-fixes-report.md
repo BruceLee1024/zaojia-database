@@ -108,3 +108,18 @@
 - The focused test covers old writes while the replacement is pending and again after the replacement commits; live DOM remains old during the pending interval and remains new after commit. It also verifies the invalidation guard preserves the current view state.
 - BOQ guards its post-load shared project-state mutation, and the AI import completion path guards its project-state/navigation mutation when its workspace has been invalidated. A static contract confirms `go()` remains the sole writer of `state.currentView`.
 - Final verification after this review: `node tests/run.mjs` -> `All tests passed`; changed-file `node --check` and `git diff --check` passed.
+
+## Sixth final review fix: atomic resource view state
+
+### RED
+
+- The resource race contract could not import `createAtomicResourceRefresh`. The existing `refresh()` assigned `state.rows` immediately after its first await, then progressively changed `selectedId`, `prices`, and `usage`, so a delayed materials request could overwrite a completed equipment view.
+
+### GREEN
+
+- Resource refresh now snapshots its route/filter inputs and loads rows, selected ID, prices, and usage entirely into locals. It checks both refresh request generation and root/render validity after each asynchronous phase, then performs one guarded `Object.assign(state, result)` before painting and binding.
+- Each resource render has its own generation. Materials/equipment switches invalidate older refreshes even when they share the same module-global state, and a newer refresh supersedes older filter work on the same root.
+- Resource selection, filter timers, copy/status/remove, editors, price actions, project dialogs, and price-history loading carry the root generation and discard obsolete shared-state or DOM work. Starting a selection also invalidates an in-flight refresh that could otherwise restore the prior selected row.
+- The regression reproduces delayed materials loading, commits equipment first, releases the old materials request, then selects the equipment row. Resource type, rows, selected ID, price/usage context, and click behavior remain equipment-only.
+- A static contract rejects direct awaited assignment into resource `rows`, `selectedId`, `prices`, or `usage` and requires the guarded atomic commit.
+- Final verification after this review: `node tests/run.mjs` -> `All tests passed`; changed-file `node --check` and `git diff --check` passed.

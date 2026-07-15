@@ -3,7 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLatestCoordinator, createLatestWorkspaceCoordinator, createSerializedKeyCoordinator, createWorkspaceRoot } from '../assets/utils/requestCoordinator.js?v=6.2';
-import { buildEquipmentPackageDialog, resourceRowHtml } from '../assets/views/resources.js?v=6.2';
+import { buildEquipmentPackageDialog, createAtomicResourceRefresh, createLatestResourceSelection, resourceRowHtml } from '../assets/views/resources.js?v=6.2';
 import { quotaResourceChoiceHtml } from '../assets/views/quotaResourceCompositionPanel.js?v=6.2';
 
 export async function testFinalFixes() {
@@ -12,6 +12,7 @@ export async function testFinalFixes() {
   await testLatestWorkspaceCoordinator();
   testWorkspaceRootIsolation();
   await testActiveWorkspaceInvalidation();
+  await testAtomicResourceRefreshRace();
   await testRouteRenderersAcceptWorkspace();
   await testCoherentModuleVersionGraph();
   await testNoInlineUntrustedIdInterpolation();
@@ -146,6 +147,46 @@ async function testActiveWorkspaceInvalidation() {
   assert.equal(live.innerHTML, 'new-final');
 }
 
+async function testAtomicResourceRefreshRace() {
+  let releaseMaterials;
+  const shared = {};
+  const refresh = createAtomicResourceRefresh({
+    list: ({ resourceType }) => resourceType === 'material'
+      ? new Promise(resolve => { releaseMaterials = () => resolve([{ id: 'mat-1', resourceType: 'material' }]); })
+      : Promise.resolve([{ id: 'eq-1', resourceType: 'equipment' }]),
+    currentPrice: item => Promise.resolve({ id: `price-${item.id}`, resourceId: item.id }),
+    usage: id => Promise.resolve({ resourceId: id, total: 1 }),
+    isCurrent: snapshot => !snapshot.context.invalidated,
+    commit: result => Object.assign(shared, result),
+  });
+  const materialContext = { invalidated: false };
+  const slowMaterials = refresh({ resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], context: materialContext });
+  await Promise.resolve();
+  materialContext.invalidated = true;
+  const fastEquipment = refresh({ resourceType: 'equipment', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], context: { invalidated: false } });
+  assert.equal(await fastEquipment, true);
+  assert.equal(shared.resourceType, 'equipment');
+  assert.equal(shared.selectedId, 'eq-1');
+  assert.equal(shared.prices.get('eq-1').resourceId, 'eq-1');
+  assert.equal(shared.usage.resourceId, 'eq-1');
+  releaseMaterials();
+  assert.equal(await slowMaterials, false);
+  assert.equal(shared.resourceType, 'equipment');
+  assert.deepEqual(shared.rows.map(item => item.id), ['eq-1']);
+  const clicked = shared.rows.find(item => item.id === shared.selectedId);
+  assert.equal(clicked?.resourceType, 'equipment');
+  const select = createLatestResourceSelection({
+    setSelectedId: id => { shared.selectedId = id; },
+    getSelectedId: () => shared.selectedId,
+    loadUsage: id => Promise.resolve({ resourceId: id, total: 2 }),
+    isCurrent: context => !context.invalidated,
+    commit: ({ usage }) => { shared.usage = usage; },
+  });
+  assert.equal(await select(clicked.id, { invalidated: false }), true);
+  assert.equal(shared.selectedId, 'eq-1');
+  assert.equal(shared.usage.resourceId, 'eq-1');
+}
+
 async function testRouteRenderersAcceptWorkspace() {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const views = ['dashboard', 'importer', 'quota', 'projects', 'boq', 'indicators', 'experience', 'settings', 'resources', 'resourceImport', 'boqLibrary', 'aiImportWizard'];
@@ -162,7 +203,7 @@ async function testRouteRenderersAcceptWorkspace() {
     indicators: [/expose\(workspace\)/, /drawCharts\(workspace\)/],
     experience: [/bindExperiencePage\(projects, document\)/, /bindReviewWorkspace\([^;]*document\)/],
     settings: [/bindSettingsEvents\(document\)/, /bindTabEvents\(document\)/],
-    resources: [/exposeActions\(workspace\)/, /loadPriceHistory\([^;]*workspace\)/, /document: scopedDom\(workspace\)/],
+    resources: [/exposeActions\(workspace, generation\)/, /await refresh\(workspace, generation\)/, /loadPriceHistory\([^;]*workspace[^;]*\)/, /document: scopedDom\(workspace\)/],
     resourceImport: [/exposeActions\(workspace\)/, /await paint\(workspace\)/],
     boqLibrary: [/await renderRows\(workspace\)/, /renderDetail\(workspace,/],
     aiImportWizard: [/expose\(workspace\)/, /await paint\(workspace\)/, /bindUpload\(workspace\)/],
@@ -181,6 +222,9 @@ async function testRouteRenderersAcceptWorkspace() {
   assert.match(resourceImport, /exposeActions\(workspace\);[\s\S]*await paint\(workspace\);/);
   const aiImport = await readFile(join(root, 'assets/views/aiImportWizard.js'), 'utf8');
   assert.match(aiImport, /expose\(workspace\);[\s\S]*await paint\(workspace\);/);
+  const resources = await readFile(join(root, 'assets/views/resources.js'), 'utf8');
+  assert.doesNotMatch(resources, /state\.(?:rows|prices|usage|selectedId)\s*=\s*await/, 'resource async results must remain local until atomic commit');
+  assert.match(resources, /Object\.assign\(state, result\)/);
 }
 
 function testEquipmentDialogSafetyAndWithdrawal() {
