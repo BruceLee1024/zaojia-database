@@ -227,8 +227,10 @@
   @media (max-width: 767px) {
     html { background: var(--bg); }
     body { overscroll-behavior: none; }
-    .mobile-only { display: flex; }
-    .desktop-sidebar { display: none; }
+    /* Tailwind CDN injects utility rules after this stylesheet; these visibility
+       rules must win over utility classes such as `.flex` and `.grid`. */
+    .mobile-only { display: flex !important; }
+    .desktop-sidebar { display: none !important; }
     .app-shell { height: 100dvh; padding: 0 !important; }
     .app-shell > div > header { height: 60px; padding: 0 12px; }
     .app-shell > div > header .h-full { gap: 8px; }
@@ -255,13 +257,13 @@
     .library-metric-card .text-2xl { font-size: 1.25rem; }
     .library-split { display: block; min-height: auto; }
     .library-list-pane { border-radius: 12px; }
-    .library-detail-pane { display: none; }
-    .mobile-card-list { display: block; }
-    .mobile-table { display: none; }
+    .library-detail-pane { display: none !important; }
+    .mobile-card-list { display: block !important; }
+    .mobile-table { display: none !important; }
     .mobile-scroll-hint { display: flex; align-items: center; gap: 4px; color: #64748b; font-size: 11px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
     .boq-main-grid { display: block !important; }
-    .boq-desktop-tree, #boqDetail { display: none; }
-    .boq-mobile-list { display: block; }
+    .boq-desktop-tree, #boqDetail { display: none !important; }
+    .boq-mobile-list { display: block !important; }
     .boq-mobile-card { display: block; width: 100%; padding: 12px 14px; text-align: left; border-bottom: 1px solid #e2e8f0; }
     .boq-mobile-card:focus-visible { outline: 2px solid #0f766e; outline-offset: -2px; }
     .mobile-bottom-nav { position: fixed; z-index: 35; left: 0; right: 0; bottom: 0; min-height: 64px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: rgba(255,255,255,.97); border-top: 1px solid #dbe4ef; backdrop-filter: blur(12px); }
