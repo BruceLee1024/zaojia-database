@@ -15,6 +15,10 @@ export const STORES = {
   data_quality_reports: 'data_quality_reports',
   experience_sessions: 'experience_sessions',
   experience_cards: 'experience_cards',
+  resource_items: 'resource_items',
+  resource_prices: 'resource_prices',
+  quota_resource_usages: 'quota_resource_usages',
+  resource_attachments: 'resource_attachments',
 };
 
 export const dbGetAll = async store => (await storageGet(store)) || [];
@@ -155,3 +159,32 @@ export const experienceCardRepo = {
   update: (id, patch) => dbUpdate(STORES.experience_cards, id, patch),
   remove: id => dbRemove(STORES.experience_cards, id),
 };
+
+function createRepo(store, helpers = {}) {
+  return {
+    all: () => dbGetAll(store),
+    findById: id => dbFind(store, id),
+    async upsert(obj) {
+      if (!obj.id) obj.id = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 10);
+      return await dbFind(store, obj.id)
+        ? await dbUpdate(store, obj.id, obj)
+        : await dbAdd(store, obj);
+    },
+    update: (id, patch) => dbUpdate(store, id, patch),
+    remove: id => dbRemove(store, id),
+    replaceAll: arr => dbSetAll(store, arr),
+    ...helpers,
+  };
+}
+
+export const resourceRepo = createRepo(STORES.resource_items);
+export const resourcePriceRepo = createRepo(STORES.resource_prices, {
+  byResource: resourceId => dbQuery(STORES.resource_prices, item => item.resourceId === resourceId),
+});
+export const quotaResourceUsageRepo = createRepo(STORES.quota_resource_usages, {
+  byQuota: quotaItemId => dbQuery(STORES.quota_resource_usages, item => item.quotaItemId === quotaItemId),
+  byResource: resourceId => dbQuery(STORES.quota_resource_usages, item => item.resourceId === resourceId),
+});
+export const resourceAttachmentRepo = createRepo(STORES.resource_attachments, {
+  byResource: resourceId => dbQuery(STORES.resource_attachments, item => item.resourceId === resourceId),
+});

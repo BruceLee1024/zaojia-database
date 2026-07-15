@@ -1,5 +1,5 @@
 // 工程量清单服务
-import { boqRepo, projectRepo, quotaRepo, versionRepo } from '../data/repository.js?v=3.9';
+import { boqRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=4.1';
 import { uid } from '../utils/dom.js';
 import { pickBestQuota, categoryGuess } from '../utils/stats.js';
 import { calculateAmount } from '../utils/costing.js?v=3.9';
@@ -43,6 +43,77 @@ export const boqService = {
     const hit = pickBestQuota(items, quotaHint);
     if (!hit) throw new Error(`没找到「${quotaHint}」相关定额`);
     return await this.addFromQuota(projectId, hit.id, qty);
+  },
+
+  async addEquipmentPackage(projectId, resourceId, priceId, qty, { installQuotaId } = {}) {
+    const [project, resource, price, installQuota] = await Promise.all([
+      projectRepo.findById(projectId),
+      resourceRepo.findById(resourceId),
+      resourcePriceRepo.findById(priceId),
+      installQuotaId ? quotaRepo.findById(installQuotaId) : null,
+    ]);
+    if (!project) throw new Error('项目不存在');
+    if (!resource || resource.resourceType !== 'equipment') throw new Error('只能将设备加入项目');
+    if (!price || price.resourceId !== resourceId) throw new Error('设备价格不存在或不属于当前设备');
+    const quantity = Number(qty);
+    if (!Number.isFinite(quantity) || quantity < 0) throw new Error('设备数量不能为负数');
+    if (installQuotaId && !installQuota) throw new Error('安装定额不存在');
+    if (price.priceBasis === 'installed_composite' && installQuotaId) throw new Error('安装综合价不能重复计取安装定额');
+
+    const [originalLines, originalProjects] = await Promise.all([boqRepo.all(), projectRepo.all()]);
+    const equipmentLine = {
+      id: uid(),
+      projectId,
+      quotaItemId: '',
+      resourceItemId: resource.id,
+      resourcePriceId: price.id,
+      resourceSnapshot: cloneSnapshot(resource),
+      resourcePriceSnapshot: cloneSnapshot(price),
+      code: resource.code || '',
+      name: resource.name,
+      feature: [resource.specModel, resource.brand || resource.manufacturer].filter(Boolean).join('；'),
+      unit: resource.unit,
+      qty: quantity,
+      factor: 1,
+      unitPrice: Number(price.unitPrice),
+      amount: calculateAmount(quantity, price.unitPrice, 1),
+      priceMissing: false,
+      structureGroup: 'equipment',
+    };
+    const created = [equipmentLine];
+    if (installQuota) {
+      const installPrice = installQuota.useBreakdown
+        ? Object.values(installQuota.breakdown || {}).reduce((sum, value) => sum + Number(value || 0), 0)
+        : Number(installQuota.priceTotal || 0);
+      created.push({
+        id: uid(),
+        projectId,
+        quotaItemId: installQuota.id,
+        linkedResourceItemId: resource.id,
+        linkedEquipmentLineId: equipmentLine.id,
+        code: '',
+        name: installQuota.name,
+        feature: installQuota.feature || '',
+        unit: installQuota.unit || resource.unit,
+        qty: quantity,
+        factor: 1,
+        unitPrice: installPrice,
+        amount: calculateAmount(quantity, installPrice, 1),
+        priceMissing: !(installPrice > 0),
+        structureGroup: 'equipment',
+      });
+    }
+    try {
+      await boqRepo.replaceAll([...originalLines, ...created]);
+      await recomputeProjectCost(projectId);
+      return created;
+    } catch (error) {
+      await Promise.allSettled([
+        boqRepo.replaceAll(originalLines),
+        projectRepo.replaceAll(originalProjects),
+      ]);
+      throw error;
+    }
   },
 
   /** 修改一条 */
@@ -250,4 +321,10 @@ export function groupForLine(line = {}) {
 
 function groupForQuota(item = {}) {
   return groupForLine({ ...item, structureGroup: item.structureGroup || item.group });
+}
+
+function cloneSnapshot(value) {
+  return typeof structuredClone === 'function'
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
 }
