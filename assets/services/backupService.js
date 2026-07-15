@@ -22,6 +22,7 @@ export async function createLegacyJsonBackup(adapter, aiConfig = {}) {
   const data = { app: BACKUP_APP, schemaVersion: BACKUP_SCHEMA_VERSION };
   for (const store of BACKUP_STORES) data[store] = await adapter.getStore(store);
   data.ai_config = toBackupSafeAIConfig(aiConfig);
+  validateBackupJson(data);
   return data;
 }
 
@@ -109,6 +110,36 @@ export async function clearBackupData(adapter) {
       throw Object.assign(backupError('BACKUP_RECOVERY_PARTIAL', '清理失败，且原数据未能完全恢复。'), { cause, rollbackCause });
     }
     throw Object.assign(backupError('BACKUP_CLEAR_FAILED', '清理失败，原数据已恢复。'), { cause });
+  }
+}
+
+export async function resetWithGenerator(adapter, generator) {
+  const originalStores = Object.fromEntries(await Promise.all(BACKUP_STORES.map(async store => [store, await adapter.getStore(store)])));
+  const originalBlobs = new Map();
+  for (const meta of originalStores.resource_attachments) {
+    const blob = await adapter.getAttachment(meta);
+    if (blob) originalBlobs.set(meta.id, { meta, blob });
+  }
+  let generatedStores = Object.fromEntries(BACKUP_STORES.map(store => [store, []]));
+  try {
+    for (const meta of originalStores.resource_attachments) await adapter.removeAttachment(meta);
+    for (const store of BACKUP_STORES) await adapter.setStore(store, []);
+    const runCacheOnly = adapter.runCacheOnly || (operation => operation());
+    await runCacheOnly(generator);
+    const readGenerated = adapter.getCacheStore || adapter.getStore;
+    generatedStores = Object.fromEntries(await Promise.all(BACKUP_STORES.map(async store => [store, (await readGenerated(store)) || []])));
+    validateBackupJson({ app: BACKUP_APP, schemaVersion: BACKUP_SCHEMA_VERSION, ...generatedStores });
+    for (const store of BACKUP_STORES) await adapter.setStore(store, generatedStores[store]);
+    return { stores: BACKUP_STORES.length };
+  } catch (cause) {
+    try {
+      for (const meta of generatedStores.resource_attachments || []) await adapter.removeAttachment(meta);
+      for (const store of BACKUP_STORES) await adapter.setStore(store, originalStores[store]);
+      for (const { meta, blob } of originalBlobs.values()) await adapter.setAttachment(meta, blob);
+    } catch (rollbackCause) {
+      throw Object.assign(backupError('BACKUP_RECOVERY_PARTIAL', '重置失败，且原数据未能完全恢复。'), { cause, rollbackCause });
+    }
+    throw Object.assign(backupError('BACKUP_RESET_FAILED', '重置失败，原数据已恢复。'), { cause });
   }
 }
 

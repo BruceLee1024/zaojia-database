@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const zip = require('../assets/vendor/fflate/fflate.cjs');
 
 export async function testBackupService() {
-  const { BACKUP_IMPORT_ACCEPT, backupOperationErrorMessage, downloadBackupBlob, runDestructiveDataAction } = await import('../assets/views/settings.js');
+  const { BACKUP_IMPORT_ACCEPT, backupOperationErrorMessage, downloadBackupBlob, runBackupExport, runDestructiveDataAction } = await import('../assets/views/settings.js');
   assert.equal(BACKUP_IMPORT_ACCEPT.includes('.json'), true);
   assert.equal(BACKUP_IMPORT_ACCEPT.includes('.zip'), true);
   const {
@@ -13,9 +13,29 @@ export async function testBackupService() {
     createLegacyJsonBackup,
     createZipBackup,
     parseLegacyJsonBackupFile,
+    resetWithGenerator,
     restoreLegacyJsonBackup,
     restoreZipBackup,
   } = await import('../assets/services/backupService.js');
+
+  let invalidDownloadCount = 0;
+  const invalidExportAdapter = memoryAdapter({ resource_items: [{ id: 'duplicate' }, { id: 'duplicate' }] });
+  await assert.rejects(() => createLegacyJsonBackup(invalidExportAdapter), error => error.code === 'BACKUP_SEMANTIC_INVALID');
+  await assert.rejects(() => createZipBackup(invalidExportAdapter, {}, {
+    zip: { zip() { invalidDownloadCount += 1; } },
+  }), error => error.code === 'BACKUP_SEMANTIC_INVALID');
+  assert.equal(invalidDownloadCount, 0);
+
+  const exportCalls = [];
+  const exportResult = await runBackupExport({
+    label: 'JSON',
+    create: async () => { throw Object.assign(new Error('数据引用无效'), { code: 'BACKUP_SEMANTIC_INVALID' }); },
+    download: () => exportCalls.push('download'),
+    notify: (message, type) => exportCalls.push([message, type]),
+  });
+  assert.equal(exportResult, false);
+  assert.equal(exportCalls.includes('download'), false);
+  assert.equal(exportCalls[0][0].includes('导出失败'), true);
 
   assert.equal(backupOperationErrorMessage({ code: 'BACKUP_CLEAR_FAILED' }, '清空').includes('原数据已恢复'), true);
   assert.equal(backupOperationErrorMessage({ code: 'BACKUP_RECOVERY_PARTIAL' }, '重置').includes('部分恢复'), true);
@@ -197,6 +217,41 @@ export async function testBackupService() {
   const missingPolicyArchive = await createZipBackup(missingPolicyAdapter, {}, { zip });
   const missingPolicyEntries = zip.unzipSync(new Uint8Array(await missingPolicyArchive.arrayBuffer()));
   assert.equal(Object.keys(missingPolicyEntries).some(name => name.startsWith('attachments/')), false);
+
+  const resetOriginal = {
+    quota_items: [{ id: 'original-quota' }],
+    resource_items: [{ id: 'original-resource' }],
+    resource_attachments: [attachment()],
+  };
+  const generatorFailure = memoryAdapter(resetOriginal, new Map([['a1', pdfBlob()]]));
+  await assert.rejects(() => resetWithGenerator(generatorFailure, async () => {
+    await generatorFailure.setCacheStore('quota_items', [{ id: 'generated-before-failure' }]);
+    throw new Error('injected generator failure');
+  }), error => error.code === 'BACKUP_RESET_FAILED');
+  assert.deepEqual(await generatorFailure.getStore('quota_items'), resetOriginal.quota_items);
+  assert.deepEqual(await generatorFailure.getStore('resource_items'), resetOriginal.resource_items);
+  assert.equal(await (await generatorFailure.getAttachment(attachment())).text(), '%PDF-backup');
+
+  const persistFailure = memoryAdapter(resetOriginal, new Map([['a1', pdfBlob()]]));
+  persistFailure.failStoreOnCall('resource_items', 2);
+  await assert.rejects(() => resetWithGenerator(persistFailure, async () => {
+    await persistFailure.setCacheStore('quota_items', [{ id: 'demo-quota' }]);
+    await persistFailure.setCacheStore('resource_items', [{ id: 'demo-resource' }]);
+    await persistFailure.setCacheStore('resource_attachments', []);
+  }), error => error.code === 'BACKUP_RESET_FAILED');
+  assert.deepEqual(await persistFailure.getStore('quota_items'), resetOriginal.quota_items);
+  assert.deepEqual(await persistFailure.getStore('resource_items'), resetOriginal.resource_items);
+  assert.equal(await (await persistFailure.getAttachment(attachment())).text(), '%PDF-backup');
+
+  const resetSuccess = memoryAdapter(resetOriginal, new Map([['a1', pdfBlob()]]));
+  await resetWithGenerator(resetSuccess, async () => {
+    await resetSuccess.setCacheStore('quota_items', [{ id: 'demo-quota' }]);
+    await resetSuccess.setCacheStore('resource_items', [{ id: 'demo-resource' }]);
+    await resetSuccess.setCacheStore('resource_attachments', []);
+  });
+  assert.deepEqual(await resetSuccess.getStore('quota_items'), [{ id: 'demo-quota' }]);
+  assert.deepEqual(await resetSuccess.getStore('resource_items'), [{ id: 'demo-resource' }]);
+  assert.equal(await resetSuccess.getAttachment(attachment()), null);
 }
 
 function cloneEntries(entries) {
@@ -220,9 +275,14 @@ function memoryAdapter(initial = {}, initialBlobs = new Map()) {
   const blobs = new Map(initialBlobs);
   let failingStore = '';
   const failureCounts = new Map();
+  const failOnCalls = new Map();
+  const storeCallCounts = new Map();
   return {
     getStore: async name => structuredClone(stores.get(name) || []),
     setStore: async (name, value) => {
+      const callCount = (storeCallCounts.get(name) || 0) + 1;
+      storeCallCounts.set(name, callCount);
+      if (failOnCalls.get(name) === callCount) throw new Error('injected store call failure');
       const remaining = failureCounts.get(name) || 0;
       if (remaining > 0) { failureCounts.set(name, remaining - 1); throw new Error('injected repeated store failure'); }
       if (name === failingStore) { failingStore = ''; throw new Error('injected store failure'); }
@@ -231,7 +291,11 @@ function memoryAdapter(initial = {}, initialBlobs = new Map()) {
     getAttachment: async meta => blobs.get(meta.id) || null,
     setAttachment: async (meta, blob) => blobs.set(meta.id, blob),
     removeAttachment: async meta => blobs.delete(meta.id),
+    getCacheStore: async name => structuredClone(stores.get(name) || []),
+    setCacheStore: async (name, value) => stores.set(name, structuredClone(value)),
+    runCacheOnly: operation => operation(),
     failStoreOnce: name => { failingStore = name; },
     failStoreTimes: (name, count) => failureCounts.set(name, count),
+    failStoreOnCall: (name, call) => failOnCalls.set(name, call),
   };
 }

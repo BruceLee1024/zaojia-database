@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js';
-import { storageGet, storageGetAttachment, storageRemoveAttachment, storageSetAttachment, storageSetStrict, writeStoresToDirectory } from '../assets/data/storage.js';
+import { storageGet, storageGetAttachment, storageRemoveAttachment, storageSetAttachment, storageSetStrict, writeStoresToDirectory } from '../assets/data/storage.js?v=1.0';
 import { restoreLegacyJsonBackup } from '../assets/services/backupService.js';
 import { resourceAttachmentService } from '../assets/services/resourceAttachmentService.js';
 import { attachmentListHtml, attachmentPanelShell, loadAttachmentPanel, shouldDownloadAttachment } from '../assets/views/resourceAttachments.js';
@@ -31,6 +31,8 @@ export async function testResourceAttachments() {
     await resetStores();
     await testStrictFolderStoreWrites(idb);
     await resetStores();
+    await testUnifiedFolderMutationQueue(idb);
+    await resetStores();
     await testRevokedFolderPermission(idb);
     await resetStores();
     await testMissingBlobDegradation(idb);
@@ -43,6 +45,29 @@ export async function testResourceAttachments() {
     globalThis.localStorage = originalStorage;
     globalThis.window = originalWindow;
   }
+}
+
+async function testUnifiedFolderMutationQueue(idb) {
+  const root = memoryDirectory('queue-root');
+  await idb.set('__costdb_directory_handle', root);
+  await idb.set('__costdb_storage_mode', 'folder');
+  await resourceRepo.replaceAll([{ id: 'queue-resource' }]);
+  const pause = root.pauseWriteOnce('manifest.json');
+  const attachmentPromise = resourceAttachmentService.add({
+    resourceId: 'queue-resource', file: file('%PDF-queue', 'queue.pdf', 'application/pdf'),
+  });
+  await pause.reached;
+  const storePromise = storageSetStrict('quota_items', [{ id: 'queue-quota' }]);
+  const queueState = await Promise.race([
+    storePromise.then(() => 'settled'),
+    new Promise(resolve => setTimeout(() => resolve('waiting'), 10)),
+  ]);
+  pause.release();
+  assert.equal(queueState, 'waiting');
+  const [saved] = await Promise.all([attachmentPromise, storePromise]);
+  const manifest = JSON.parse(await root.read('manifest.json').text());
+  assert.equal(manifest.stores.quota_items.file, 'stores/quota_items.json');
+  assert.equal(manifest.attachments[saved.id].path, saved.storagePath);
 }
 
 async function testStrictFolderStoreWrites(idb) {
@@ -330,12 +355,18 @@ function memoryDirectory(name) {
   const entries = new Map();
   const directories = new Set(['']);
   const failingWrites = new Map();
+  const pausedWrites = new Map();
   let permission = 'granted';
   const root = directory(name, '');
   root.read = path => entries.get(path);
   root.delete = path => entries.delete(path);
   root.setPermission = value => { permission = value; };
   root.failWriteOnce = path => failingWrites.set(path, 1);
+  root.pauseWriteOnce = path => {
+    const gate = deferredWithReject();
+    pausedWrites.set(path, gate);
+    return { reached: gate.reached, release: gate.resolve };
+  };
   return root;
 
   function directory(directoryName, prefix) {
@@ -358,6 +389,12 @@ function memoryDirectory(name) {
           async createWritable() {
             return {
               async write(value) {
+                const pause = pausedWrites.get(path);
+                if (pause) {
+                  pausedWrites.delete(path);
+                  pause.markReached();
+                  await pause.promise;
+                }
                 const remaining = failingWrites.get(path) || 0;
                 if (remaining > 0) {
                   failingWrites.set(path, remaining - 1);
@@ -376,6 +413,14 @@ function memoryDirectory(name) {
       },
     };
   }
+}
+
+function deferredWithReject() {
+  let resolve;
+  let markReached;
+  const promise = new Promise(done => { resolve = done; });
+  const reached = new Promise(done => { markReached = done; });
+  return { promise, reached, resolve, markReached };
 }
 
 function panelDom(resourceId, generation) {

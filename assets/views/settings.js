@@ -5,8 +5,8 @@ import { testAIConnection } from '../services/aiAssistService.js?v=1.1';
 import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
 import { experienceService } from '../services/experienceService.js?v=3.9';
 import { STORES, dbGetAll } from '../data/repository.js?v=1.0';
-import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, storageGetAttachment, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder } from '../data/storage.js?v=1.0';
-import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=1.0';
+import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, storageGetAttachment, storageGetCache, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder, withFolderMirrorSuspended } from '../data/storage.js?v=1.0';
+import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, resetWithGenerator, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=1.0';
 import { ensureDemoData } from '../data/demo.js?v=3.9';
 import { esc, toast, fmt } from '../utils/dom.js';
 
@@ -27,6 +27,8 @@ const backupAdapter = {
   getAttachment: storageGetAttachment,
   setAttachment: storageSetAttachment,
   removeAttachment: storageRemoveAttachment,
+  getCacheStore: storageGetCache,
+  runCacheOnly: withFolderMirrorSuspended,
 };
 
 export async function render() {
@@ -658,16 +660,13 @@ async function loadDemo() {
 
 async function resetDemo() {
   if (!confirm('将先清空当前业务数据，再重新加载演示数据。此操作不可撤销，确定继续？')) return;
-  await runDestructiveDataAction({
-    action: '重置演示数据',
-    clear: clearBusinessData,
-    afterClear: async () => {
-      await ensureDemoData({ force: true });
-      toast('演示数据已重置', 'success');
-      window.__app.go('dashboard');
-    },
-    notify: toast,
-  });
+  try {
+    await resetWithGenerator(backupAdapter, () => ensureDemoData({ force: true }));
+    toast('演示数据已重置', 'success');
+    window.__app.go('dashboard');
+  } catch (error) {
+    toast(backupOperationErrorMessage(error, '重置演示数据'), 'error');
+  }
 }
 
 async function clearAll() {
@@ -895,17 +894,21 @@ async function clearBusinessData() {
 }
 
 async function exportAll() {
-  const data = await createLegacyJsonBackup(backupAdapter, getAIConfig());
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  downloadBackupBlob(blob, `造价数据库备份-${Date.now()}.json`);
+  await runBackupExport({
+    label: 'JSON 备份',
+    create: async () => new Blob([JSON.stringify(await createLegacyJsonBackup(backupAdapter, getAIConfig()), null, 2)], { type: 'application/json' }),
+    download: blob => downloadBackupBlob(blob, `造价数据库备份-${Date.now()}.json`),
+    notify: toast,
+  });
 }
 
 async function exportZip() {
-  try {
-    downloadBackupBlob(await createZipBackup(backupAdapter, getAIConfig()), `造价数据库完整备份-${Date.now()}.zip`);
-  } catch (err) {
-    toast(`ZIP 导出失败：${err?.message || '未知错误'}`, 'error');
-  }
+  await runBackupExport({
+    label: 'ZIP 备份',
+    create: () => createZipBackup(backupAdapter, getAIConfig()),
+    download: blob => downloadBackupBlob(blob, `造价数据库完整备份-${Date.now()}.zip`),
+    notify: toast,
+  });
 }
 
 export function downloadBackupBlob(blob, fileName, dependencies = {}) {
@@ -924,10 +927,20 @@ export function backupOperationErrorMessage(error, action) {
   if (error?.code === 'BACKUP_RECOVERY_PARTIAL' || error?.code === 'STORAGE_STRICT_RECOVERY_PARTIAL') {
     return `${action}失败：补偿未完成，数据可能仅部分恢复。请立即停止操作并检查备份。`;
   }
-  if (error?.code === 'BACKUP_CLEAR_FAILED' || error?.code === 'BACKUP_RESTORE_FAILED' || error?.code === 'STORAGE_STRICT_WRITE_FAILED') {
+  if (error?.code === 'BACKUP_CLEAR_FAILED' || error?.code === 'BACKUP_RESET_FAILED' || error?.code === 'BACKUP_RESTORE_FAILED' || error?.code === 'STORAGE_STRICT_WRITE_FAILED') {
     return `${action}失败：原数据已恢复。`;
   }
   return `${action}失败：${error?.message || '未知错误'}`;
+}
+
+export async function runBackupExport({ label, create, download, notify }) {
+  try {
+    download(await create());
+    return true;
+  } catch (error) {
+    notify(`${label} 导出失败：${error?.message || '备份数据无效'}`, 'error');
+    return false;
+  }
 }
 
 export async function runDestructiveDataAction({ action, clear, afterClear, notify }) {

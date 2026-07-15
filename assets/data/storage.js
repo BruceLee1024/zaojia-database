@@ -10,7 +10,8 @@ const ATTACHMENT_DIR = 'attachments';
 const MANIFEST_FILE = 'manifest.json';
 const ATTACHMENT_KEY_PREFIX = '__costdb_attachment:';
 
-let writeQueue = Promise.resolve();
+let folderMutationQueue = Promise.resolve();
+let folderMirrorSuspension = 0;
 
 export function isLocalFolderSupported() {
   return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function';
@@ -36,13 +37,14 @@ export async function storageGet(store) {
 
 export async function storageSet(store, value) {
   await idb.set(store, value);
+  if (folderMirrorSuspension > 0) return;
   if (await getStorageMode() !== 'folder') return;
   const handle = await getStoredDirectoryHandle();
   if (!handle || !(await hasPermission(handle, 'readwrite'))) {
     markPendingSync(true);
     return;
   }
-  writeQueue = writeQueue.then(async () => {
+  return enqueueFolderMutation(async () => {
     try {
       await writeStoreToDirectory(handle, store, value);
       await updateManifest(handle, [store]);
@@ -52,13 +54,22 @@ export async function storageSet(store, value) {
       console.error(`[storage] write folder store failed: ${store}`, err);
     }
   });
-  return writeQueue;
+}
+
+export async function storageGetCache(store) {
+  return await idb.get(store);
+}
+
+export async function withFolderMirrorSuspended(operation) {
+  folderMirrorSuspension += 1;
+  try { return await operation(); }
+  finally { folderMirrorSuspension -= 1; }
 }
 
 // 备份恢复/清理专用：文件夹模式下必须同时写成 store、manifest 和 IDB，任一失败即回滚并向上抛出。
 // 普通 CRUD 继续使用 storageSet 的最终一致/待同步语义。
 export async function storageSetStrict(store, value) {
-  const operation = writeQueue.catch(() => {}).then(async () => {
+  return enqueueFolderMutation(async () => {
     const previousIdb = await idb.get(store);
     if (await getStorageMode() !== 'folder') {
       await idb.set(store, value);
@@ -90,8 +101,6 @@ export async function storageSetStrict(store, value) {
       throw Object.assign(strictStorageError('STORAGE_STRICT_WRITE_FAILED', '严格写入失败，原数据已恢复。'), { cause });
     }
   });
-  writeQueue = operation.catch(() => {});
-  return operation;
 }
 
 export async function storageSetAttachment(meta, blob) {
@@ -100,12 +109,14 @@ export async function storageSetAttachment(meta, blob) {
   await idb.set(key, blob);
   if (!handle) return;
   try {
-    const { directory, fileName } = await attachmentFileTarget(handle, meta, true);
-    const fileHandle = await directory.getFileHandle(fileName, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    await updateAttachmentManifest(handle, meta, false);
+    await enqueueFolderMutation(async () => {
+      const { directory, fileName } = await attachmentFileTarget(handle, meta, true);
+      const fileHandle = await directory.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      await updateAttachmentManifest(handle, meta, false);
+    });
   } catch (error) {
     await idb.del(key);
     throw normalizeAttachmentFolderError(error);
@@ -134,13 +145,15 @@ export async function storageRemoveAttachment(meta) {
   const key = attachmentStorageKey(meta);
   const handle = await attachmentWritableFolderHandle();
   if (handle) {
-    try {
-      const { directory, fileName } = await attachmentFileTarget(handle, meta, false);
-      await directory.removeEntry(fileName);
-    } catch (error) {
-      if (error?.name !== 'NotFoundError') throw normalizeAttachmentFolderError(error);
-    }
-    await updateAttachmentManifest(handle, meta, true);
+    await enqueueFolderMutation(async () => {
+      try {
+        const { directory, fileName } = await attachmentFileTarget(handle, meta, false);
+        await directory.removeEntry(fileName);
+      } catch (error) {
+        if (error?.name !== 'NotFoundError') throw normalizeAttachmentFolderError(error);
+      }
+      await updateAttachmentManifest(handle, meta, true);
+    });
   }
   await idb.del(key);
 }
@@ -199,6 +212,10 @@ export async function switchToBrowserStorage() {
 }
 
 export async function writeStoresToDirectory(rootHandle, snapshot, options = {}) {
+  return enqueueFolderMutation(() => writeStoresToDirectoryNow(rootHandle, snapshot, options));
+}
+
+async function writeStoresToDirectoryNow(rootHandle, snapshot, options = {}) {
   await ensureFolderLayout(rootHandle);
   const stores = Object.keys(snapshot).filter(key => Array.isArray(snapshot[key]));
   if (options.backupLabel) {
@@ -209,6 +226,12 @@ export async function writeStoresToDirectory(rootHandle, snapshot, options = {})
     await writeStoreToDirectory(rootHandle, store, snapshot[store]);
   }
   await writeManifest(rootHandle, stores);
+}
+
+function enqueueFolderMutation(operation) {
+  const queued = folderMutationQueue.catch(() => {}).then(operation);
+  folderMutationQueue = queued.catch(() => {});
+  return queued;
 }
 
 export async function readStoreFromDirectory(rootHandle, store) {

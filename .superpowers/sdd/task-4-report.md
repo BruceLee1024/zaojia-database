@@ -43,6 +43,7 @@ Implemented complete ZIP backup/restore, preserved legacy JSON compatibility, up
 - `node --check assets/views/settings.js` — passed.
 - `node --check assets/data/storage.js` — passed.
 - `git diff --check` — passed.
+
 - Static-server smoke check returned HTTP 200 for `/app/`, the local fflate UMD file, and `backupService.js`; `app/index.html` references the local fflate file.
 
 Tests cover JSON compatibility and API-key preservation, JSON size limits and metadata-only policy, ZIP roundtrip, schema 2 manifest, missing attachments, malicious paths, hash/size/schema failures, validation-before-mutation, injected restore rollback, partial compensation reporting, missing-file omission policy, and local-folder manifest add/remove behavior.
@@ -83,4 +84,28 @@ Addressed all Task 4 review findings after commit `4742d97`.
 
 - `node tests/run.mjs` — all tests passed, including strict store/manifest failure integration and focused review regression cases.
 - Syntax checks for `storage.js`, `backupService.js`, and `settings.js` — passed.
+- `git diff --check` — passed.
+
+## R2 final follow-up
+
+Addressed the final Task 4 R2 findings after commit `04e62be`.
+
+### Focused TDD evidence
+
+1. Added invalid-current-data export tests first and observed legacy JSON export succeed unexpectedly. `createLegacyJsonBackup` now validates its normalized, all-store snapshot with the exact import validator; ZIP inherits the same validation before compression. A settings export orchestrator test proves controlled errors never invoke download.
+2. Added the wished-for `resetWithGenerator` tests first and observed the API was absent. The tests inject both a generator exception and a strict `resource_items` persistence failure on its second call (after the strict clear and after earlier stores were processed); both prove original stores and attachment blobs are restored with `BACKUP_RESET_FAILED`. A success case proves only generated stores remain.
+3. Added a deterministic manifest race test: pause an attachment manifest write, start a strict store write, and assert the latter is waiting. The pre-fix implementation settled concurrently; the unified resilient folder-mutation queue now serializes store, attachment, manifest, strict rollback, and full-folder snapshot writes while retaining best-effort normal CRUD semantics.
+
+### R2 behavior
+
+- Both JSON and ZIP exports are self-restorable by construction: app/schema, store shapes, duplicate IDs, and resource/price/quota/attachment ownership are validated before any file bytes or object URL are produced.
+- Export validation failures are presented as honest controlled errors; no download callback runs.
+- Reset-demo is one compensated backup-service transaction: snapshot stores/blobs, strict clear, seed IDB with folder mirroring suspended, read the fresh cache directly, validate it, strictly persist every seeded store/manifest, and restore the original snapshot on any generator or strict failure.
+- Settings shows reset success and navigates only after the entire compensated operation completes.
+- All folder file/manifest mutations share a failure-resilient queue so a failed operation does not poison later work and a rollback cannot overwrite a concurrent manifest update.
+
+### R2 verification
+
+- `node tests/run.mjs` — all tests passed.
+- Syntax checks for storage, backup service, and settings modules — passed.
 - `git diff --check` — passed.
