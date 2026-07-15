@@ -1,17 +1,17 @@
 // 视图：Excel 导入工作台
-import { projectService } from '../services/projectService.js?v=4.0';
-import { boqService } from '../services/boqService.js?v=4.0';
-import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
-import { quotaService } from '../services/quotaService.js?v=4.0';
-import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=1.1';
-import { quotaRepo } from '../data/repository.js?v=3.9';
-import { parseExcel, exportQuotaTemplate } from '../data/excel.js?v=4.0';
-import { getStorageStatus } from '../data/storage.js?v=1.0';
-import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=1.2';
-import { createMappingTemplate, deleteMappingTemplate, duplicateMappingTemplate, getMappingTemplate, listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=1.0';
-import { esc, fmtMoney, openModal, closeModal, toast } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { categoryGuess } from '../utils/stats.js';
+import { projectService } from '../services/projectService.js?v=6.2';
+import { boqService } from '../services/boqService.js?v=6.2';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
+import { quotaService } from '../services/quotaService.js?v=6.2';
+import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=6.2';
+import { quotaRepo } from '../data/repository.js?v=6.2';
+import { parseExcel, exportQuotaTemplate } from '../data/excel.js?v=6.2';
+import { getStorageStatus } from '../data/storage.js?v=6.2';
+import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=6.2';
+import { createMappingTemplate, deleteMappingTemplate, duplicateMappingTemplate, getMappingTemplate, listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.2';
+import { esc, fmtMoney, openModal, closeModal, toast } from '../utils/dom.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { categoryGuess } from '../utils/stats.js?v=6.2';
 
 const PREVIEW_PAGE_SIZES = [20, 50, 100];
 
@@ -54,7 +54,7 @@ const state = {
   importMode: 'append',
 };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
   [state.projects, state.storageStatus] = await Promise.all([
     projectService.list(),
@@ -67,7 +67,7 @@ export async function render() {
   state.draftAvailable = Boolean(readDraft());
   if (params.mode === 'boq') state.mode = 'boq';
   if (params.mode === 'hub') state.mode = 'hub';
-  exposeImporterActions();
+  exposeImporterActions(workspace);
   if (params.action === 'quota') {
     window.__app.state.routeParams = {};
     setTimeout(() => importQuotaExcel(), 0);
@@ -80,17 +80,17 @@ export async function render() {
   }
   if (state.mode === 'boq') {
     if (!state.rawRows.length) loadSample();
-    paint();
+    paint(workspace);
     return;
   }
-  renderHub();
+  renderHub(workspace);
 }
 
-function exposeImporterActions() {
+function exposeImporterActions(workspace) {
   window.__importer = {
     showHub: () => {
       state.mode = 'hub';
-      renderHub();
+      renderHub(workspace);
     },
     startBOQImport: () => {
       if (!state.projects.length) {
@@ -110,8 +110,10 @@ function exposeImporterActions() {
       if (state.projectId) window.__app.go('boq', { projectId: state.projectId });
       else window.__app.go('boq');
     },
-    pickFile,
-    handleFile,
+    importMaterials: () => window.__app.go('resource-import', { resourceType: 'material' }),
+    importEquipment: () => window.__app.go('resource-import', { resourceType: 'equipment' }),
+    pickFile: () => pickFile(workspace),
+    handleFile: file => handleFile(file, workspace),
     setProject: id => {
       state.projectId = id;
       window.__app.state.currentProjectId = id;
@@ -260,14 +262,14 @@ function exposeImporterActions() {
   };
 }
 
-function renderHub() {
+function renderHub(workspace = document.getElementById('workspace')) {
   const projectCount = state.projects.length;
   const usingFolder = state.storageStatus.mode === 'folder';
   const storageLabel = usingFolder ? '本地文件夹' : '浏览器本地库';
   const storageDetail = usingFolder
     ? `当前数据同步到“${state.storageStatus.directoryName || '已选文件夹'}”，并保留浏览器镜像。`
     : '当前数据保存在此浏览器的 IndexedDB 中。';
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-5">
         <div class="flex flex-col lg:flex-row lg:items-end gap-4">
@@ -288,7 +290,7 @@ function renderHub() {
         </div>
       </section>
 
-      <section class="grid grid-cols-1 xl:grid-cols-4 gap-3">
+      <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         ${hubCard({
           icon: 'list_alt',
           tone: 'teal',
@@ -306,6 +308,24 @@ function renderHub() {
           action: '选择定额 Excel',
           handler: 'importQuotaExcel',
           note: '支持清单名称、项目特征、单位、综合单价等字段',
+        })}
+        ${hubCard({
+          icon: 'category',
+          tone: 'blue',
+          title: '导入材料库',
+          desc: '批量识别材料编码、规格、品牌和价格快照，预览后写入。',
+          action: '选择材料 Excel',
+          handler: 'importMaterials',
+          note: '按编码优先匹配，无编码时按名称、规格、单位和品牌匹配',
+        })}
+        ${hubCard({
+          icon: 'precision_manufacturing',
+          tone: 'teal',
+          title: '导入设备库',
+          desc: '批量导入设备选型参数、厂家报价和安装价口径。',
+          action: '选择设备 Excel',
+          handler: 'importEquipment',
+          note: '到场价可后续组合安装定额加入项目',
         })}
         ${hubCard({
           icon: 'backup',
@@ -393,14 +413,14 @@ function flowStep(num, title, desc) {
   </div>`;
 }
 
-function paint() {
+function paint(workspace = document.getElementById('workspace')) {
   const project = currentProject();
   const mappedRows = getMappedRows();
   const quality = analyzeRows(mappedRows);
   const filteredRows = filterPreviewRows(mappedRows, quality);
   const hasUploaded = Boolean(state.fileName);
 
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame h-[calc(100dvh-112px)] min-h-[620px] flex flex-col">
       <div class="mb-3 flex items-center gap-3">
         <button onclick="window.__importer.showHub()" class="h-10 w-10 border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 flex items-center justify-center" title="返回导入中心" aria-label="返回导入中心">
@@ -438,7 +458,7 @@ function paint() {
       </div>
     </div>
   `;
-  bindUploadEvents();
+  bindUploadEvents(workspace);
 }
 
 function uploadZone(hasUploaded) {
@@ -895,11 +915,11 @@ function issueCard(issue) {
   `;
 }
 
-function bindUploadEvents() {
-  const input = document.getElementById('importFileInput');
-  const dropZone = document.getElementById('importDropZone');
+function bindUploadEvents(workspace = document.getElementById('workspace')) {
+  const input = workspace.querySelector('#importFileInput');
+  const dropZone = workspace.querySelector('#importDropZone');
   if (!input || !dropZone) return;
-  input.onchange = () => handleFile(input.files?.[0]);
+  input.onchange = () => handleFile(input.files?.[0], workspace);
   dropZone.ondragover = e => {
     e.preventDefault();
     dropZone.classList.add('ring-2', 'ring-blue-300');
@@ -908,15 +928,15 @@ function bindUploadEvents() {
   dropZone.ondrop = e => {
     e.preventDefault();
     dropZone.classList.remove('ring-2', 'ring-blue-300');
-    handleFile(e.dataTransfer?.files?.[0]);
+    handleFile(e.dataTransfer?.files?.[0], workspace);
   };
 }
 
-function pickFile() {
-  document.getElementById('importFileInput')?.click();
+function pickFile(workspace = document.getElementById('workspace')) {
+  workspace.querySelector('#importFileInput')?.click();
 }
 
-async function handleFile(file) {
+async function handleFile(file, workspace = document.getElementById('workspace')) {
   if (!file) return;
   try {
     const rows = await parseExcel(file);
@@ -933,7 +953,7 @@ async function handleFile(file) {
     state.selectedRows.clear();
     state.previewPage = 1;
     toast(`已解析 ${rows.length} 行，${mappingToastMessage('自动确认')}`, 'success');
-    paint();
+    paint(workspace);
   } catch (err) {
     console.error(err);
     toast(`解析失败：${err.message}`, 'error');

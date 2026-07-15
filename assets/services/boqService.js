@@ -1,9 +1,13 @@
 // 工程量清单服务
-import { boqRepo, projectRepo, quotaRepo, versionRepo } from '../data/repository.js?v=3.9';
-import { uid } from '../utils/dom.js';
-import { pickBestQuota, categoryGuess } from '../utils/stats.js';
-import { calculateAmount } from '../utils/costing.js?v=3.9';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
+import { boqRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
+import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.2';
+import { calculateAmount } from '../utils/costing.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { localDateKey } from '../utils/localDate.js?v=6.2';
+import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.2';
+
+const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 
 export const boqService = {
   async listByProject(projectId) {
@@ -43,6 +47,89 @@ export const boqService = {
     const hit = pickBestQuota(items, quotaHint);
     if (!hit) throw new Error(`没找到「${quotaHint}」相关定额`);
     return await this.addFromQuota(projectId, hit.id, qty);
+  },
+
+  async addEquipmentPackage(projectId, resourceId, priceId, qty, { installQuotaId } = {}) {
+    return equipmentPackageCoordinator.run('project_boq', async () => {
+      const [project, resource, price, installQuota] = await Promise.all([
+      projectRepo.findById(projectId),
+      resourceRepo.findById(resourceId),
+      resourcePriceRepo.findById(priceId),
+      installQuotaId ? quotaRepo.findById(installQuotaId) : null,
+      ]);
+      if (!project) throw new Error('项目不存在');
+    if (!resource || resource.resourceType !== 'equipment') throw new Error('只能将设备加入项目');
+    if (!price || price.resourceId !== resourceId) throw new Error('设备价格不存在或不属于当前设备');
+    if (price.status === 'withdrawn') throw new Error('已撤回价格不能加入项目');
+    const quantity = Number(qty);
+    if (!Number.isFinite(quantity) || quantity < 0) throw new Error('设备数量不能为负数');
+    if (installQuotaId && !installQuota) throw new Error('安装定额不存在');
+    if (price.priceBasis === 'installed_composite' && installQuotaId) throw new Error('安装综合价不能重复计取安装定额');
+
+    const [originalLines, originalProjects] = await Promise.all([boqRepo.all(), projectRepo.all()]);
+    const equipmentLine = {
+      id: uid(),
+      projectId,
+      quotaItemId: '',
+      resourceItemId: resource.id,
+      resourcePriceId: price.id,
+      resourceSnapshot: cloneSnapshot(resource),
+      resourcePriceSnapshot: cloneSnapshot(price),
+      code: resource.code || '',
+      name: resource.name,
+      feature: [resource.specModel, resource.brand || resource.manufacturer].filter(Boolean).join('；'),
+      unit: resource.unit,
+      qty: quantity,
+      factor: 1,
+      unitPrice: Number(price.unitPrice),
+      amount: calculateAmount(quantity, price.unitPrice, 1),
+      priceMissing: false,
+      structureGroup: 'equipment',
+    };
+    const created = [equipmentLine];
+    if (installQuota) {
+      const installPrice = installQuota.useBreakdown
+        ? Object.values(installQuota.breakdown || {}).reduce((sum, value) => sum + Number(value || 0), 0)
+        : Number(installQuota.priceTotal || 0);
+      created.push({
+        id: uid(),
+        projectId,
+        quotaItemId: installQuota.id,
+        linkedResourceItemId: resource.id,
+        linkedResourceSnapshot: cloneSnapshot(resource),
+        linkedEquipmentLineId: equipmentLine.id,
+        code: '',
+        name: installQuota.name,
+        feature: installQuota.feature || '',
+        unit: installQuota.unit || resource.unit,
+        qty: quantity,
+        factor: 1,
+        unitPrice: installPrice,
+        amount: calculateAmount(quantity, installPrice, 1),
+        priceMissing: !(installPrice > 0),
+        structureGroup: 'equipment',
+      });
+    }
+    try {
+      await boqRepo.replaceAll([...originalLines, ...created]);
+      await recomputeProjectCost(projectId);
+      return created;
+    } catch (error) {
+      const rollback = await Promise.allSettled([
+        boqRepo.replaceAll(originalLines),
+        projectRepo.replaceAll(originalProjects),
+      ]);
+      const rollbackCauses = rollback.filter(result => result.status === 'rejected').map(result => result.reason);
+      if (rollbackCauses.length) {
+        throw Object.assign(new Error('设备包写入失败，且原数据未能完全恢复。'), {
+          code: 'EQUIPMENT_PACKAGE_PARTIAL_RECOVERY', cause: error, rollbackCauses,
+        });
+      }
+      throw Object.assign(new Error('设备包写入失败，原数据已恢复。'), {
+        code: 'EQUIPMENT_PACKAGE_ROLLED_BACK', cause: error,
+      });
+    }
+    });
   },
 
   /** 修改一条 */
@@ -189,13 +276,18 @@ export const boqService = {
   },
 
   async audit(projectId) {
-    const [project, lines, versions, quotas] = await Promise.all([
+    const [project, lines, versions, quotas, resources, resourcePrices] = await Promise.all([
       projectRepo.findById(projectId),
       boqRepo.byProject(projectId),
       versionRepo.byProject(projectId),
       quotaRepo.all(),
+      resourceRepo.all(),
+      resourcePriceRepo.all(),
     ]);
     const quotaIds = new Set(quotas.map(item => item.id));
+    const resourceIds = new Set(resources.map(item => item.id));
+    const resourcePriceMap = new Map(resourcePrices.map(item => [item.id, item]));
+    const today = localDateKey();
     const duplicateMap = new Map();
     lines.forEach(line => {
       const key = [line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|');
@@ -208,6 +300,10 @@ export const boqService = {
       unmatchedQuota: lines.filter(line => !line.quotaItemId),
       invalidQuotaReference: lines.filter(line => line.quotaReferenceStatus === 'missing' || (line.quotaItemId && !quotaIds.has(line.quotaItemId))),
       duplicate: lines.filter(line => duplicateMap.get([line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|')) > 1),
+      invalidResourceReference: lines.filter(line => hasInvalidResourceReference(line, resourceIds)),
+      expiredResourcePrice: lines.filter(line => isExpiredResourcePrice(line, resourcePriceMap, today)),
+      missingResourcePriceBasis: lines.filter(line => hasResourcePrice(line) && !resourcePriceForLine(line, resourcePriceMap)?.priceBasis),
+      duplicateEquipmentInstallation: duplicateEquipmentInstallationLines(lines, resourcePriceMap),
       noVersion: versions.length ? [] : [project].filter(Boolean),
     };
     const score = Math.max(0, 100
@@ -217,6 +313,10 @@ export const boqService = {
       - issues.unmatchedQuota.length * 4
       - issues.invalidQuotaReference.length * 8
       - issues.duplicate.length * 3
+      - issues.invalidResourceReference.length * 8
+      - issues.expiredResourcePrice.length * 5
+      - issues.missingResourcePriceBasis.length * 5
+      - issues.duplicateEquipmentInstallation.length * 8
       - (versions.length ? 0 : 10));
     return {
       project,
@@ -250,4 +350,54 @@ export function groupForLine(line = {}) {
 
 function groupForQuota(item = {}) {
   return groupForLine({ ...item, structureGroup: item.structureGroup || item.group });
+}
+
+function cloneSnapshot(value) {
+  return typeof structuredClone === 'function'
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
+}
+
+function hasInvalidResourceReference(line, resourceIds) {
+  if (line.resourceReferenceStatus === 'missing' || line.linkedResourceReferenceStatus === 'missing') return true;
+  const ids = [line.resourceItemId, line.linkedResourceItemId].filter(Boolean);
+  return ids.some(id => !resourceIds.has(id));
+}
+
+function hasResourcePrice(line) {
+  return Boolean(line.resourceItemId || line.resourcePriceId || line.resourcePriceSnapshot);
+}
+
+function resourcePriceForLine(line, resourcePriceMap) {
+  return line.resourcePriceSnapshot || resourcePriceMap.get(line.resourcePriceId) || null;
+}
+
+function isExpiredResourcePrice(line, resourcePriceMap, today) {
+  if (!hasResourcePrice(line)) return false;
+  const price = resourcePriceForLine(line, resourcePriceMap);
+  return Boolean(price?.validTo && price.validTo < today);
+}
+
+function duplicateEquipmentInstallationLines(lines, resourcePriceMap) {
+  const equipmentLines = lines.filter(line => line.resourceItemId);
+  const equipmentById = new Map(equipmentLines.map(line => [line.id, line]));
+  const equipmentByResource = new Map();
+  equipmentLines.forEach(line => {
+    const group = equipmentByResource.get(line.resourceItemId) || [];
+    group.push(line);
+    equipmentByResource.set(line.resourceItemId, group);
+  });
+  const duplicateLineIds = new Set();
+  lines.forEach(installationLine => {
+    const resourceId = installationLine.linkedResourceItemId || installationLine.installationResourceItemId || installationLine.manualInstallationResourceId;
+    if (!resourceId) return;
+    const candidate = installationLine.linkedEquipmentLineId
+      ? equipmentById.get(installationLine.linkedEquipmentLineId)
+      : ((equipmentByResource.get(resourceId) || []).length === 1 ? equipmentByResource.get(resourceId)[0] : null);
+    if (!candidate || candidate.resourceItemId !== resourceId) return;
+    if (resourcePriceForLine(candidate, resourcePriceMap)?.priceBasis !== 'installed_composite') return;
+    duplicateLineIds.add(candidate.id);
+    duplicateLineIds.add(installationLine.id);
+  });
+  return lines.filter(line => duplicateLineIds.has(line.id));
 }

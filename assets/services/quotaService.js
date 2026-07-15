@@ -1,8 +1,9 @@
 // 定额库服务
-import { quotaRepo, boqRepo, boqLibraryRepo } from '../data/repository.js?v=3.9';
-import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=4.0';
-import { uid } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
+import { quotaRepo, boqRepo, boqLibraryRepo } from '../data/repository.js?v=6.2';
+import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { normalizeQuotaBreakdown } from '../utils/quotaBreakdown.js?v=6.2';
 
 export const quotaService = {
   /** 列出所有定额，支持分类/关键字过滤 */
@@ -36,10 +37,14 @@ export const quotaService = {
 
   /** 创建/更新 */
   async save(data) {
+    const normalized = {
+      ...data,
+      ...('breakdown' in data ? { breakdown: normalizeQuotaBreakdown(data.breakdown) } : {}),
+    };
     if (data.id) {
-      return await quotaRepo.update(data.id, { ...data, updatedAt: new Date().toISOString() });
+      return await quotaRepo.update(data.id, { ...normalized, updatedAt: new Date().toISOString() });
     }
-    const obj = { ...data, id: uid(), updatedAt: new Date().toISOString() };
+    const obj = { ...normalized, breakdown: normalizeQuotaBreakdown(normalized.breakdown), id: uid(), updatedAt: new Date().toISOString() };
     await quotaRepo.upsert(obj);
     return obj;
   },
@@ -130,7 +135,7 @@ export const quotaService = {
         ...item,
         id: exist?.id || uid(),
         category: exist?.category || item.category,
-        breakdown: exist?.breakdown || { 人工: 0, 材料: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
+        breakdown: normalizeQuotaBreakdown(exist?.breakdown),
         useBreakdown: exist?.useBreakdown || false,
         tags: exist?.tags || [],
         updatedAt: new Date().toISOString(),

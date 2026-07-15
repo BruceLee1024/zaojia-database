@@ -1,12 +1,12 @@
 // 视图：我的项目
-import { projectService } from '../services/projectService.js?v=4.0';
-import { indicatorService } from '../services/indicatorService.js?v=3.9';
-import { boqRepo, versionRepo } from '../data/repository.js?v=3.9';
-import { fmt, fmtMoney, esc, openModal, closeModal, toast } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { openReview } from './experience.js?v=4.5';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=1.0';
-import { suggestProjectInfo } from '../services/aiAssistService.js?v=1.2';
+import { projectService } from '../services/projectService.js?v=6.2';
+import { indicatorService } from '../services/indicatorService.js?v=6.2';
+import { boqRepo, versionRepo } from '../data/repository.js?v=6.2';
+import { fmt, fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { openReview } from './experience.js?v=6.2';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.2';
+import { suggestProjectInfo } from '../services/aiAssistService.js?v=6.2';
 
 const TYPES = [
   '水厂', '污水处理厂', '再生水厂', '工业废水', '泵站', '管网', '调蓄池', '水池', '污泥处理',
@@ -17,7 +17,8 @@ const TYPES = [
 const SCALES = ['小型', '中型', '大型', '特大型'];
 const projectState = { status: '', type: '', risk: '', version: '', keyword: '', selectedId: '' };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
+  const document = scopedDom(workspace);
   const params = window.__app?.state?.routeParams || {};
   if (params.keyword != null) projectState.keyword = params.keyword;
   if (params.selectedId) projectState.selectedId = params.selectedId;
@@ -36,7 +37,7 @@ export async function render() {
     return true;
   });
   const portfolio = portfolioStats(summaries);
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="flex items-start gap-4">

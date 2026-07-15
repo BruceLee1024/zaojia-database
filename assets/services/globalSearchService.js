@@ -1,7 +1,7 @@
 // 全局搜索：聚合定额、项目、指标、经验和常用入口
-import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo } from '../data/repository.js?v=1.0';
-import { fmtMoney } from '../utils/dom.js';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
+import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo, resourceRepo } from '../data/repository.js?v=6.2';
+import { fmtMoney } from '../utils/dom.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
 
 const TYPE_META = {
   quota: { label: '定额', icon: 'menu_book' },
@@ -10,12 +10,14 @@ const TYPE_META = {
   indicator: { label: '指标', icon: 'analytics' },
   experience: { label: '经验', icon: 'psychology_alt' },
   import_action: { label: '导入', icon: 'upload_file' },
+  material: { label: '材料', icon: 'category' },
+  equipment: { label: '设备', icon: 'precision_manufacturing' },
 };
 
 export async function searchAll(keyword = '') {
   const kw = String(keyword || '').trim().toLowerCase();
   if (!kw) return [];
-  const [quotas, libraryItems, projects, boq, versions, indicators, cards] = await Promise.all([
+  const [quotas, libraryItems, projects, boq, versions, indicators, cards, resources] = await Promise.all([
     quotaRepo.all(),
     boqLibraryRepo.all(),
     projectRepo.all(),
@@ -23,6 +25,7 @@ export async function searchAll(keyword = '') {
     versionRepo.all(),
     indicatorRepo.all(),
     experienceCardRepo.all(),
+    resourceRepo.all(),
   ]);
   return [
     ...importActionResults(kw),
@@ -31,13 +34,32 @@ export async function searchAll(keyword = '') {
     ...projectResults(projects, boq, versions, kw),
     ...indicatorResults(indicators, kw),
     ...experienceResults(cards, kw),
+    ...resourceResults(resources, kw),
   ].sort((a, b) => b.score - a.score).slice(0, 24);
 }
 
 export function searchGroups(results = []) {
-  return ['quota', 'boq_library', 'project', 'indicator', 'experience', 'import_action']
+  return ['material', 'equipment', 'quota', 'boq_library', 'project', 'indicator', 'experience', 'import_action']
     .map(type => ({ type, meta: TYPE_META[type], items: results.filter(r => r.type === type) }))
     .filter(group => group.items.length);
+}
+
+function resourceResults(rows, kw) {
+  const matches = rows.filter(item => item.status !== 'inactive')
+    .filter(item => includes(item, kw, ['code', 'category', 'name', 'specModel', 'unit', 'brand', 'manufacturer', 'standard', 'processStage', 'tags']));
+  return ['material', 'equipment'].flatMap(resourceType => matches
+    .filter(item => item.resourceType === resourceType)
+    .slice(0, 8)
+    .map(item => result(
+      item.resourceType,
+      item.id,
+      item.name || (item.resourceType === 'equipment' ? '未命名设备' : '未命名材料'),
+      `${item.code || '未编码'} · ${item.specModel || '无规格'} · ${item.unit || '-'}`,
+      item.resourceType === 'equipment' ? 'equipment' : 'materials',
+      { keyword: kw, selectedId: item.id },
+      scoreText(`${item.code} ${item.name}`, kw) + 21,
+      [item.category, item.brand || item.manufacturer, item.processStage].filter(Boolean).join(' / ')
+    )));
 }
 
 function boqLibraryResults(rows, kw) {

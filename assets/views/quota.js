@@ -1,12 +1,13 @@
 // 视图：定额库
-import { quotaService } from '../services/quotaService.js?v=4.0';
-import { boqService } from '../services/boqService.js?v=4.0';
-import { fmtMoney, esc, $, openModal, closeModal, toast } from '../utils/dom.js';
-import { exportQuotaTemplate } from '../data/excel.js?v=4.0';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
+import { quotaService } from '../services/quotaService.js?v=6.2';
+import { boqService } from '../services/boqService.js?v=6.2';
+import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
+import { exportQuotaTemplate } from '../data/excel.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.2';
+import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.2';
 
-const BREAKDOWN_KEYS = ['人工', '材料', '机械', '管理费', '利润', '风险'];
-const BREAKDOWN_COLORS = ['bg-blue-600', 'bg-emerald-500', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-rose-400'];
+const BREAKDOWN_COLORS = ['bg-blue-600', 'bg-emerald-500', 'bg-cyan-600', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-rose-400'];
 const filterState = { keyword: '', category: '', unit: '', priceStatus: '' };
 let editorState = { selectedId: '', modalItem: null };
 let lastRows = [];
@@ -20,7 +21,7 @@ const emptyQuota = () => ({
   rule: '',
   unit: '',
   priceTotal: 0,
-  breakdown: { 人工: 0, 材料: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
+  breakdown: normalizeBreakdown(),
   useBreakdown: false,
   tags: [],
 });
@@ -32,6 +33,10 @@ function exposeQuotaActions() {
     edit: () => {
       const it = selectedItem();
       if (it) openQuotaForm(it, 'edit');
+    },
+    composition: () => {
+      const it = selectedItem();
+      if (it) openQuotaCompositionModal(it);
     },
     copy: () => copySelectedQuota(),
     addToBoq: () => addSelectedToBoq(),
@@ -57,18 +62,20 @@ function exposeQuotaActions() {
   };
 }
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
   if (params.keyword != null) filterState.keyword = params.keyword;
   if (params.priceStatus != null) filterState.priceStatus = params.priceStatus;
   if (params.selectedId) editorState.selectedId = params.selectedId;
+  if (!params.selectedId && Array.isArray(params.quotaItemIds) && params.quotaItemIds[0]) editorState.selectedId = params.quotaItemIds[0];
+  const routeNotice = quotaRouteNotice(params);
   const [cats, units, allRows] = await Promise.all([
     quotaService.categories(),
     quotaService.units(),
     quotaService.list(),
   ]);
   exposeQuotaActions();
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame h-full min-h-[760px] flex flex-col gap-4">
       <section class="rounded-lg border border-slate-200 bg-white px-4 py-4 shrink-0">
         <div class="flex items-center gap-4">
@@ -91,6 +98,8 @@ export async function render() {
             <span class="material-symbols-outlined text-[18px]">download</span>下载模板
           </button>
         </div>
+
+        ${routeNotice ? `<div role="status" class="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">${esc(routeNotice)}</div>` : ''}
 
         <div class="mt-4 flex items-center gap-2">
           <div class="relative flex-1 min-w-[320px]">
@@ -153,16 +162,23 @@ export async function render() {
     </div>
   `;
 
-  $('#qKw').oninput = e => { filterState.keyword = e.target.value; renderList(); };
-  $('#qCat').onchange = e => { filterState.category = e.target.value; renderList(); };
-  $('#qUnit').onchange = e => { filterState.unit = e.target.value; renderList(); };
-  $('#qPrice').onchange = e => { filterState.priceStatus = e.target.value; renderList(); };
-  $('#btnImport').onclick = importExcel;
-  $('#btnTpl').onclick = exportQuotaTemplate;
-  await renderList();
+  $('#qKw', workspace).oninput = e => { filterState.keyword = e.target.value; renderList(workspace); };
+  $('#qCat', workspace).onchange = e => { filterState.category = e.target.value; renderList(workspace); };
+  $('#qUnit', workspace).onchange = e => { filterState.unit = e.target.value; renderList(workspace); };
+  $('#qPrice', workspace).onchange = e => { filterState.priceStatus = e.target.value; renderList(workspace); };
+  $('#btnImport', workspace).onclick = importExcel;
+  $('#btnTpl', workspace).onclick = exportQuotaTemplate;
+  await renderList(workspace);
 }
 
-async function renderList() {
+export function quotaRouteNotice(params = {}) {
+  if (params.healthReason !== 'pending-resource-updates') return '';
+  const count = Math.max(0, Number(params.affectedCount) || 0);
+  return `来自“资源健康”：${count} 条定额的材料/设备价格或元数据已变更，请打开人材机组成对比并确认刷新快照。`;
+}
+
+async function renderList(workspace = document.getElementById('workspace')) {
+  const document = scopedDom(workspace);
   const [rows, allRows] = await Promise.all([quotaService.list(filterState), quotaService.list()]);
   lastRows = rows;
   if (!rows.some(row => row.id === editorState.selectedId)) {
@@ -304,9 +320,12 @@ function inspector(it) {
       </div>
 
       <div class="px-4 py-4 border-t border-slate-200 bg-white shrink-0">
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-2 gap-2">
           <button onclick="window.__quota.edit()" class="h-10 text-sm brand-bg text-white flex items-center justify-center gap-1.5">
             <span class="material-symbols-outlined text-[18px]">edit</span>编辑定额
+          </button>
+          <button onclick="window.__quota.composition()" class="h-10 text-sm border border-slate-300 bg-white text-slate-700 flex items-center justify-center gap-1.5 hover:bg-slate-50">
+            <span class="material-symbols-outlined text-[18px]">inventory_2</span>资源组成
           </button>
           <button onclick="window.__quota.copy()" class="h-10 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1.5">
             <span class="material-symbols-outlined text-[18px]">content_copy</span>复制
@@ -458,7 +477,7 @@ function openQuotaForm(item, mode = 'edit') {
     ...item,
     id: mode === 'copy' ? '' : item.id,
     name: mode === 'copy' ? `${item.name || '未命名定额'} 副本` : item.name,
-    breakdown: { ...emptyQuota().breakdown, ...(item.breakdown || {}) },
+    breakdown: normalizeBreakdown(item.breakdown),
     tags: [...(item.tags || [])],
   };
   editorState.modalItem = draft;
@@ -468,6 +487,38 @@ function openQuotaForm(item, mode = 'edit') {
     <button onclick="window.__quota.save()" class="px-3 py-1.5 text-sm brand-bg text-white rounded">保存定额</button>
   `);
   updateBreakdownSum();
+  mountQuotaResourceComposition(draft, { onApplied: syncAppliedCompositionToForm, getBaseBreakdown: captureQuotaFormBreakdown });
+}
+
+function openQuotaCompositionModal(item) {
+  const quota = { ...item, breakdown: normalizeBreakdown(item.breakdown) };
+  openModal('资源组成', `<div class="text-sm text-slate-700">${compositionPanelShell(quota)}</div>`, `
+    <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">关闭</button>
+  `);
+  mountQuotaResourceComposition(quota, { onApplied: async () => { await renderList(); } });
+}
+
+function syncAppliedCompositionToForm(updated) {
+  editorState.modalItem = { ...(editorState.modalItem || {}), ...updated, breakdown: normalizeBreakdown(updated.breakdown) };
+  const useBreakdown = document.getElementById('qf_usebd');
+  if (!useBreakdown) return;
+  useBreakdown.checked = true;
+  document.getElementById('qf_bd')?.classList.remove('hidden');
+  document.getElementById('qf_price').value = updated.priceTotal || 0;
+  BREAKDOWN_KEYS.forEach(key => {
+    const input = document.querySelector(`#qf_bd input[data-bd="${key}"]`);
+    if (input) input.value = updated.breakdown?.[key] || 0;
+  });
+  updateBreakdownSum();
+}
+
+function captureQuotaFormBreakdown() {
+  const rawValues = {};
+  BREAKDOWN_KEYS.forEach(key => {
+    const input = document.querySelector(`#qf_bd input[data-bd="${key}"]`);
+    rawValues[key] = input?.value ?? '';
+  });
+  return parseQuotaBreakdownInputValues(rawValues);
 }
 
 function quotaForm(it) {
@@ -551,7 +602,7 @@ function quotaForm(it) {
           </label>
         </div>
         <div id="qf_bd" class="${it.useBreakdown ? '' : 'hidden'}">
-          <div class="grid grid-cols-6 gap-3">
+          <div class="grid grid-cols-4 gap-3">
             ${BREAKDOWN_KEYS.map(key => `
               <label class="block rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <span class="text-xs font-medium text-slate-500">${key}</span>
@@ -562,6 +613,7 @@ function quotaForm(it) {
           <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" id="qf_bdsum">分项合计：¥0</div>
         </div>
       </section>
+      ${compositionPanelShell(it)}
     </div>
   `;
 }
@@ -641,13 +693,13 @@ function suggestedTags(intent, it) {
 
 function breakdownSuggestion(total, intent) {
   const ratios = {
-    earthwork: { 人工: 0.1, 材料: 0, 机械: 0.75, 管理费: 0.06, 利润: 0.06, 风险: 0.03 },
-    concrete: { 人工: 0.18, 材料: 0.55, 机械: 0.12, 管理费: 0.06, 利润: 0.06, 风险: 0.03 },
-    rebar: { 人工: 0.22, 材料: 0.58, 机械: 0.05, 管理费: 0.06, 利润: 0.06, 风险: 0.03 },
-    waterproof: { 人工: 0.25, 材料: 0.55, 机械: 0.04, 管理费: 0.07, 利润: 0.06, 风险: 0.03 },
-    pipe: { 人工: 0.18, 材料: 0.58, 机械: 0.1, 管理费: 0.06, 利润: 0.06, 风险: 0.02 },
-    equipment: { 人工: 0.15, 材料: 0.65, 机械: 0.08, 管理费: 0.05, 利润: 0.05, 风险: 0.02 },
-    default: { 人工: 0.2, 材料: 0.45, 机械: 0.2, 管理费: 0.06, 利润: 0.06, 风险: 0.03 },
+    earthwork: { 人工: 0.1, 材料: 0, 设备: 0, 机械: 0.75, 管理费: 0.06, 利润: 0.06, 风险: 0.03 },
+    concrete: { 人工: 0.18, 材料: 0.55, 设备: 0, 机械: 0.12, 管理费: 0.06, 利润: 0.06, 风险: 0.03 },
+    rebar: { 人工: 0.22, 材料: 0.58, 设备: 0, 机械: 0.05, 管理费: 0.06, 利润: 0.06, 风险: 0.03 },
+    waterproof: { 人工: 0.25, 材料: 0.55, 设备: 0, 机械: 0.04, 管理费: 0.07, 利润: 0.06, 风险: 0.03 },
+    pipe: { 人工: 0.18, 材料: 0.58, 设备: 0, 机械: 0.1, 管理费: 0.06, 利润: 0.06, 风险: 0.02 },
+    equipment: { 人工: 0.15, 材料: 0, 设备: 0.65, 机械: 0.08, 管理费: 0.05, 利润: 0.05, 风险: 0.02 },
+    default: { 人工: 0.2, 材料: 0.45, 设备: 0, 机械: 0.2, 管理费: 0.06, 利润: 0.06, 风险: 0.03 },
   }[intent] || {};
   const result = {};
   let used = 0;

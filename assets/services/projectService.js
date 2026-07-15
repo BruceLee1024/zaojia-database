@@ -1,9 +1,9 @@
 // 项目服务
-import { projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=3.9';
-import { uid } from '../utils/dom.js';
-import { recomputeProjectCost } from './boqService.js?v=4.0';
-import { dataEngineService } from './dataEngineService.js?v=4.0';
-import { archiveEligibility } from './projectWorkflow.js?v=1.0';
+import { projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
+import { recomputeProjectCost } from './boqService.js?v=6.2';
+import { dataEngineService } from './dataEngineService.js?v=6.2';
+import { archiveEligibility } from './projectWorkflow.js?v=6.2';
 
 export function normalizeProjectMetadata(data = {}) {
   const priceYear = String(data.priceYear || '').trim();

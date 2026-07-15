@@ -1,11 +1,11 @@
 // 演示数据加载 + 智能兜底单价
-import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from './repository.js?v=1.0';
-import { parseExcel, detectRowKind, rowToQuotaItem, rowToBOQ } from './excel.js?v=3.9';
-import { categoryGuess } from '../utils/stats.js';
-import { uid } from '../utils/dom.js';
-import { calculateAmount } from '../utils/costing.js?v=3.9';
-import { versionService } from '../services/versionService.js?v=3.9';
-import { dataEngineService } from '../services/dataEngineService.js?v=3.9';
+import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from './repository.js?v=6.2';
+import { parseExcel, detectRowKind, rowToQuotaItem, rowToBOQ } from './excel.js?v=6.2';
+import { categoryGuess } from '../utils/stats.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
+import { calculateAmount } from '../utils/costing.js?v=6.2';
+import { versionService } from '../services/versionService.js?v=6.2';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
 
 const FILES = [
   '定额数据库.xlsx',
@@ -216,7 +216,7 @@ export async function loadDemoData() {
           if (seen.has(k)) continue;
           seen.add(k);
           item.id = uid();
-          item.breakdown = { 人工: 0, 材料: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 };
+          item.breakdown = { 人工: 0, 材料: 0, 设备: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 };
           item.useBreakdown = false;
           item.tags = [];
           item.updatedAt = new Date().toISOString();
@@ -257,7 +257,7 @@ export async function loadDemoData() {
               rule: '',
               unit: line.unit,
               priceTotal: line.unitPrice,
-              breakdown: { 人工: 0, 材料: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
+              breakdown: { 人工: 0, 材料: 0, 设备: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
               useBreakdown: false,
               tags: [],
               updatedAt: new Date().toISOString(),
@@ -323,7 +323,7 @@ async function ensureBuiltinDemoData() {
       priceTotal,
       priceMissing: false,
       structureGroup,
-      breakdown: { 人工: 0, 材料: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
+      breakdown: { 人工: 0, 材料: 0, 设备: 0, 机械: 0, 管理费: 0, 利润: 0, 风险: 0 },
       useBreakdown: false,
       tags: [category.replace(/与.*/, ''), structureGroup],
       updatedAt: now,

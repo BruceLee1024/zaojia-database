@@ -1,11 +1,16 @@
 // 报价版本服务：当前清单的不可变快照、恢复与对比
-import { boqRepo, projectRepo, versionRepo } from '../data/repository.js?v=3.9';
-import { uid } from '../utils/dom.js';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { dataEngineService } from './dataEngineService.js?v=4.0';
-import { groupForLine } from './boqService.js?v=4.0';
+import { boqRepo, projectRepo, versionRepo } from '../data/repository.js?v=6.2';
+import { uid } from '../utils/dom.js?v=6.2';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { dataEngineService } from './dataEngineService.js?v=6.2';
+import { groupForLine } from './boqService.js?v=6.2';
 
-const LINE_FIELDS = ['quotaItemId', 'code', 'name', 'feature', 'unit', 'qty', 'factor', 'unitPrice', 'amount', 'priceMissing', 'structureGroup'];
+const LINE_FIELDS = [
+  'quotaItemId', 'code', 'name', 'feature', 'unit', 'qty', 'factor', 'unitPrice', 'amount', 'priceMissing', 'structureGroup',
+  'resourceItemId', 'resourcePriceId', 'resourceSnapshot', 'resourcePriceSnapshot', 'resourceReferenceStatus', 'resourceReferenceNote',
+  'linkedResourceItemId', 'linkedResourceSnapshot', 'linkedEquipmentLineId', 'linkedResourceReferenceStatus', 'linkedResourceReferenceNote',
+  'installationResourceItemId', 'manualInstallationResourceId',
+];
 
 export const versionService = {
   async createFromCurrent(projectId, { name, note = '' } = {}) {
@@ -149,13 +154,14 @@ export function defaultVersionName(date = new Date()) {
 }
 
 export function lineKey(line) {
-  return line.quotaItemId || [line.code, line.name, line.feature, line.unit].map(v => v || '').join('|');
+  return line.quotaItemId || (line.resourceItemId ? `resource:${line.resourceItemId}` : '') || [line.code, line.name, line.feature, line.unit].map(v => v || '').join('|');
 }
 
 function snapshotLine(line) {
   const copy = {};
   LINE_FIELDS.forEach(field => {
-    copy[field] = line[field] ?? (field === 'factor' ? 1 : '');
+    const value = line[field] ?? (field === 'factor' ? 1 : '');
+    copy[field] = cloneValue(value);
   });
   copy.qty = Number(copy.qty) || 0;
   copy.factor = Number(copy.factor) || 1;
@@ -165,6 +171,13 @@ function snapshotLine(line) {
   copy.structureGroup = copy.structureGroup || groupForLine(copy);
   copy.id = line.id || uid();
   return copy;
+}
+
+function cloneValue(value) {
+  if (!value || typeof value !== 'object') return value;
+  return typeof structuredClone === 'function'
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
 }
 
 function mapByLineKey(lines) {

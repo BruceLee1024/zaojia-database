@@ -5,6 +5,8 @@ export const ICONS = Object.freeze({
     overview: 'dashboard',
     import: 'upload_file',
     quota: 'menu_book',
+    materials: 'category',
+    equipment: 'precision_manufacturing',
     boqLibrary: 'format_list_bulleted',
     projects: 'folder_managed',
     boq: 'list_alt',

@@ -1,13 +1,14 @@
 // 视图：数据与备份
-import { AI_SYSTEM_PROMPT_PRESETS, getAIConfig, getAISystemPromptPreset, setAIConfig, listProviders, getProviderDefaults, toBackupSafeAIConfig, restoreBackupSafeAIConfig } from '../services/aiService.js?v=4.1';
-import { generateSystemPromptDraft } from '../services/aiPromptService.js?v=1.0';
-import { testAIConnection } from '../services/aiAssistService.js?v=1.1';
-import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
-import { experienceService } from '../services/experienceService.js?v=3.9';
-import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo } from '../data/repository.js?v=1.0';
-import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, switchToBrowserStorage, syncBrowserCacheToLocalFolder } from '../data/storage.js?v=1.0';
-import { ensureDemoData } from '../data/demo.js?v=3.9';
-import { esc, toast, fmt } from '../utils/dom.js';
+import { AI_SYSTEM_PROMPT_PRESETS, getAIConfig, getAISystemPromptPreset, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=6.2';
+import { generateSystemPromptDraft } from '../services/aiPromptService.js?v=6.2';
+import { testAIConnection } from '../services/aiAssistService.js?v=6.2';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
+import { experienceService } from '../services/experienceService.js?v=6.2';
+import { STORES, dbGetAll } from '../data/repository.js?v=6.2';
+import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, storageGetAttachment, storageGetCache, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder, withFolderMirrorSuspended } from '../data/storage.js?v=6.2';
+import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, resetWithGenerator, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=6.2';
+import { ensureDemoData } from '../data/demo.js?v=6.2';
+import { esc, toast, fmt, scopedDom } from '../utils/dom.js?v=6.2';
 
 const SETTINGS_TABS = [
   { id: 'storage', label: '数据保存', icon: 'folder_managed', desc: '本地数据' },
@@ -18,8 +19,19 @@ const SETTINGS_TABS = [
 ];
 
 let activeSettingsTab = 'storage';
+export const BACKUP_IMPORT_ACCEPT = '.json,.zip,application/json,application/zip';
 
-export async function render() {
+const backupAdapter = {
+  getStore: dbGetAll,
+  setStore: storageSetStrict,
+  getAttachment: storageGetAttachment,
+  setAttachment: storageSetAttachment,
+  removeAttachment: storageRemoveAttachment,
+  getCacheStore: storageGetCache,
+  runCacheOnly: withFolderMirrorSuspended,
+};
+
+export async function render(workspace = document.getElementById('workspace')) {
   const cfg = getAIConfig();
   const providers = listProviders();
   const [engine, experience, storageStatus, storageEstimate] = await Promise.all([
@@ -29,14 +41,15 @@ export async function render() {
     getBrowserStorageEstimate(),
   ]);
   const ctx = { cfg, providers, engine, experience, storageStatus, storageEstimate };
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame space-y-4">
       ${settingsTabs()}
       ${renderActiveTab(ctx)}
     </div>
   `;
-  bindSettingsEvents();
-  bindTabEvents();
+  const document = scopedDom(workspace);
+  bindSettingsEvents(document);
+  bindTabEvents(document);
 }
 
 export async function triggerExportBackup() {
@@ -341,15 +354,16 @@ function renderBackupTab() {
         </div>
         <div>
           <h2 class="text-base font-semibold text-slate-900">备份与恢复</h2>
-          <p class="mt-1 text-xs text-slate-500">用于跨电脑迁移、临时留档或从 JSON 备份恢复业务数据。</p>
+          <p class="mt-1 text-xs text-slate-500">用于跨电脑迁移、临时留档或恢复业务数据。</p>
         </div>
       </div>
-      <div class="mt-5 grid grid-cols-3 gap-4">
-        ${backupAction('恢复 JSON 备份', '恢复会覆盖业务资料和 AI 偏好；当前设备的 API Key 会保留。', 'upload_file', 'btnImport')}
-        ${backupAction('导出 JSON 备份', '导出当前业务数据，适合迁移或交接前留档。', 'download', 'btnExport')}
+      <div class="mt-5 grid grid-cols-2 xl:grid-cols-4 gap-4">
+        ${backupAction('恢复备份', '接受旧 JSON 或完整 ZIP；恢复前会先校验全部内容。', 'upload_file', 'btnImport')}
+        ${backupAction('导出完整 ZIP', '包含所有业务数据、校验清单和附件原文件。', 'folder_zip', 'btnExportZip')}
+        ${backupAction('导出兼容 JSON', '不包含附件二进制，仅用于兼容旧版和轻量留档。', 'download', 'btnExport')}
         ${backupAction('加载演示数据', '已有业务数据不会被覆盖，用于快速体验系统流程。', 'database', 'btnDemo')}
       </div>
-      <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">备份文件包含你的项目和报价资料，请妥善保存。AI Key 仅保存在当前浏览器。</div>
+      <div class="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">ZIP 才是可完整迁移附件的备份；JSON 中只有附件元数据。备份包含敏感业务资料，请妥善保存。任何备份都不会导出或覆盖当前设备的 API Key。</div>
     </section>
   `;
 }
@@ -369,7 +383,7 @@ function renderDangerTab() {
       <div class="mt-5 grid grid-cols-3 gap-4">
         ${dangerAction('重置演示数据', '清空当前业务数据后重新加载内置演示数据。', 'restart_alt', 'btnDemoReset')}
         ${dangerAction('清理待检查记录', '删除待检查记录，不影响可用案例、项目和清单。', 'mop', 'btnEngineClearCandidates')}
-        ${dangerAction('清空全部数据', '清空定额、项目、清单、版本、经验卡和指标。', 'delete_forever', 'btnClear')}
+        ${dangerAction('清空全部数据', '清空所有业务记录与附件原文件。', 'delete_forever', 'btnClear')}
       </div>
     </section>
   `;
@@ -413,7 +427,7 @@ function renderSettingsSummaryCards({ cfg, engine }) {
   `;
 }
 
-function bindSettingsEvents() {
+function bindSettingsEvents(document = globalThis.document) {
   const on = (id, handler) => {
     const el = document.getElementById(id);
     if (el) el.onclick = handler;
@@ -430,19 +444,20 @@ function bindSettingsEvents() {
   }
   const systemPrompt = document.getElementById('cfg_sys');
   if (systemPrompt) {
-    systemPrompt.oninput = updateSystemPromptCount;
+    systemPrompt.oninput = () => updateSystemPromptCount(document);
   }
   document.querySelectorAll('[data-ai-prompt-template]').forEach(button => {
-    button.onclick = () => applySystemPromptTemplate(button.dataset.aiPromptTemplate);
+    button.onclick = () => applySystemPromptTemplate(button.dataset.aiPromptTemplate, document);
   });
-  on('btnPromptGenerateToggle', togglePromptGenerator);
-  on('btnPromptGenerate', generatePromptDraft);
-  on('btnPromptApplyDraft', applyPromptDraft);
-  on('btnPromptReset', () => applySystemPromptTemplate('general'));
-  on('btnSave', saveAIConfig);
-  on('btnTest', testAI);
+  on('btnPromptGenerateToggle', () => togglePromptGenerator(document));
+  on('btnPromptGenerate', () => generatePromptDraft(document));
+  on('btnPromptApplyDraft', () => applyPromptDraft(document));
+  on('btnPromptReset', () => applySystemPromptTemplate('general', document));
+  on('btnSave', () => saveAIConfig(document));
+  on('btnTest', () => testAI(document));
   on('btnImport', importAll);
   on('btnExport', exportAll);
+  on('btnExportZip', exportZip);
   on('btnFolderActivate', activateFolder);
   on('btnFolderReconnect', reconnectFolder);
   on('btnFolderSync', syncFolder);
@@ -457,7 +472,7 @@ function bindSettingsEvents() {
   on('btnClear', clearAll);
 }
 
-function bindTabEvents() {
+function bindTabEvents(document = globalThis.document) {
   document.querySelectorAll('[data-settings-tab]').forEach(btn => {
     btn.onclick = () => {
       activeSettingsTab = btn.dataset.settingsTab;
@@ -466,7 +481,7 @@ function bindTabEvents() {
   });
 }
 
-function saveAIConfig() {
+function saveAIConfig(document = globalThis.document) {
   const system = document.getElementById('cfg_sys').value.trim();
   if (!system) {
     toast('系统提示词不能为空；你可以自行编辑，或恢复推荐默认。', 'error');
@@ -484,38 +499,38 @@ function saveAIConfig() {
   return true;
 }
 
-async function testAI() {
-  if (!saveAIConfig()) return;
+async function testAI(document = globalThis.document) {
+  if (!saveAIConfig(document)) return;
   const result = await testAIConnection();
   toast(result.summary, result.confidence === 'high' ? 'success' : 'error');
 }
 
-function updateSystemPromptCount() {
+function updateSystemPromptCount(document = globalThis.document) {
   const prompt = document.getElementById('cfg_sys');
   const count = document.getElementById('cfg_sys_count');
   if (prompt && count) count.textContent = `${prompt.value.length} 个字符`;
 }
 
-function applySystemPromptTemplate(key) {
+function applySystemPromptTemplate(key, document = globalThis.document) {
   const prompt = document.getElementById('cfg_sys');
   if (!prompt) return;
   const next = getAISystemPromptPreset(key);
   const saved = getAIConfig().system || '';
   if (prompt.value.trim() && prompt.value.trim() !== saved.trim() && !confirm('替换会覆盖当前未保存的提示词修改。是否继续？')) return;
   prompt.value = next;
-  updateSystemPromptCount();
+  updateSystemPromptCount(document);
   prompt.focus();
   toast('已填入模板；请检查或继续编辑后保存。', 'success');
 }
 
-function togglePromptGenerator() {
+function togglePromptGenerator(document = globalThis.document) {
   const generator = document.getElementById('promptGenerator');
   if (!generator) return;
   generator.classList.toggle('hidden');
   if (!generator.classList.contains('hidden')) document.getElementById('promptGenScenario')?.focus();
 }
 
-async function generatePromptDraft() {
+async function generatePromptDraft(document = globalThis.document) {
   const scenario = document.getElementById('promptGenScenario')?.value.trim();
   const focus = document.getElementById('promptGenFocus')?.value.trim();
   const responseStyle = document.getElementById('promptGenStyle')?.value;
@@ -552,14 +567,14 @@ async function generatePromptDraft() {
   }
 }
 
-function applyPromptDraft() {
+function applyPromptDraft(document = globalThis.document) {
   const draft = document.getElementById('promptDraft')?.value.trim();
   const prompt = document.getElementById('cfg_sys');
   if (!draft || !prompt) return;
   const saved = getAIConfig().system || '';
   if (prompt.value.trim() && prompt.value.trim() !== saved.trim() && !confirm('应用草案会覆盖当前未保存的提示词修改。是否继续？')) return;
   prompt.value = draft;
-  updateSystemPromptCount();
+  updateSystemPromptCount(document);
   prompt.focus();
   toast('草案已应用到编辑框；请检查后保存。', 'success');
 }
@@ -646,16 +661,24 @@ async function loadDemo() {
 
 async function resetDemo() {
   if (!confirm('将先清空当前业务数据，再重新加载演示数据。此操作不可撤销，确定继续？')) return;
-  await ensureDemoData({ force: true });
-  toast('演示数据已重置', 'success');
-  window.__app.go('dashboard');
+  try {
+    await resetWithGenerator(backupAdapter, () => ensureDemoData({ force: true }));
+    toast('演示数据已重置', 'success');
+    window.__app.go('dashboard');
+  } catch (error) {
+    toast(backupOperationErrorMessage(error, '重置演示数据'), 'error');
+  }
 }
 
 async function clearAll() {
-  const typed = prompt('此操作会清空所有定额、项目、清单、报价版本、经验卡和指标；不会删除 AI 配置。请输入“清空全部”确认。');
+  const typed = prompt('此操作会清空所有业务数据和附件原文件；不会删除 AI 配置。请输入“清空全部”确认。');
   if (typed !== '清空全部') return;
-  await clearBusinessData();
-  location.reload();
+  await runDestructiveDataAction({
+    action: '清空全部数据',
+    clear: clearBusinessData,
+    afterClear: () => location.reload(),
+    notify: toast,
+  });
 }
 
 function storageRailGroup(icon, title, rows) {
@@ -846,30 +869,21 @@ async function getBrowserStorageEstimate() {
 async function importAll() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.json';
+  input.accept = BACKUP_IMPORT_ACCEPT;
   input.onchange = async e => {
     const file = e.target.files[0]; if (!file) return;
-    if (!confirm('恢复 JSON 备份会覆盖当前定额、项目、清单、报价版本、复盘笔记、造价参考和 AI 偏好；当前设备的 API Key 不会被导入或覆盖。建议先导出当前备份。确定恢复？')) return;
-    let data;
+    if (!confirm('恢复会覆盖当前业务数据与附件；当前设备的 API Key 不会被导入或覆盖。建议先导出完整 ZIP。确定恢复？')) return;
     try {
-      data = JSON.parse(await file.text());
+      if (file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip') {
+        await restoreZipBackup(file, backupAdapter, { currentAI: getAIConfig(), setAI: setAIConfig });
+      } else {
+        await restoreLegacyJsonBackup(await parseLegacyJsonBackupFile(file), backupAdapter, { currentAI: getAIConfig(), setAI: setAIConfig });
+      }
     } catch (err) {
-      toast('导入失败：JSON 文件无法解析', 'error');
+      const partial = err?.code === 'BACKUP_RECOVERY_PARTIAL' ? '（数据可能仅部分恢复，请立即停止操作并检查备份）' : '';
+      toast(`导入失败：${err?.message || '备份无法解析'}${partial}`, 'error');
       return;
     }
-    if (data.quota_items) await quotaRepo.replaceAll(data.quota_items);
-    await boqLibraryRepo.replaceAll(data.boq_library_items || []);
-    if (data.projects)    await projectRepo.replaceAll(data.projects);
-    if (data.project_boq) await boqRepo.replaceAll(data.project_boq);
-    await versionRepo.replaceAll(data.boq_versions || []);
-    if (data.indicators)  await indicatorRepo.replaceAll(data.indicators);
-    await dataFactRepo.replaceAll(data.data_facts || []);
-    await dataCandidateRepo.replaceAll(data.data_candidates || []);
-    await dataJobRepo.replaceAll(data.data_jobs || []);
-    await dataQualityReportRepo.replaceAll(data.data_quality_reports || []);
-    await experienceSessionRepo.replaceAll(data.experience_sessions || []);
-    await experienceCardRepo.replaceAll(data.experience_cards || []);
-    if (data.ai_config) setAIConfig(restoreBackupSafeAIConfig(data.ai_config, getAIConfig()));
     toast('导入完成', 'success');
     location.reload();
   };
@@ -877,47 +891,70 @@ async function importAll() {
 }
 
 async function clearBusinessData() {
-  await Promise.all([
-    quotaRepo.replaceAll([]),
-    boqLibraryRepo.replaceAll([]),
-    projectRepo.replaceAll([]),
-    boqRepo.replaceAll([]),
-    versionRepo.replaceAll([]),
-    indicatorRepo.replaceAll([]),
-    dataFactRepo.replaceAll([]),
-    dataCandidateRepo.replaceAll([]),
-    dataJobRepo.replaceAll([]),
-    dataQualityReportRepo.replaceAll([]),
-    experienceSessionRepo.replaceAll([]),
-    experienceCardRepo.replaceAll([]),
-  ]);
+  await clearBackupData(backupAdapter);
 }
 
 async function exportAll() {
-  const data = {
-    ...(await collectBusinessData()),
-    ai_config: toBackupSafeAIConfig(getAIConfig()),
-  };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `造价数据库备份-${Date.now()}.json`;
+  await runBackupExport({
+    label: 'JSON 备份',
+    create: async () => new Blob([JSON.stringify(await createLegacyJsonBackup(backupAdapter, getAIConfig()), null, 2)], { type: 'application/json' }),
+    download: blob => downloadBackupBlob(blob, `造价数据库备份-${Date.now()}.json`),
+    notify: toast,
+  });
+}
+
+async function exportZip() {
+  await runBackupExport({
+    label: 'ZIP 备份',
+    create: () => createZipBackup(backupAdapter, getAIConfig()),
+    download: blob => downloadBackupBlob(blob, `造价数据库完整备份-${Date.now()}.zip`),
+    notify: toast,
+  });
+}
+
+export function downloadBackupBlob(blob, fileName, dependencies = {}) {
+  const documentApi = dependencies.document || document;
+  const urlApi = dependencies.URL || URL;
+  const schedule = dependencies.schedule || (callback => setTimeout(callback, 0));
+  const a = documentApi.createElement('a');
+  const url = urlApi.createObjectURL(blob);
+  a.href = url;
+  a.download = fileName;
   a.click();
+  schedule(() => urlApi.revokeObjectURL(url));
+}
+
+export function backupOperationErrorMessage(error, action) {
+  if (error?.code === 'BACKUP_RECOVERY_PARTIAL' || error?.code === 'STORAGE_STRICT_RECOVERY_PARTIAL') {
+    return `${action}失败：补偿未完成，数据可能仅部分恢复。请立即停止操作并检查备份。`;
+  }
+  if (error?.code === 'BACKUP_CLEAR_FAILED' || error?.code === 'BACKUP_RESET_FAILED' || error?.code === 'BACKUP_RESTORE_FAILED' || error?.code === 'STORAGE_STRICT_WRITE_FAILED') {
+    return `${action}失败：原数据已恢复。`;
+  }
+  return `${action}失败：${error?.message || '未知错误'}`;
+}
+
+export async function runBackupExport({ label, create, download, notify }) {
+  try {
+    download(await create());
+    return true;
+  } catch (error) {
+    notify(`${label} 导出失败：${error?.message || '备份数据无效'}`, 'error');
+    return false;
+  }
+}
+
+export async function runDestructiveDataAction({ action, clear, afterClear, notify }) {
+  try {
+    await clear();
+    await afterClear();
+    return true;
+  } catch (error) {
+    notify(backupOperationErrorMessage(error, action), 'error');
+    return false;
+  }
 }
 
 async function collectBusinessData() {
-  return {
-    quota_items: await quotaRepo.all(),
-    boq_library_items: await boqLibraryRepo.all(),
-    projects:    await projectRepo.all(),
-    project_boq: await boqRepo.all(),
-    boq_versions: await versionRepo.all(),
-    indicators:  await indicatorRepo.all(),
-    data_facts: await dataFactRepo.all(),
-    data_candidates: await dataCandidateRepo.all(),
-    data_jobs: await dataJobRepo.all(),
-    data_quality_reports: await dataQualityReportRepo.all(),
-    experience_sessions: await experienceSessionRepo.all(),
-    experience_cards: await experienceCardRepo.all(),
-  };
+  return Object.fromEntries(await Promise.all(Object.values(STORES).map(async store => [store, await dbGetAll(store)])));
 }

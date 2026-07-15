@@ -1,14 +1,14 @@
 // AI 自由格式清单导入向导。标准表头自动采用，模型仅补充模糊映射建议。
-import { readWorkbookSummary } from '../data/excel.js?v=1.1';
-import { recognizeBoqImport, getRecognitionFields } from '../services/aiImportRecognitionService.js?v=1.2';
-import { boqService } from '../services/boqService.js?v=4.0';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=1.0';
-import { projectRepo } from '../data/repository.js?v=1.0';
-import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { categoryGuess } from '../utils/stats.js';
-import { normalizeImportHeader } from '../services/importMappingService.js?v=1.2';
-import { esc, toast } from '../utils/dom.js';
+import { readWorkbookSummary } from '../data/excel.js?v=6.2';
+import { recognizeBoqImport, getRecognitionFields } from '../services/aiImportRecognitionService.js?v=6.2';
+import { boqService } from '../services/boqService.js?v=6.2';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.2';
+import { projectRepo } from '../data/repository.js?v=6.2';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { categoryGuess } from '../utils/stats.js?v=6.2';
+import { normalizeImportHeader } from '../services/importMappingService.js?v=6.2';
+import { esc, toast } from '../utils/dom.js?v=6.2';
 
 const state = {
   targetType: 'project_boq', projectId: '', fileName: '', sheets: [], sheetIndex: -1,
@@ -20,7 +20,7 @@ export function normalizeWizardStep(step, { recognition, hasSheet } = {}) {
   return step;
 }
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app.state.routeParams || {};
   const targetType = params.targetType === 'boq_library' ? 'boq_library' : 'project_boq';
   const requestedProjectId = params.projectId || window.__app.state.currentProjectId || '';
@@ -39,33 +39,41 @@ export async function render() {
     state.projectId = projects[0]?.id || '';
   }
   state.step = normalizeWizardStep(state.step, { recognition: state.recognition, hasSheet: Boolean(currentSheet()) });
-  expose();
-  paint();
+  expose(workspace);
+  await paint(workspace);
 }
 
-function expose() {
+function expose(workspace) {
   window.__aiImport = {
-    chooseFile, selectSheet, runRecognition, setSource, setFixedValue, confirmField, confirmCombinedMapping, disableCombinedMapping, setAmountRule,
-    setProject: value => { state.projectId = value; paint(); },
-    setImportMode: value => { state.importMode = value; paint(); },
-    back: () => { state.step = state.step === 'confirm' ? 'sheet' : 'upload'; paint(); },
-    save: importConfirmed,
+    chooseFile: file => chooseFile(workspace, file),
+    selectSheet: index => selectSheet(workspace, index),
+    runRecognition: () => runRecognition(workspace),
+    setSource: (key, source) => setSource(workspace, key, source),
+    setFixedValue,
+    confirmField: (key, confirmed) => confirmField(workspace, key, confirmed),
+    confirmCombinedMapping: confirmed => confirmCombinedMapping(workspace, confirmed),
+    disableCombinedMapping: () => disableCombinedMapping(workspace),
+    setAmountRule: rule => setAmountRule(workspace, rule),
+    setProject: value => { state.projectId = value; paint(workspace); },
+    setImportMode: value => { state.importMode = value; paint(workspace); },
+    back: () => { state.step = state.step === 'confirm' ? 'sheet' : 'upload'; paint(workspace); },
+    save: () => importConfirmed(workspace),
     goSettings: () => window.__app.go('settings', { section: 'ai' }),
     cancel: () => window.__app.go(state.targetType === 'boq_library' ? 'boq-library' : 'importer'),
   };
 }
 
-async function paint() {
+async function paint(workspace) {
   const title = state.targetType === 'boq_library' ? 'AI 导入我的清单库' : 'AI 导入项目工程量清单';
   const projectOptions = state.targetType === 'project_boq' ? await projectRepo.all() : [];
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full p-5">
       <div class="mb-5 flex items-start gap-3"><button onclick="window.__aiImport.cancel()" class="mt-0.5 h-9 w-9 border border-slate-300 bg-white text-slate-600" title="返回"><span class="material-symbols-outlined">arrow_back</span></button><div><h1 class="text-xl font-semibold text-slate-900">${title}</h1><p class="mt-1 text-sm text-slate-500">上传任意常见 Excel，AI 只识别字段结构；逐字段确认后才会写入本机数据。</p></div></div>
       <div class="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">发送给已配置 AI 服务的内容仅包括：工作表名称、表头和前 50 行样本；不会发送整份文件或本机项目资料。</div>
       ${stepper()}
       ${state.step === 'upload' ? uploadPanel(projectOptions) : state.step === 'sheet' ? sheetPanel() : confirmPanel(projectOptions)}
     </div>`;
-  bindUpload();
+  bindUpload(workspace);
 }
 
 function stepper() {
@@ -147,26 +155,26 @@ function projectPicker(projects) { return `<label class="mt-4 block text-sm text
 function importModePicker() { return `<div class="mt-4 text-sm"><div class="mb-1 text-slate-700">导入方式</div><label class="mr-4"><input type="radio" name="aiImportMode" ${state.importMode === 'append' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('append')" /> 追加</label><label><input type="radio" name="aiImportMode" ${state.importMode === 'replace' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('replace')" /> 覆盖当前清单</label></div>`; }
 function amountRulePicker() { return `<label class="mt-4 block text-sm text-slate-700">金额规则<select onchange="window.__aiImport.setAmountRule(this.value)" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2"><option value="calculated" ${state.amountRule === 'calculated' ? 'selected' : ''}>数量 × 综合单价</option><option value="sourceAmount" ${state.amountRule === 'sourceAmount' ? 'selected' : ''}>使用 Excel 合价</option><option value="deriveUnitPrice" ${state.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option></select></label>`; }
 
-function bindUpload() {
-  const input = document.getElementById('aiImportFile'); const zone = document.getElementById('aiImportDrop');
+function bindUpload(workspace) {
+  const input = workspace.querySelector('#aiImportFile'); const zone = workspace.querySelector('#aiImportDrop');
   if (!input || !zone) return;
-  input.onchange = () => chooseFile(input.files?.[0]);
+  input.onchange = () => chooseFile(workspace, input.files?.[0]);
   zone.ondragover = event => { event.preventDefault(); zone.classList.add('border-teal-500'); };
   zone.ondragleave = () => zone.classList.remove('border-teal-500');
-  zone.ondrop = event => { event.preventDefault(); zone.classList.remove('border-teal-500'); chooseFile(event.dataTransfer?.files?.[0]); };
+  zone.ondrop = event => { event.preventDefault(); zone.classList.remove('border-teal-500'); chooseFile(workspace, event.dataTransfer?.files?.[0]); };
 }
 
-async function chooseFile(file) {
+async function chooseFile(workspace, file) {
   if (!file) return;
   if (!/\.(xlsx|xls)$/i.test(file.name)) return toast('请选择 .xlsx 或 .xls 文件', 'error');
-  try { state.fileName = file.name; state.sheets = await readWorkbookSummary(file); state.sheetIndex = -1; state.recognition = null; state.fieldState = {}; state.combinedMapping = null; state.step = 'sheet'; await paint(); }
+  try { state.fileName = file.name; state.sheets = await readWorkbookSummary(file); state.sheetIndex = -1; state.recognition = null; state.fieldState = {}; state.combinedMapping = null; state.step = 'sheet'; await paint(workspace); }
   catch (error) { toast(`文件解析失败：${error.message}`, 'error'); }
 }
 
-function selectSheet(index) { state.sheetIndex = Number(index); paint(); }
-async function runRecognition() {
+function selectSheet(workspace, index) { state.sheetIndex = Number(index); paint(workspace); }
+async function runRecognition(workspace) {
   const sheet = currentSheet(); if (!sheet?.headers?.length || !sheet.rows.length) return toast('请选择含有可用表头和数据的工作表', 'error');
-  state.busy = true; await paint();
+  state.busy = true; await paint(workspace);
   try {
     state.recognition = await recognizeBoqImport({ targetType: state.targetType, sheetName: sheet.name, headers: sheet.headers, sampleRows: sheet.rows });
     state.fieldState = state.recognition.fields;
@@ -177,12 +185,12 @@ async function runRecognition() {
     state.step = 'confirm';
   }
   catch (error) { toast(error.message || 'AI 识别失败，请重试', 'error'); }
-  finally { state.busy = false; await paint(); }
+  finally { state.busy = false; await paint(workspace); }
 }
 
-function setSource(key, source) { const field = state.fieldState[key]; if (!field) return; state.fieldState[key] = { ...field, sourceType: source === '__fixed__' ? 'fixed' : source ? 'column' : 'none', source: source && source !== '__fixed__' ? source : '', fixedValue: source === '__fixed__' ? field.fixedValue : '', confirmed: false, autoMatched: false }; paint(); }
+function setSource(workspace, key, source) { const field = state.fieldState[key]; if (!field) return; state.fieldState[key] = { ...field, sourceType: source === '__fixed__' ? 'fixed' : source ? 'column' : 'none', source: source && source !== '__fixed__' ? source : '', fixedValue: source === '__fixed__' ? field.fixedValue : '', confirmed: false, autoMatched: false }; paint(workspace); }
 function setFixedValue(key, fixedValue) { state.fieldState[key] = { ...state.fieldState[key], fixedValue, confirmed: false, autoMatched: false }; }
-function confirmField(key, confirmed) { state.fieldState[key] = { ...state.fieldState[key], confirmed }; paint(); }
+function confirmField(workspace, key, confirmed) { state.fieldState[key] = { ...state.fieldState[key], confirmed }; paint(workspace); }
 function createCombinedMapping(meta) { return meta ? { ...meta, confirmed: meta.status === 'ready', autoMatched: meta.status === 'ready' } : null; }
 function applyCombinedFieldState(mapping) {
   ['name', 'feature'].forEach(key => {
@@ -197,22 +205,22 @@ function clearUnsafeCombinedSuggestions(source) {
     if (field?.source === source) state.fieldState[key] = { ...field, sourceType: 'none', source: '', fixedValue: '', confirmed: false, reason: '合并列没有稳定换行结构，需手动选择来源列' };
   });
 }
-function confirmCombinedMapping(confirmed) {
+function confirmCombinedMapping(workspace, confirmed) {
   if (state.combinedMapping?.status !== 'ready') return;
   state.combinedMapping.confirmed = confirmed;
   ['name', 'feature'].forEach(key => { state.fieldState[key] = { ...state.fieldState[key], confirmed }; });
-  paint();
+  paint(workspace);
 }
-function disableCombinedMapping() {
+function disableCombinedMapping(workspace) {
   if (!state.combinedMapping) return;
   ['name', 'feature'].forEach(key => {
     const field = state.fieldState[key];
     state.fieldState[key] = { ...field, sourceType: 'none', source: '', fixedValue: '', transform: '', confirmed: false, confidence: 'low', reason: '请手动选择独立来源列，或将项目特征设为不导入' };
   });
   state.combinedMapping = null;
-  paint();
+  paint(workspace);
 }
-function setAmountRule(amountRule) { state.amountRule = amountRule; paint(); }
+function setAmountRule(workspace, amountRule) { state.amountRule = amountRule; paint(workspace); }
 function emptyField(def) { return { key: def.key, label: def.label, required: Boolean(def.required), sourceType: 'none', source: '', fixedValue: '', confidence: 'low', reason: '未识别', confirmed: false }; }
 function currentSheet() { return state.sheets[state.sheetIndex] || null; }
 
@@ -257,10 +265,10 @@ export function splitImportedNameFeature(name, feature, { combined = false } = {
   };
 }
 
-async function importConfirmed() {
+async function importConfirmed(workspace) {
   if (!canImport()) return toast('请完成所有字段确认并补齐必填字段', 'error');
   const rows = currentSheet().rows;
-  state.busy = true; await paint();
+  state.busy = true; await paint(workspace);
   try {
     if (state.targetType === 'boq_library') {
       const result = await boqLibraryService.importRows(rows.map(row => { const split = mappedNameFeature(row); return { major: mappedValue(row, 'major'), code: mappedValue(row, 'code'), name: split.name, feature: split.feature, unit: mappedValue(row, 'unit'), defaultQty: Number(mappedValue(row, 'defaultQty')) || 0, scope: mappedValue(row, 'scope'), structureGroup: mappedValue(row, 'structureGroup'), quotaRefs: mappedValue(row, 'quotaRefs'), source: mappedValue(row, 'source'), version: mappedValue(row, 'version'), note: mappedValue(row, 'note') }; }));
@@ -271,6 +279,7 @@ async function importConfirmed() {
     if (!lines.length) throw new Error('没有可导入的有效清单行');
     const result = await boqService.importLines(state.projectId, lines, { mode: state.importMode });
     await dataEngineService.ingestBOQ(state.projectId, { sourceType: 'ai_excel_import', sourceId: state.fileName });
+    if (workspace.isInvalidated) return;
     window.__app.state.currentProjectId = state.projectId;
     toast(`项目清单导入完成：成功 ${result.success} 条，缺单价 ${result.missingPrice} 条`, 'success');
     window.__app.go('boq', { projectId: state.projectId, imported: true });

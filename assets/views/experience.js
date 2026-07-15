@@ -1,9 +1,9 @@
 // 复盘笔记与个人经验库
-import { projectRepo, boqRepo, versionRepo, experienceSessionRepo } from '../data/repository.js?v=3.9';
-import { hasMissingPrice } from '../utils/costing.js?v=3.9';
-import { experienceService } from '../services/experienceService.js?v=4.5';
-import { indicatorService } from '../services/indicatorService.js?v=3.9';
-import { esc, fmt, openModal, closeModal, toast } from '../utils/dom.js';
+import { projectRepo, boqRepo, versionRepo, experienceSessionRepo } from '../data/repository.js?v=6.2';
+import { hasMissingPrice } from '../utils/costing.js?v=6.2';
+import { experienceService } from '../services/experienceService.js?v=6.2';
+import { indicatorService } from '../services/indicatorService.js?v=6.2';
+import { esc, fmt, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
 
 const experienceState = {
   keyword: '',
@@ -31,7 +31,7 @@ const experienceState = {
   caseSort: 'similarity',
 };
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
   if (params.keyword != null) experienceState.keyword = params.keyword;
   if (params.selectedId) experienceState.selectedId = params.selectedId;
@@ -60,7 +60,7 @@ export async function render() {
   const projectRows = buildReviewProjectRows(projects, boq, versions, sessions, kb.items);
   const visibleProjects = filterReviewProjects(projectRows);
 
-  document.getElementById('workspace').innerHTML = `
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-3">
       <section class="card p-4 shrink-0">
         <div class="flex flex-col lg:flex-row lg:items-center gap-4">
@@ -120,8 +120,9 @@ export async function render() {
       </section>
     </div>
   `;
-  bindExperiencePage(projects);
-  bindReviewWorkspace(projects, sessions, kb.items, projectRows, currentProject, benchmark);
+  const document = scopedDom(workspace);
+  bindExperiencePage(projects, document);
+  bindReviewWorkspace(projects, sessions, kb.items, projectRows, currentProject, benchmark, document);
 }
 
 function byUpdatedDesc(a, b) {
@@ -347,7 +348,7 @@ function benchmarkDetailPanel(benchmark) {
   return `<div class="space-y-4 text-sm"><div class="grid grid-cols-2 gap-2">${summaryMetric('同类案例', benchmark.sampleCount ? `${fmt(benchmark.sampleCount)} 个` : '样本不足')}${summaryMetric('可信度', benchmark.confidence || '暂无资料')}${summaryMetric('参考指标', total?.label || '总造价')}${summaryMetric('当前值', total?.value ? fmt(total.value) : '暂无资料')}</div><div class="rounded border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">${esc(benchmark.conclusion || '当前可用案例不足，仅供参考。')}</div>${benchmark.deviations?.length ? `<div><div class="font-medium text-slate-800">成本构成偏差</div><div class="mt-2 space-y-2">${benchmark.deviations.slice(0, 5).map(item => `<div class="flex justify-between gap-3 rounded border border-slate-200 bg-white px-3 py-2 text-xs"><span>${esc(item.category)}</span><span class="tabular-nums ${item.delta >= 0 ? 'text-rose-700' : 'text-teal-700'}">${item.delta >= 0 ? '+' : ''}${fmt(item.delta)}</span></div>`).join('')}</div></div>` : ''}</div>`;
 }
 
-function bindReviewWorkspace(projects, sessions, cards = [], projectRows = [], currentProject = null, benchmark = null) {
+function bindReviewWorkspace(projects, sessions, cards = [], projectRows = [], currentProject = null, benchmark = null, document = globalThis.document) {
   document.querySelectorAll('details').forEach(details => {
     details.setAttribute('aria-expanded', String(details.open));
     details.addEventListener('toggle', () => details.setAttribute('aria-expanded', String(details.open)));
@@ -610,13 +611,13 @@ function renderReview(session, draft = null) {
   };
 }
 
-function bindExperiencePage(projects) {
-  bindInput('expKw', value => { experienceState.keyword = value; renderDebounced(); });
-  bindSelect('expStatus', value => { experienceState.status = value; render(); });
-  bindSelect('expProjectType', value => { experienceState.projectType = value; render(); });
-  bindSelect('expProcessType', value => { experienceState.processType = value; render(); });
-  bindSelect('expCostCategory', value => { experienceState.costCategory = value; render(); });
-  bindSelect('expExpired', value => { experienceState.expired = value; render(); });
+function bindExperiencePage(projects, document = globalThis.document) {
+  bindInput('expKw', value => { experienceState.keyword = value; renderDebounced(); }, document);
+  bindSelect('expStatus', value => { experienceState.status = value; render(); }, document);
+  bindSelect('expProjectType', value => { experienceState.projectType = value; render(); }, document);
+  bindSelect('expProcessType', value => { experienceState.processType = value; render(); }, document);
+  bindSelect('expCostCategory', value => { experienceState.costCategory = value; render(); }, document);
+  bindSelect('expExpired', value => { experienceState.expired = value; render(); }, document);
   document.getElementById('expResetFilters')?.addEventListener('click', () => {
     Object.assign(experienceState, { keyword: '', status: '', projectType: '', processType: '', costCategory: '', expired: '' });
     render();
@@ -941,11 +942,11 @@ function emptyState(text) {
   return `<div class="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-400">${text}</div>`;
 }
 
-function bindInput(id, fn) {
+function bindInput(id, fn, document = globalThis.document) {
   document.getElementById(id)?.addEventListener('input', e => fn(e.target.value));
 }
 
-function bindSelect(id, fn) {
+function bindSelect(id, fn, document = globalThis.document) {
   document.getElementById(id)?.addEventListener('change', e => fn(e.target.value));
 }
 

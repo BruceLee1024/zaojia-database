@@ -12,6 +12,7 @@
 <script src="../assets/vendor/xlsx/xlsx.full.min.js"></script>
 <script src="../assets/vendor/chartjs/chart.umd.min.js"></script>
 <script src="../assets/vendor/idb-keyval/idb-keyval.umd.js"></script>
+<script src="../assets/vendor/fflate/fflate.min.js"></script>
 
 <style>
   :root {
@@ -166,6 +167,21 @@
     .ai-drawer { width: min(360px, calc(100vw - 24px)); }
   }
   @media (max-width: 640px) {
+    .app-shell > aside { width: 64px !important; }
+    .app-shell > aside > div:first-child { padding: 12px 10px; }
+    .app-shell > aside > div:first-child .w-11 { width: 42px; height: 42px; }
+    .app-shell > aside > div:first-child .w-11 + div,
+    .app-shell > aside > div:first-child .grid,
+    .app-shell > aside > div:last-child,
+    .app-shell .nav-section-title,
+    .app-shell .nav-item > span.flex-1,
+    .app-shell .nav-item > .rounded-full { display: none; }
+    .app-shell #nav { padding: 10px 7px; }
+    .app-shell .nav-item { justify-content: center; padding: 10px 6px; }
+    .app-shell > div > header { padding-left: 8px; padding-right: 8px; }
+    .app-shell #workspace { padding: 8px; }
+    .app-shell #aiOpenButton { width: 36px; padding-left: 0; padding-right: 0; justify-content: center; }
+    .app-shell #aiOpenButton > span:last-child { display: none; }
     .review-workspace [data-review-save-next],
     .review-workspace [data-review-save-draft],
     .review-workspace [data-review-next],
@@ -295,6 +311,6 @@
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="../app.js?v=5.41"></script>
+<script type="module" src="../app.js?v=6.2"></script>
 </body>
 </html>

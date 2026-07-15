@@ -1,14 +1,17 @@
 // 存储适配层：默认 IndexedDB，用户授权后可镜像并读写本地文件夹 JSON。
-import { idb } from './idb-bridge.js?v=3.9';
+import { idb } from './idb-bridge.js?v=6.2';
 
 const STORAGE_MODE_KEY = '__costdb_storage_mode';
 const DIRECTORY_HANDLE_KEY = '__costdb_directory_handle';
 const PENDING_SYNC_KEY = 'costdb_folder_pending_sync';
 const STORE_DIR = 'stores';
 const BACKUP_DIR = 'backups';
+const ATTACHMENT_DIR = 'attachments';
 const MANIFEST_FILE = 'manifest.json';
+const ATTACHMENT_KEY_PREFIX = '__costdb_attachment:';
 
-let writeQueue = Promise.resolve();
+let folderMutationQueue = Promise.resolve();
+let folderMirrorSuspension = 0;
 
 export function isLocalFolderSupported() {
   return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function';
@@ -34,13 +37,14 @@ export async function storageGet(store) {
 
 export async function storageSet(store, value) {
   await idb.set(store, value);
+  if (folderMirrorSuspension > 0) return;
   if (await getStorageMode() !== 'folder') return;
   const handle = await getStoredDirectoryHandle();
   if (!handle || !(await hasPermission(handle, 'readwrite'))) {
     markPendingSync(true);
     return;
   }
-  writeQueue = writeQueue.then(async () => {
+  return enqueueFolderMutation(async () => {
     try {
       await writeStoreToDirectory(handle, store, value);
       await updateManifest(handle, [store]);
@@ -50,7 +54,108 @@ export async function storageSet(store, value) {
       console.error(`[storage] write folder store failed: ${store}`, err);
     }
   });
-  return writeQueue;
+}
+
+export async function storageGetCache(store) {
+  return await idb.get(store);
+}
+
+export async function withFolderMirrorSuspended(operation) {
+  folderMirrorSuspension += 1;
+  try { return await operation(); }
+  finally { folderMirrorSuspension -= 1; }
+}
+
+// 备份恢复/清理专用：文件夹模式下必须同时写成 store、manifest 和 IDB，任一失败即回滚并向上抛出。
+// 普通 CRUD 继续使用 storageSet 的最终一致/待同步语义。
+export async function storageSetStrict(store, value) {
+  return enqueueFolderMutation(async () => {
+    const previousIdb = await idb.get(store);
+    if (await getStorageMode() !== 'folder') {
+      await idb.set(store, value);
+      return;
+    }
+    const handle = await getStoredDirectoryHandle();
+    if (!handle || !(await hasPermission(handle, 'readwrite'))) {
+      markPendingSync(true);
+      throw strictStorageError('STORAGE_STRICT_WRITE_FAILED', '本地数据文件夹未授权读写。');
+    }
+    const storesDir = await handle.getDirectoryHandle(STORE_DIR, { create: true });
+    const previousStoreFile = await readOptionalFile(storesDir, `${store}.json`);
+    const previousManifestFile = await readOptionalFile(handle, MANIFEST_FILE);
+    try {
+      await writeStoreToDirectory(handle, store, value);
+      await updateManifest(handle, [store]);
+      await idb.set(store, value);
+      markPendingSync(false);
+    } catch (cause) {
+      markPendingSync(true);
+      try {
+        await restoreOptionalFile(storesDir, `${store}.json`, previousStoreFile);
+        await restoreOptionalFile(handle, MANIFEST_FILE, previousManifestFile);
+        if (previousIdb === undefined) await idb.del(store);
+        else await idb.set(store, previousIdb);
+      } catch (rollbackCause) {
+        throw Object.assign(strictStorageError('STORAGE_STRICT_RECOVERY_PARTIAL', '严格写入失败，且文件夹与浏览器镜像未能完全恢复。'), { cause, rollbackCause });
+      }
+      throw Object.assign(strictStorageError('STORAGE_STRICT_WRITE_FAILED', '严格写入失败，原数据已恢复。'), { cause });
+    }
+  });
+}
+
+export async function storageSetAttachment(meta, blob) {
+  const key = attachmentStorageKey(meta);
+  const handle = await attachmentWritableFolderHandle();
+  await idb.set(key, blob);
+  if (!handle) return;
+  try {
+    await enqueueFolderMutation(async () => {
+      const { directory, fileName } = await attachmentFileTarget(handle, meta, true);
+      const fileHandle = await directory.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      await updateAttachmentManifest(handle, meta, false);
+    });
+  } catch (error) {
+    await idb.del(key);
+    throw normalizeAttachmentFolderError(error);
+  }
+}
+
+export async function storageGetAttachment(meta) {
+  const key = attachmentStorageKey(meta);
+  if (await getStorageMode() === 'folder') {
+    const handle = await getStoredDirectoryHandle();
+    if (handle && await hasPermission(handle, 'read')) {
+      try {
+        const { directory, fileName } = await attachmentFileTarget(handle, meta, false);
+        const fileHandle = await directory.getFileHandle(fileName);
+        const file = await fileHandle.getFile();
+        if (file?.size) return file;
+      } catch (error) {
+        if (error?.name !== 'NotFoundError') console.warn('[storage] read folder attachment failed', error);
+      }
+    }
+  }
+  return await idb.get(key) || null;
+}
+
+export async function storageRemoveAttachment(meta) {
+  const key = attachmentStorageKey(meta);
+  const handle = await attachmentWritableFolderHandle();
+  if (handle) {
+    await enqueueFolderMutation(async () => {
+      try {
+        const { directory, fileName } = await attachmentFileTarget(handle, meta, false);
+        await directory.removeEntry(fileName);
+      } catch (error) {
+        if (error?.name !== 'NotFoundError') throw normalizeAttachmentFolderError(error);
+      }
+      await updateAttachmentManifest(handle, meta, true);
+    });
+  }
+  await idb.del(key);
 }
 
 export async function getStorageStatus() {
@@ -107,6 +212,10 @@ export async function switchToBrowserStorage() {
 }
 
 export async function writeStoresToDirectory(rootHandle, snapshot, options = {}) {
+  return enqueueFolderMutation(() => writeStoresToDirectoryNow(rootHandle, snapshot, options));
+}
+
+async function writeStoresToDirectoryNow(rootHandle, snapshot, options = {}) {
   await ensureFolderLayout(rootHandle);
   const stores = Object.keys(snapshot).filter(key => Array.isArray(snapshot[key]));
   if (options.backupLabel) {
@@ -117,6 +226,12 @@ export async function writeStoresToDirectory(rootHandle, snapshot, options = {})
     await writeStoreToDirectory(rootHandle, store, snapshot[store]);
   }
   await writeManifest(rootHandle, stores);
+}
+
+function enqueueFolderMutation(operation) {
+  const queued = folderMutationQueue.catch(() => {}).then(operation);
+  folderMutationQueue = queued.catch(() => {});
+  return queued;
 }
 
 export async function readStoreFromDirectory(rootHandle, store) {
@@ -149,38 +264,108 @@ async function ensureFolderLayout(rootHandle) {
   await rootHandle.getDirectoryHandle(BACKUP_DIR, { create: true });
 }
 
-async function updateManifest(rootHandle, changedStores) {
-  let manifest = {};
-  try {
-    const fileHandle = await rootHandle.getFileHandle(MANIFEST_FILE);
-    const text = await (await fileHandle.getFile()).text();
-    manifest = text.trim() ? JSON.parse(text) : {};
-  } catch (err) {
-    if (err?.name !== 'NotFoundError') throw err;
+function attachmentStorageKey(meta) {
+  const id = safePathSegment(meta?.id);
+  if (!id) throw new Error('附件 ID 无效。');
+  return `${ATTACHMENT_KEY_PREFIX}${id}`;
+}
+
+async function attachmentWritableFolderHandle() {
+  if (await getStorageMode() !== 'folder') return null;
+  const handle = await getStoredDirectoryHandle();
+  if (!handle || !(await hasPermission(handle, 'readwrite'))) {
+    markPendingSync(true);
+    throw attachmentFolderPermissionError();
   }
+  return handle;
+}
+
+function normalizeAttachmentFolderError(error) {
+  if (error?.code === 'ATTACHMENT_FOLDER_PERMISSION') return error;
+  if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') return attachmentFolderPermissionError();
+  return error;
+}
+
+function attachmentFolderPermissionError() {
+  return Object.assign(new Error('本地数据文件夹未授权读写，请先在设置中重新连接。'), {
+    code: 'ATTACHMENT_FOLDER_PERMISSION',
+  });
+}
+
+async function attachmentFileTarget(rootHandle, meta, create) {
+  const resourceId = safePathSegment(meta?.resourceId);
+  const id = safePathSegment(meta?.id);
+  const safeFileName = safeAttachmentFileName(meta?.safeFileName || meta?.fileName);
+  if (!resourceId || !id || !safeFileName) throw new Error('附件存储路径无效。');
+  const attachments = await rootHandle.getDirectoryHandle(ATTACHMENT_DIR, { create });
+  const directory = await attachments.getDirectoryHandle(resourceId, { create });
+  return { directory, fileName: `${id}-${safeFileName}` };
+}
+
+function safePathSegment(value) {
+  const text = String(value || '');
+  return /^[a-zA-Z0-9_-]+$/.test(text) ? text : '';
+}
+
+function safeAttachmentFileName(value) {
+  const text = String(value || '');
+  return text && !/[\\/]/.test(text) && !text.includes('..') ? text : '';
+}
+
+async function updateManifest(rootHandle, changedStores) {
+  const manifest = await readManifest(rootHandle);
   const stores = { ...(manifest.stores || {}) };
   for (const store of changedStores) {
     stores[store] = { file: `${STORE_DIR}/${store}.json`, revision: Date.now() };
   }
-  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(Object.keys(stores), stores));
+  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(Object.keys(stores), stores, manifest.attachments));
 }
 
 async function writeManifest(rootHandle, storeNames) {
+  const manifest = await readManifest(rootHandle);
   const stores = {};
   for (const store of storeNames) {
     stores[store] = { file: `${STORE_DIR}/${store}.json`, revision: Date.now() };
   }
-  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(storeNames, stores));
+  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(storeNames, stores, manifest.attachments));
 }
 
-function buildManifest(storeNames, stores) {
+async function updateAttachmentManifest(rootHandle, meta, remove) {
+  const manifest = await readManifest(rootHandle);
+  const attachments = { ...(manifest.attachments || {}) };
+  if (remove) delete attachments[meta.id];
+  else attachments[meta.id] = {
+    path: `attachments/${meta.resourceId}/${meta.id}-${meta.safeFileName}`,
+    resourceId: meta.resourceId,
+    size: meta.size,
+    mime: meta.mimeType,
+    sha256: meta.sha256,
+    revision: Date.now(),
+  };
+  const stores = { ...(manifest.stores || {}) };
+  await writeJsonFile(rootHandle, MANIFEST_FILE, buildManifest(Object.keys(stores), stores, attachments));
+}
+
+async function readManifest(rootHandle) {
+  try {
+    const fileHandle = await rootHandle.getFileHandle(MANIFEST_FILE);
+    const text = await (await fileHandle.getFile()).text();
+    return text.trim() ? JSON.parse(text) : {};
+  } catch (err) {
+    if (err?.name === 'NotFoundError') return {};
+    throw err;
+  }
+}
+
+function buildManifest(storeNames, stores, attachments = {}) {
   return {
     app: 'wastewater-cost-db',
-    schemaVersion: 1,
+    schemaVersion: 2,
     storage: 'local-folder-json',
     updatedAt: new Date().toISOString(),
     storeCount: storeNames.length,
     stores,
+    attachments: attachments && typeof attachments === 'object' ? attachments : {},
   };
 }
 
@@ -209,6 +394,30 @@ async function writeJsonFile(directoryHandle, name, data) {
   const writable = await fileHandle.createWritable();
   await writable.write(JSON.stringify(data, null, 2));
   await writable.close();
+}
+
+async function readOptionalFile(directoryHandle, name) {
+  try {
+    return await (await directoryHandle.getFileHandle(name)).getFile();
+  } catch (error) {
+    if (error?.name === 'NotFoundError') return null;
+    throw error;
+  }
+}
+
+async function restoreOptionalFile(directoryHandle, name, blob) {
+  if (!blob) {
+    try { await directoryHandle.removeEntry(name); }
+    catch (error) { if (error?.name !== 'NotFoundError') throw error; }
+    return;
+  }
+  const writable = await (await directoryHandle.getFileHandle(name, { create: true })).createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+function strictStorageError(code, message) {
+  return Object.assign(new Error(message), { code });
 }
 
 async function getStoredDirectoryHandle() {

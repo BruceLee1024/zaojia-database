@@ -1,9 +1,9 @@
 // 视图：造价参考
-import { indicatorService } from '../services/indicatorService.js?v=3.9';
-import { dataEngineService } from '../services/dataEngineService.js?v=4.0';
-import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=1.1';
-import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=3.9';
-import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js';
+import { indicatorService } from '../services/indicatorService.js?v=6.2';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
+import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=6.2';
+import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=6.2';
+import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js?v=6.2';
 
 const state = {
   tab: 'overview',
@@ -22,7 +22,7 @@ let cache = { indicators: [], projects: [], archived: [], benchmark: null, queue
 const chartState = { confidence: null, year: null };
 const favoriteKeys = new Set(readFavorites());
 
-export async function render() {
+export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
   if (params.keyword != null) state.keyword = params.keyword;
   if (params.selectedFamily) state.selectedFamily = params.selectedFamily;
@@ -42,8 +42,8 @@ export async function render() {
   cache.queue = (await Promise.all(state.benchmarkQueueIds.map(id => indicatorService.benchmarkProject(id)))).filter(Boolean);
   cache.estimate = await indicatorService.estimate(state.filters, state.estimate);
 
-  expose();
-  document.getElementById('workspace').innerHTML = `
+  expose(workspace);
+  workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-3">
       ${decisionHeader()}
       ${trustExplainer()}
@@ -55,7 +55,7 @@ export async function render() {
       </section>
     </div>
   `;
-  drawCharts();
+  drawCharts(workspace);
 }
 
 function trustExplainer() {
@@ -84,7 +84,7 @@ function trustTile(title, desc, icon) {
   </div>`;
 }
 
-function expose() {
+function expose(workspace) {
   window.__indicators = {
     tab: async tab => { state.tab = tab; await render(); },
     recompute: async () => { await indicatorService.recompute(scopeOptions()); toast('指标已重算', 'success'); await render(); },
@@ -99,7 +99,7 @@ function expose() {
     selectFamily: async family => { state.selectedFamily = family; await render(); },
     addEstimate: () => toast('已加入估算参考，可在快速估算中继续调整', 'success'),
     parseEstimate: async () => {
-      const text = document.getElementById('estimatePrompt')?.value || '';
+      const text = workspace.querySelector('#estimatePrompt')?.value || '';
       const result = parseEstimatePrompt(text);
       (result.suggestions || []).forEach(item => {
         if (item.field === 'area') state.estimate.area = item.suggestedValue;
@@ -1306,9 +1306,9 @@ function formatTime(s) {
   return new Date(s).toLocaleString('zh-CN', { hour12: false });
 }
 
-function drawCharts() {
+function drawCharts(workspace = document.getElementById('workspace')) {
   if (typeof Chart === 'undefined') return;
-  const yearCanvas = document.getElementById('indicatorYearTrendChart');
+  const yearCanvas = workspace.querySelector('#indicatorYearTrendChart');
   if (!yearCanvas) {
     if (chartState.year) {
       chartState.year.destroy();
