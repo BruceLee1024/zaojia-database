@@ -216,6 +216,7 @@
   .ai-composer-note { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 8px; color: #64748b; font-size: 11px; line-height: 1.35; }
   .ai-composer-note .material-symbols-outlined { font-size: 14px; color: #0f766e; flex: 0 0 auto; }
   .ai-key { padding: 1px 4px; border: 1px solid #dbe3ea; border-radius: 4px; background: #f8fafc; color: #475569; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10px; white-space: nowrap; }
+  .ai-composer-note-mobile { display: none; }
   .mobile-only { display: none; }
   .mobile-nav-sheet { display: none; }
   .mobile-card-list { display: none; }
@@ -226,7 +227,7 @@
   }
   @media (max-width: 767px) {
     html { background: var(--bg); }
-    body { overscroll-behavior: none; }
+    body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
     /* Tailwind CDN injects utility rules after this stylesheet; these visibility
        rules must win over utility classes such as `.flex` and `.grid`. */
     .mobile-only { display: flex !important; }
@@ -242,7 +243,7 @@
     .app-shell > div > header #aiOpenButton { width: 40px; padding: 0; justify-content: center; }
     .app-shell > div > header #aiOpenButton > span:last-child { display: none; }
     .app-shell > div > header #aiOpenButton + button { display: none; }
-    .app-shell #workspace { padding: 12px; padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+    .app-shell #workspace { padding: 12px; padding-bottom: calc(76px + env(safe-area-inset-bottom)); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
     .page-frame { min-height: auto; }
     .library-workbench { min-height: auto; }
     .library-toolbar { padding: 12px; }
@@ -266,23 +267,28 @@
     .boq-mobile-list { display: block !important; }
     .boq-mobile-card { display: block; width: 100%; padding: 12px 14px; text-align: left; border-bottom: 1px solid #e2e8f0; }
     .boq-mobile-card:focus-visible { outline: 2px solid #0f766e; outline-offset: -2px; }
-    .mobile-bottom-nav { position: fixed; z-index: 35; left: 0; right: 0; bottom: 0; min-height: 64px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: rgba(255,255,255,.97); border-top: 1px solid #dbe4ef; backdrop-filter: blur(12px); }
+    .mobile-bottom-nav { position: fixed; z-index: 35; left: 0; right: 0; bottom: 0; min-height: 64px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: rgba(255,255,255,.97); border-top: 1px solid #dbe4ef; box-shadow: 0 -4px 14px rgba(15,23,42,.05); backdrop-filter: blur(12px); }
     .mobile-nav-button { min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #64748b; font-size: 10px; border-radius: 8px; }
     .mobile-nav-button.active { color: #0f766e; background: #f0fdfa; font-weight: 700; }
     .mobile-nav-sheet { position: fixed; inset: 0; z-index: 60; background: rgba(15,23,42,.45); align-items: flex-end; }
     .mobile-nav-sheet.open { display: flex; }
-    .mobile-nav-sheet-panel { width: 100%; max-height: min(78dvh, 680px); overflow: auto; border-radius: 16px 16px 0 0; background: #fff; padding: 12px 16px calc(20px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 32px rgba(15,23,42,.18); }
+    .mobile-nav-sheet-panel { width: 100%; max-height: min(82dvh, 680px); overflow: auto; border-radius: 16px 16px 0 0; background: #fff; padding: 12px 16px calc(20px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 32px rgba(15,23,42,.18); }
+    .mobile-nav-sheet-panel > div:first-child { position: sticky; top: -12px; z-index: 1; margin: -12px -16px 0; padding: 12px 16px; background: #fff; border-bottom: 1px solid #f1f5f9; }
     .mobile-nav-sheet-item { min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 8px 4px; border-bottom: 1px solid #f1f5f9; color: #334155; text-align: left; width: 100%; }
     .mobile-nav-sheet-item.active { color: #0f766e; font-weight: 700; }
+    .mobile-nav-sheet-item > span:last-child { max-width: 42%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .mobile-nav-sheet-group { margin: 16px 0 6px; color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
     #modal { padding: 0; align-items: flex-end; }
     #modalPanel { max-width: none; max-height: min(92dvh, 820px); border-radius: 16px 16px 0 0; }
+    #modalPanel > div:first-child { padding: 14px 16px; }
     #modalBody { padding: 16px; }
     #modalFoot { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
     #modalFoot > button { min-height: 44px; flex: 1 1 auto; }
     body.ai-open .ai-drawer { width: 100vw; max-width: none; }
     .ai-drawer { top: 0; bottom: 0; border-left: 0; }
     .ai-composer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+    .ai-composer-note-desktop { display: none; }
+    .ai-composer-note-mobile { display: inline; }
     .ai-hint-grid, .ai-quick-tasks { grid-template-columns: 1fr; }
     .mobile-form-grid, form.grid.grid-cols-2, form.grid.grid-cols-3, form.grid.grid-cols-4 { grid-template-columns: 1fr !important; }
     .grid.grid-cols-5, .grid.grid-cols-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -298,6 +304,18 @@
     .review-workspace > div:last-child { align-items: stretch; }
     .review-workspace > div:last-child > div { width: 100%; }
     .review-workspace > div:last-child button { flex: 1 1 auto; }
+  }
+  @media (max-width: 420px) {
+    .app-shell > div > header { height: 56px; }
+    .app-shell > div > header #crumbDesc { display: none; }
+    .app-shell #workspace { padding: 10px; padding-bottom: calc(74px + env(safe-area-inset-bottom)); }
+    .library-toolbar, .library-metric-card { border-radius: 10px; }
+    .mobile-bottom-nav { padding-left: 4px; padding-right: 4px; }
+    .mobile-nav-button { font-size: 9px; }
+    .mobile-nav-sheet-panel { padding-left: 12px; padding-right: 12px; }
+    .mobile-nav-sheet-panel > div:first-child { margin-left: -12px; margin-right: -12px; padding-left: 12px; padding-right: 12px; }
+    .ai-composer { padding: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+    .ai-composer-note { margin-top: 6px; }
   }
 </style>
 </head>
@@ -435,7 +453,7 @@
         class="ai-composer-input w-full border border-gray-300 rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:border-teal-600" aria-label="向 AI 造价工作副驾提问"></textarea>
       <button onclick="window.__app.sendAI()" class="ai-composer-send px-3 text-sm brand-bg text-white" aria-label="发送给 AI"><span class="material-symbols-outlined text-[17px] leading-none" aria-hidden="true">arrow_upward</span><span>发送</span></button>
     </div>
-    <div class="ai-composer-note"><span class="material-symbols-outlined" aria-hidden="true">lock</span><span><span class="ai-key">Enter</span> 发送，<span class="ai-key">Shift + Enter</span> 换行；仅在你确认后外发去标识化资料。</span></div>
+    <div class="ai-composer-note"><span class="material-symbols-outlined" aria-hidden="true">lock</span><span class="ai-composer-note-desktop"><span class="ai-key">Enter</span> 发送，<span class="ai-key">Shift + Enter</span> 换行；仅在你确认后外发去标识化资料。</span><span class="ai-composer-note-mobile">本地优先；仅在你确认后外发去标识化资料。</span></div>
   </div>
 </div>
 
