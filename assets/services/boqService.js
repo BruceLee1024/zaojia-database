@@ -66,7 +66,9 @@ export const boqService = {
     if (!resource || resource.resourceType !== 'equipment') throw new Error('只能将设备加入项目');
     assertResourceAvailableForNewUse(resource);
     if (!price || price.resourceId !== resourceId) throw new Error('设备价格不存在或不属于当前设备');
-    assertPriceUsableForCosting(price, resource, { context: 'equipment' });
+    assertPriceUsableForCosting(price, resource, {
+      context: 'equipment', pricingContext: { projectId: project.id, region: project.pricingRegion, asOf: project.pricingDate },
+    });
     const quantity = Number(qty);
     if (!Number.isFinite(quantity) || quantity < 0) throw new Error('设备数量不能为负数');
     if (installQuotaId && !installQuota) throw new Error('安装定额不存在');

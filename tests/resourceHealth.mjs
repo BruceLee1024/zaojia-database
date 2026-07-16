@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 export async function testResourceHealth() {
-  const { selectCurrentResourcePrice } = await import('../assets/services/resourcePriceService.js?v=test-health');
+  const { selectCurrentResourcePrice, selectUsableResourcePrice } = await import('../assets/services/resourcePriceService.js?v=test-health');
   const { getUsageComparisonReasons } = await import('../assets/services/quotaResourceService.js?v=test-health');
   const { buildResourceHealth, selectResourcePriceForHealth } = await import('../assets/services/resourceHealthService.js?v=test-health');
   const { healthResourceRouteParams, resourceHealthSection } = await import('../assets/views/dashboard.js?v=test-health');
@@ -49,6 +49,15 @@ export async function testResourceHealth() {
     { id: 'latest', resourceId: ordinaryExpired.id, priceDate: '2026-07-01', validTo: '2026-07-14' },
   ];
   assert.equal(selectCurrentResourcePrice(ordinaryExpired, ordinaryExpiredPrices, localToday).id, 'older', 'operational policy still selects a valid price');
+  const regional = { id: 'regional', resourceType: 'equipment', preferredPriceId: 'sc' };
+  const regionalPrices = [
+    { id: 'sc', resourceId: 'regional', priceDate: '2026-07-10', validFrom: '2026-07-01', region: { province: '四川', city: '成都' } },
+    { id: 'cq', resourceId: 'regional', priceDate: '2026-07-12', validFrom: '2026-07-01', region: { province: '重庆', city: '重庆' } },
+    { id: 'project', resourceId: 'regional', projectId: 'p1', priceDate: '2026-07-11', validFrom: '2026-07-01', region: { province: '四川', city: '成都' } },
+  ];
+  assert.equal(selectUsableResourcePrice(regional, regionalPrices, { asOf: localToday, region: { province: '四川', city: '成都' } }).id, 'sc');
+  assert.equal(selectUsableResourcePrice(regional, regionalPrices, { asOf: localToday, projectId: 'p1', region: { province: '四川', city: '成都' } }).id, 'project');
+  assert.equal(selectUsableResourcePrice(regional, regionalPrices, { asOf: localToday, region: { province: '江苏', city: '南京' } }), null);
   assert.equal(selectResourcePriceForHealth(ordinaryExpired, ordinaryExpiredPrices, localToday).id, 'older', 'health classification first uses the operational current price');
   const expiredHealth = buildResourceHealth({ resources: [ordinaryExpired], prices: ordinaryExpiredPrices, today: localToday });
   assert.equal(expiredHealth.missingCurrentPrice.total, 0);

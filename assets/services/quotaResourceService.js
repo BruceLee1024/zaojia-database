@@ -22,7 +22,7 @@ export const quotaResourceService = {
     if (!usage) throw new Error('定额资源用量不存在');
     const [resource, currentPrice] = await Promise.all([
       resourceRepo.findById(usage.resourceId),
-      resourcePriceService.getCurrentPrice(usage.resourceId),
+      resourcePriceService.getCurrentPrice(usage.resourceId, payloadPricingContext(usage)),
     ]);
     const staleReasons = getUsageComparisonReasons(usage, resource, currentPrice);
     const currentCost = currentPrice
@@ -50,12 +50,12 @@ export const quotaResourceService = {
     if (!usage) throw new Error('定额资源用量不存在');
     const [resource, currentPrice] = await Promise.all([
       resourceRepo.findById(usage.resourceId),
-      resourcePriceService.getCurrentPrice(usage.resourceId),
+      resourcePriceService.getCurrentPrice(usage.resourceId, payloadPricingContext(usage)),
     ]);
     if (!resource) throw new Error('材料或设备已失效，无法刷新快照');
     if (!currentPrice) throw new Error('当前材料或设备没有可用价格');
     assertResourceAvailableForNewUse(resource);
-    assertPriceUsableForCosting(currentPrice, resource, { context: 'quota' });
+    assertPriceUsableForCosting(currentPrice, resource, { context: 'quota', pricingContext: payloadPricingContext(usage) });
     return await quotaResourceUsageRepo.update(usageId, {
       resourceType: resource.resourceType,
       selectedPriceId: currentPrice.id,
@@ -77,9 +77,9 @@ export const quotaResourceService = {
     if (!Number.isFinite(lossRate) || lossRate < 0) throw new Error('损耗率不能为负数');
     const price = payload.selectedPriceId
       ? await resourcePriceRepo.findById(payload.selectedPriceId)
-      : await resourcePriceService.getCurrentPrice(payload.resourceId);
+      : await resourcePriceService.getCurrentPrice(payload.resourceId, payload.pricingContext || {});
     if (!price || price.resourceId !== payload.resourceId) throw new Error('所选价格不存在或不属于当前材料/设备');
-    assertPriceUsableForCosting(price, resource, { context: 'quota' });
+    assertPriceUsableForCosting(price, resource, { context: 'quota', pricingContext: payload.pricingContext || {} });
     const priceSnapshot = snapshotPrice(price);
     const usage = {
       id: payload.id || uid(),
@@ -130,6 +130,10 @@ function roundCost(value) {
 
 function calculateUsageCost(quantityPerUnit, lossRate, unitPrice) {
   return roundCost(Number(quantityPerUnit || 0) * (1 + Number(lossRate || 0) / 100) * Number(unitPrice || 0));
+}
+
+function payloadPricingContext(value = {}) {
+  return value.pricingContext || { asOf: value.priceSnapshot?.validFrom || '' };
 }
 
 function snapshotPrice(price = {}) {

@@ -759,6 +759,7 @@ async function testArchiveEligibility() {
   const project = { id: 'pa', name: '归档校验项目', status: 'doing', totalCost: 0 };
   assert.deepEqual(normalizeProjectMetadata({ code: ' P-01 ', client: ' 业主 ', region: ' 南京 ', stage: '投标报价', priceYear: 2026 }), {
     code: 'P-01', client: '业主', region: '南京', stage: '投标报价', priceYear: '2026',
+    pricingRegion: { province: '', city: '', district: '' }, pricingDate: '',
   });
   assert.equal(normalizeProjectMetadata({ priceYear: '20x6' }).priceYear, '');
   await repo.projectRepo.replaceAll([project]);

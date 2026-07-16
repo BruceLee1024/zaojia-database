@@ -54,7 +54,11 @@ export function buildResourceHealth({ resources = [], prices = [], attachments =
     .filter(({ resource }) => resource?.status === 'inactive'));
   const unsupportedCostingPrice = summarize(references
     .map(usage => ({ resource: resources.find(item => item.id === usage.resourceId), usage }))
-    .filter(({ resource, usage }) => resource && usage.priceSnapshot?.priceBasis && usage.priceSnapshot.priceBasis !== 'delivered'));
+    .filter(({ resource, usage }) => resource && usage.priceSnapshot?.priceBasis && (
+      (usage.id?.startsWith('project:')
+        ? !['delivered', 'installed_composite'].includes(usage.priceSnapshot.priceBasis)
+        : usage.priceSnapshot.priceBasis !== 'delivered')
+    )));
   const duplicateCode = summarizeDuplicateGroups(resources, resourceCodeIdentity, true);
   const duplicateComposite = summarizeDuplicateGroups(resources, resourceCompositeIdentity);
 

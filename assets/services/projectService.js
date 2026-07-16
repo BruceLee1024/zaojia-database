@@ -14,10 +14,20 @@ export function normalizeProjectMetadata(data = {}) {
     code: String(data.code || '').trim(),
     client: String(data.client || '').trim(),
     region: String(data.region || '').trim(),
+    pricingRegion: normalizePricingRegion(data.pricingRegion),
+    pricingDate: isLocalDate(data.pricingDate) ? data.pricingDate : '',
     stage: String(data.stage || '').trim(),
     priceYear: /^\d{4}$/.test(priceYear) ? priceYear : '',
   };
 }
+
+function normalizePricingRegion(region = {}) {
+  return {
+    province: String(region?.province || '').trim(), city: String(region?.city || '').trim(), district: String(region?.district || '').trim(),
+  };
+}
+
+function isLocalDate(value) { return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')); }
 
 export const projectService = {
   async list() { return await projectRepo.all(); },

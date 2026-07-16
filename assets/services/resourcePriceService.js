@@ -33,7 +33,7 @@ export const resourcePriceService = {
       taxRate: numberOrZero(payload.taxRate),
       region: normalizeRegion(payload.region),
       priceDate: payload.priceDate,
-      validFrom: payload.validFrom || '',
+      validFrom: payload.validFrom || payload.priceDate,
       validTo: payload.validTo || '',
       supplier: String(payload.supplier || '').trim(),
       projectId: payload.projectId || '',
@@ -56,9 +56,9 @@ export const resourcePriceService = {
     return withdrawPrice(id);
   },
 
-  async getCurrentPrice(resourceId) {
+  async getCurrentPrice(resourceId, context = {}) {
     const [resource, prices] = await Promise.all([resourceRepo.findById(resourceId), resourcePriceRepo.byResource(resourceId)]);
-    return selectCurrentResourcePrice(resource, prices, localDateKey());
+    return selectUsableResourcePrice(resource, prices, context);
   },
 };
 
@@ -69,9 +69,12 @@ export function isPriceEffective(price, today = localDateKey()) {
     && (!price.validTo || price.validTo >= today));
 }
 
-export function assertPriceUsableForCosting(price, resource, { context = 'quota' } = {}) {
+export function assertPriceUsableForCosting(price, resource, { context = 'quota', pricingContext = {} } = {}) {
   if (!price || price.resourceId !== resource?.id) throw new Error('价格记录不存在或不属于当前材料/设备');
   if (!isPriceEffective(price)) throw new Error('所选价格尚未生效、已过期或已撤回，不能用于新计价');
+  if (!isPriceContextCompatible(price, pricingContext)) {
+    throw new Error('所选价格与项目计价日期、地区或项目范围不匹配，不能用于新计价');
+  }
   if (context === 'quota' && price.priceBasis !== 'delivered') {
     throw new Error('定额资源组成只能使用到场价');
   }
@@ -99,6 +102,34 @@ async function withdrawPrice(id) {
 
 export function selectCurrentResourcePrice(resource, prices = [], today = localDateKey()) {
   return selectResourcePrice(resource, prices, today);
+}
+
+export function selectUsableResourcePrice(resource, prices = [], context = {}) {
+  if (!resource) return null;
+  const normalized = normalizePricingContext(context);
+  const candidates = prices.filter(price => price.resourceId === resource.id && isPriceEffective(price, normalized.asOf));
+  const projectScoped = normalized.projectId ? candidates.filter(price => price.projectId === normalized.projectId) : [];
+  const projectCandidates = projectScoped.length ? projectScoped : candidates.filter(price => !price.projectId);
+  const compatible = projectCandidates.filter(price => isPriceContextCompatible(price, normalized));
+  const preferred = compatible.find(price => price.id === resource.preferredPriceId);
+  return preferred || compatible.sort((a, b) => regionScore(b, normalized.region) - regionScore(a, normalized.region) || comparePriceDate(b, a))[0] || null;
+}
+
+export function normalizePricingContext(context = {}) {
+  return {
+    asOf: context.asOf || context.pricingDate || localDateKey(),
+    projectId: String(context.projectId || '').trim(),
+    usage: context.usage || '',
+    region: normalizeRegion(context.region || context.pricingRegion),
+  };
+}
+
+export function isPriceContextCompatible(price, context = {}) {
+  const normalized = normalizePricingContext(context);
+  if (price.projectId && price.projectId !== normalized.projectId) return false;
+  const target = normalized.region;
+  const candidate = normalizeRegion(price.region);
+  return ['province', 'city', 'district'].every(key => !target[key] || candidate[key] === target[key]);
 }
 
 export function selectResourcePrice(resource, prices = [], today = localDateKey(), { latestRegardlessOfValidity = false } = {}) {
@@ -152,6 +183,11 @@ function isDate(value) {
 
 function comparePriceDate(a, b) {
   return String(a.priceDate || '').localeCompare(String(b.priceDate || '')) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+}
+
+function regionScore(price, region) {
+  const candidate = normalizeRegion(price.region);
+  return ['province', 'city', 'district'].reduce((score, key) => score + (region[key] && candidate[key] === region[key] ? 1 : 0), 0);
 }
 
 function numberOrZero(value) {

@@ -423,6 +423,18 @@ function editForm(p) {
           <label class="block text-xs font-medium text-slate-500">价格年份
             <input id="pf_price_year" type="number" min="2000" max="2100" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm tabular-nums" value="${esc(p.priceYear || '')}" placeholder="2026" />
           </label>
+          <label class="block text-xs font-medium text-slate-500">计价省份
+            <input id="pf_price_province" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.pricingRegion?.province || '')}" placeholder="例如：四川" />
+          </label>
+          <label class="block text-xs font-medium text-slate-500">计价城市
+            <input id="pf_price_city" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.pricingRegion?.city || '')}" placeholder="例如：成都" />
+          </label>
+          <label class="block text-xs font-medium text-slate-500">计价区县
+            <input id="pf_price_district" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.pricingRegion?.district || '')}" placeholder="可选" />
+          </label>
+          <label class="block text-xs font-medium text-slate-500">计价日期
+            <input id="pf_pricing_date" type="date" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.pricingDate || '')}" />
+          </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">计价阶段
             <select id="pf_stage" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${['概算', '预算', '招标控制价', '投标报价', '结算参考'].map(stage => `<option value="${stage}" ${p.stage === stage ? 'selected' : ''}>${stage}</option>`).join('')}</select>
           </label>
@@ -469,6 +481,12 @@ function editForm(p) {
       structure: document.getElementById('pf_struct').value,
       process: document.getElementById('pf_proc').value,
       region: document.getElementById('pf_region').value.trim(),
+      pricingRegion: {
+        province: document.getElementById('pf_price_province').value.trim(),
+        city: document.getElementById('pf_price_city').value.trim(),
+        district: document.getElementById('pf_price_district').value.trim(),
+      },
+      pricingDate: document.getElementById('pf_pricing_date').value,
       priceYear: document.getElementById('pf_price_year').value.trim(),
       stage: document.getElementById('pf_stage').value,
       status: document.getElementById('pf_status').value,
