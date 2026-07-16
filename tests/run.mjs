@@ -710,7 +710,7 @@ async function testDataEngine() {
   assert.equal(dashboard.qualityScore > 0, true);
   assert.equal(dashboard.sourceSummary.archived_project > 0, true);
   assert.equal(dashboard.stageSummary['采集'] > 0, true);
-  await projectService.archive('p2');
+  await projectService.unlockForRevision('p2', '修订测试');
   assert.equal((await repo.dataFactRepo.all()).some(f => f.projectId === 'p2' && f.sourceType === 'archived_project'), false);
   assert.equal((await repo.indicatorRepo.all()).some(i => (i.sampleProjectIds || []).includes('p2')), false);
 

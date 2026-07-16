@@ -20,6 +20,7 @@ export const STORES = {
   quota_resource_usages: 'quota_resource_usages',
   resource_attachments: 'resource_attachments',
   ai_sessions: 'ai_sessions',
+  project_lifecycle_events: 'project_lifecycle_events',
 };
 
 export const dbGetAll = async store => (await storageGet(store)) || [];
@@ -192,4 +193,8 @@ export const resourceAttachmentRepo = createRepo(STORES.resource_attachments, {
 
 export const aiSessionRepo = createRepo(STORES.ai_sessions, {
   byProject: projectId => dbQuery(STORES.ai_sessions, item => item.projectId === projectId),
+});
+
+export const projectLifecycleEventRepo = createRepo(STORES.project_lifecycle_events, {
+  byProject: projectId => dbQuery(STORES.project_lifecycle_events, item => item.projectId === projectId),
 });

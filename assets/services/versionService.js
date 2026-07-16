@@ -4,6 +4,7 @@ import { uid } from '../utils/dom.js?v=6.2';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.2';
 import { dataEngineService } from './dataEngineService.js?v=6.2';
 import { groupForLine } from './boqService.js?v=6.2';
+import { assertProjectEditableById } from './projectLockService.js?v=6.2';
 
 const LINE_FIELDS = [
   'quotaItemId', 'code', 'name', 'feature', 'unit', 'qty', 'factor', 'unitPrice', 'amount', 'priceMissing', 'structureGroup',
@@ -50,6 +51,7 @@ export const versionService = {
   async restore(versionId) {
     const version = await versionRepo.findById(versionId);
     if (!version) throw new Error('版本不存在');
+    await assertProjectEditableById(version.projectId);
     const allLines = await boqRepo.all();
     const currentLines = allLines.filter(line => line.projectId === version.projectId);
     let backup = null;

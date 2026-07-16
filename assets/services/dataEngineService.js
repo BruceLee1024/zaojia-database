@@ -55,14 +55,20 @@ export const dataEngineService = {
   },
 
   async ingestArchivedProject(projectId, options = {}) {
-    const [project, lines] = await Promise.all([projectRepo.findById(projectId), boqRepo.byProject(projectId)]);
+    const [project, liveLines, snapshot] = await Promise.all([
+      projectRepo.findById(projectId), boqRepo.byProject(projectId),
+      options.versionId ? versionRepo.findById(options.versionId) : Promise.resolve(null),
+    ]);
     if (!project) throw new Error('项目不存在');
+    const versionId = options.versionId || project.archivedSnapshotVersionId || '';
+    const snapshotVersion = snapshot || (versionId ? await versionRepo.findById(versionId) : null);
+    const lines = snapshotVersion?.lines || liveLines;
     const job = await createJob('ingest_archived_project', { projectId, sourceType: 'archived_project', sourceId: projectId, stages: stageLog(['采集']) });
-    const snapshot = { ...project, lines };
+    const projectSnapshot = { ...project, lines };
     const facts = [
-      makeProjectFact(snapshot, { sourceType: 'archived_project', sourceId: projectId, projectId, jobId: job.id }),
-      ...lines.map(line => makeLineFact(line, { sourceType: 'archived_project', sourceId: projectId, projectId, jobId: job.id })),
-      ...categoryFacts(lines, { sourceType: 'archived_project', sourceId: projectId, projectId, jobId: job.id }),
+      makeProjectFact(projectSnapshot, { sourceType: 'archived_project', sourceId: projectId, projectId, versionId, jobId: job.id }),
+      ...lines.map(line => makeLineFact(line, { sourceType: 'archived_project', sourceId: projectId, projectId, versionId, jobId: job.id })),
+      ...categoryFacts(lines, { sourceType: 'archived_project', sourceId: projectId, projectId, versionId, jobId: job.id }),
     ];
     await touchJobStage(job.id, '标准化');
     await replaceFacts(facts, 'archived_project', projectId);

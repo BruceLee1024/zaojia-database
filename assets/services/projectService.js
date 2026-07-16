@@ -4,6 +4,8 @@ import { uid } from '../utils/dom.js?v=6.2';
 import { recomputeProjectCost } from './boqService.js?v=6.2';
 import { dataEngineService } from './dataEngineService.js?v=6.2';
 import { archiveEligibility } from './projectWorkflow.js?v=6.2';
+import { versionService } from './versionService.js?v=6.2';
+import { recordProjectLifecycleEvent } from './projectLockService.js?v=6.2';
 
 export function normalizeProjectMetadata(data = {}) {
   const priceYear = String(data.priceYear || '').trim();
@@ -24,6 +26,11 @@ export const projectService = {
   async save(data) {
     const obj = normalizeProjectMetadata(data);
     const current = obj.id ? await projectRepo.findById(obj.id) : null;
+    if (current?.status === 'archived') {
+      const error = new Error('已收录案例不能直接编辑。请先解锁修订。');
+      error.code = 'PROJECT_ARCHIVED_READONLY';
+      throw error;
+    }
     obj.typeKey = [obj.type, obj.scale, obj.structure].filter(Boolean).join(' / ');
     if (obj.status === 'archived') {
       const [current, lines, versions] = await Promise.all([
@@ -42,10 +49,12 @@ export const projectService = {
       }
       if (!obj.archivedAt) obj.archivedAt = new Date().toISOString();
     }
+    if (obj.id && current?.status !== 'archived' && obj.status === 'archived') {
+      await projectRepo.update(obj.id, { ...obj, status: 'doing' });
+      return await this.archive(obj.id, { snapshotName: obj.archiveSnapshotName || '' });
+    }
     if (obj.id) {
       const updated = await projectRepo.update(obj.id, obj);
-      if (updated?.status === 'archived') await dataEngineService.ingestArchivedProject(obj.id);
-      if (current?.status === 'archived' && updated?.status !== 'archived') await dataEngineService.discardProjectArtifacts(obj.id);
       return updated;
     }
     obj.id = uid();
@@ -54,6 +63,9 @@ export const projectService = {
   },
 
   async remove(id) {
+    const project = await projectRepo.findById(id);
+    if (!project) return;
+    await recordProjectLifecycleEvent(id, 'delete_requested', { name: project.name || '' });
     await projectRepo.remove(id);
     // 级联删清单
     const boq = await boqRepo.all();
@@ -63,7 +75,7 @@ export const projectService = {
     await dataEngineService.discardProjectArtifacts(id, { includeVersions: true });
   },
 
-  async archive(id) {
+  async archive(id, { snapshotName = '' } = {}) {
     const [p, lines, versions] = await Promise.all([
       projectRepo.findById(id),
       boqRepo.byProject(id),
@@ -79,12 +91,35 @@ export const projectService = {
         throw err;
       }
     }
-    p.status = p.status === 'archived' ? 'doing' : 'archived';
-    if (p.status === 'archived') p.archivedAt = new Date().toISOString();
-    await projectRepo.update(id, p);
-    if (p.status === 'archived') await dataEngineService.ingestArchivedProject(id);
-    else await dataEngineService.discardProjectArtifacts(id);
-    return p;
+    if (p.status === 'archived') return p;
+    const snapshot = await versionService.createFromCurrent(id, {
+      name: snapshotName || `案例归档快照 · ${p.name || '项目'}`,
+      note: '项目收录为案例时自动创建的不可变快照。',
+    });
+    const archivedAt = new Date().toISOString();
+    const updated = await projectRepo.update(id, {
+      status: 'archived', archivedAt, archivedSnapshotVersionId: snapshot.id,
+      revisionCount: Number(p.revisionCount || 0),
+    });
+    const event = await recordProjectLifecycleEvent(id, 'archived', { snapshotVersionId: snapshot.id, revisionCount: Number(p.revisionCount || 0) });
+    await dataEngineService.ingestArchivedProject(id, { versionId: snapshot.id });
+    return { ...updated, archivedSnapshotVersionId: snapshot.id, lifecycleEvent: event };
+  },
+
+  async unlockForRevision(id, reason = '') {
+    const project = await projectRepo.findById(id);
+    if (!project) throw new Error('项目不存在');
+    if (project.status !== 'archived') return project;
+    const revisionCount = Number(project.revisionCount || 0) + 1;
+    await dataEngineService.discardProjectArtifacts(id);
+    const updated = await projectRepo.update(id, {
+      status: 'doing', revisionCount, unlockedAt: new Date().toISOString(),
+      unlockReason: String(reason || '').trim(),
+    });
+    const event = await recordProjectLifecycleEvent(id, 'unlocked_for_revision', {
+      snapshotVersionId: project.archivedSnapshotVersionId || '', revisionCount, reason: String(reason || '').trim(),
+    });
+    return { ...updated, lifecycleEvent: event };
   },
 
   /** 项目总造价 = 清单合价汇总（不直接调用，从 boqService 走） */

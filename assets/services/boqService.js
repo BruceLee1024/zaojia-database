@@ -8,6 +8,7 @@ import { localDateKey } from '../utils/localDate.js?v=6.2';
 import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.2';
 import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.2';
 import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.2';
+import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.2';
 
 const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 
@@ -18,6 +19,7 @@ export const boqService = {
 
   /** 通过定额 id 添加一条清单 */
   async addFromQuota(projectId, quotaItemId, qty = 0) {
+    await assertProjectEditableById(projectId);
     const it = await quotaRepo.findById(quotaItemId);
     if (!it) throw new Error('定额不存在');
     const unitPrice = it.useBreakdown
@@ -60,6 +62,7 @@ export const boqService = {
       installQuotaId ? quotaRepo.findById(installQuotaId) : null,
       ]);
       if (!project) throw new Error('项目不存在');
+    assertProjectEditable(project);
     if (!resource || resource.resourceType !== 'equipment') throw new Error('只能将设备加入项目');
     assertResourceAvailableForNewUse(resource);
     if (!price || price.resourceId !== resourceId) throw new Error('设备价格不存在或不属于当前设备');
@@ -140,6 +143,7 @@ export const boqService = {
     const all = await boqRepo.all();
     const b = all.find(x => x.id === id);
     if (!b) return null;
+    await assertProjectEditableById(b.projectId);
     const updated = { ...b, ...patch };
     if ('qty' in patch || 'unitPrice' in patch || 'factor' in patch) {
       updated.amount = calculateAmount(updated.qty, updated.unitPrice, updated.factor);
@@ -155,6 +159,7 @@ export const boqService = {
     const all = await boqRepo.all();
     const b = all.find(x => x.id === id);
     if (!b) return;
+    await assertProjectEditableById(b.projectId);
     await boqRepo.remove(id);
     await recomputeProjectCost(b.projectId);
   },

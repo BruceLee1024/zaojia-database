@@ -109,11 +109,23 @@ export async function render(workspace = document.getElementById('workspace')) {
   });
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = async () => {
     const p = await projectService.get(b.dataset.edit);
+    if (p?.status === 'archived') {
+      toast('该项目已收录为案例；请先解锁修订后再编辑。', 'error');
+      return;
+    }
     if (p) editForm(p);
   });
   document.querySelectorAll('[data-archive]').forEach(b => b.onclick = async () => {
     const p = await projectService.get(b.dataset.archive);
-    if (p?.status !== 'archived' && !confirm('收录后会把当前项目作为案例，用于后续造价参考。确定收录？')) return;
+    if (p?.status === 'archived') {
+      const reason = prompt('请输入解锁修订原因。解锁后旧案例样本将撤出造价参考：');
+      if (reason == null) return;
+      const updated = await projectService.unlockForRevision(p.id, reason);
+      toast(`已解锁修订（第 ${updated.revisionCount || 1} 次），请修改后重新收录。`, 'success');
+      render();
+      return;
+    }
+    if (!confirm('收录后会创建不可变案例快照并锁定项目。确定收录？')) return;
     try {
       const updated = await projectService.archive(b.dataset.archive);
       toast('案例状态已更新，造价参考已同步');
@@ -316,7 +328,7 @@ function projectCard(summary) {
       <button data-edit="${p.id}" class="px-2.5 py-1.5 text-xs rounded border border-slate-300 hover:bg-slate-50">编辑</button>
       ${archiveBlocked
         ? `<button data-blocked="${p.id}" ${blocker?.params?.priceStatus ? `data-price-status="${blocker.params.priceStatus}"` : ''} ${blocker?.params?.riskStatus ? `data-risk-status="${blocker.params.riskStatus}"` : ''} class="px-2.5 py-1.5 text-xs rounded border border-amber-300 text-amber-700 hover:bg-amber-50" title="${esc(archiveBlockerText(eligibility))}">查看阻断</button>`
-        : `<button data-archive="${p.id}" class="px-2.5 py-1.5 text-xs rounded border border-slate-300 hover:bg-slate-50">${p.status === 'archived' ? '取消收录' : '收录案例'}</button>`}
+        : `<button data-archive="${p.id}" class="px-2.5 py-1.5 text-xs rounded border border-slate-300 hover:bg-slate-50">${p.status === 'archived' ? '解锁修订' : '收录案例'}</button>`}
       <div class="flex-1"></div>
       <button data-del="${p.id}" class="px-2.5 py-1.5 text-xs rounded border text-red-600 border-red-300 hover:bg-red-50">删除</button>
     </div>
