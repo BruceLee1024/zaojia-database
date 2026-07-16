@@ -5,6 +5,8 @@ const STORAGE_MODE_KEY = '__costdb_storage_mode';
 const DIRECTORY_HANDLE_KEY = '__costdb_directory_handle';
 const PENDING_SYNC_KEY = 'costdb_folder_pending_sync';
 const SYNC_META_KEY = 'costdb_folder_sync_meta';
+const DATA_PROFILE_KEY = '__costdb_data_profile';
+const DATA_PROFILES = new Set(['personal', 'demo']);
 const STORE_DIR = 'stores';
 const BACKUP_DIR = 'backups';
 const ATTACHMENT_DIR = 'attachments';
@@ -22,22 +24,46 @@ export async function getStorageMode() {
   return (await idb.get(STORAGE_MODE_KEY)) || 'indexeddb';
 }
 
+export function getDataProfile() {
+  const profile = localStorage.getItem(DATA_PROFILE_KEY) || 'personal';
+  return DATA_PROFILES.has(profile) ? profile : 'personal';
+}
+
+export function setDataProfile(profile) {
+  if (!DATA_PROFILES.has(profile)) throw new Error('资料库类型无效');
+  localStorage.setItem(DATA_PROFILE_KEY, profile);
+  return profile;
+}
+
+function scopedStoreKey(store) { return `__costdb_profile:${getDataProfile()}:${store}`; }
+
+async function readProfileStore(store, key = scopedStoreKey(store)) {
+  if (typeof window === 'undefined') return await idb.get(store);
+  const scoped = await idb.get(key);
+  if (scoped !== undefined && scoped !== null) return scoped;
+  if (getDataProfile() !== 'personal') return scoped;
+  const legacy = await idb.get(store);
+  if (legacy !== undefined && legacy !== null) await idb.set(key, legacy);
+  return legacy;
+}
+
 export async function storageGet(store) {
-  if (await getStorageMode() !== 'folder') return await idb.get(store);
+  const key = scopedStoreKey(store);
+  if (await getStorageMode() !== 'folder') return await readProfileStore(store, key);
   const handle = await getStoredDirectoryHandle();
-  if (!handle || !(await hasPermission(handle, 'read'))) return await idb.get(store);
+  if (!handle || !(await hasPermission(handle, 'read'))) return await readProfileStore(store, key);
   try {
     const records = await readStoreFromDirectory(handle, store);
-    if (records) await idb.set(store, records);
-    return records || await idb.get(store);
+    if (records) await idb.set(key, records);
+    return records || await readProfileStore(store, key);
   } catch (err) {
     console.warn(`[storage] read folder store failed: ${store}`, err);
-    return await idb.get(store);
+    return await readProfileStore(store, key);
   }
 }
 
 export async function storageSet(store, value) {
-  await idb.set(store, value);
+  await idb.set(typeof window === 'undefined' ? store : scopedStoreKey(store), value);
   if (folderMirrorSuspension > 0) return;
   if (await getStorageMode() !== 'folder') return;
   const handle = await getStoredDirectoryHandle();
@@ -58,7 +84,7 @@ export async function storageSet(store, value) {
 }
 
 export async function storageGetCache(store) {
-  return await idb.get(store);
+  return await readProfileStore(store);
 }
 
 export async function withFolderMirrorSuspended(operation) {
@@ -71,9 +97,10 @@ export async function withFolderMirrorSuspended(operation) {
 // 普通 CRUD 继续使用 storageSet 的最终一致/待同步语义。
 export async function storageSetStrict(store, value) {
   return enqueueFolderMutation(async () => {
-    const previousIdb = await idb.get(store);
+    const key = scopedStoreKey(store);
+    const previousIdb = await readProfileStore(store, key);
     if (await getStorageMode() !== 'folder') {
-      await idb.set(store, value);
+      await idb.set(typeof window === 'undefined' ? store : key, value);
       return;
     }
     const handle = await getStoredDirectoryHandle();
@@ -87,15 +114,15 @@ export async function storageSetStrict(store, value) {
     try {
       await writeStoreToDirectory(handle, store, value);
       await updateManifest(handle, [store]);
-      await idb.set(store, value);
+      await idb.set(typeof window === 'undefined' ? store : key, value);
       markPendingSync(false);
     } catch (cause) {
       markPendingSync(true);
       try {
         await restoreOptionalFile(storesDir, `${store}.json`, previousStoreFile);
         await restoreOptionalFile(handle, MANIFEST_FILE, previousManifestFile);
-        if (previousIdb === undefined) await idb.del(store);
-        else await idb.set(store, previousIdb);
+        if (previousIdb === undefined) await idb.del(key);
+        else await idb.set(key, previousIdb);
       } catch (rollbackCause) {
         throw Object.assign(strictStorageError('STORAGE_STRICT_RECOVERY_PARTIAL', '严格写入失败，且文件夹与浏览器镜像未能完全恢复。'), { cause, rollbackCause });
       }
@@ -164,7 +191,7 @@ export async function getStorageStatus() {
   const handle = await getStoredDirectoryHandle();
   const permission = handle ? await permissionState(handle, 'readwrite') : 'missing';
   return {
-    mode,
+    mode, profile: getDataProfile(),
     supported: isLocalFolderSupported(),
     hasHandle: Boolean(handle),
     directoryName: handle?.name || '',
@@ -269,7 +296,7 @@ async function ensureFolderLayout(rootHandle) {
 function attachmentStorageKey(meta) {
   const id = safePathSegment(meta?.id);
   if (!id) throw new Error('附件 ID 无效。');
-  return `${ATTACHMENT_KEY_PREFIX}${id}`;
+  return `${ATTACHMENT_KEY_PREFIX}${getDataProfile()}:${id}`;
 }
 
 async function attachmentWritableFolderHandle() {

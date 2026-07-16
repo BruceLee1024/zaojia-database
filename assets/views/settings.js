@@ -5,7 +5,7 @@ import { testAIConnection } from '../services/aiAssistService.js?v=6.2';
 import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
 import { experienceService } from '../services/experienceService.js?v=6.2';
 import { STORES, dbGetAll } from '../data/repository.js?v=6.2';
-import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, storageGetAttachment, storageGetCache, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder, withFolderMirrorSuspended } from '../data/storage.js?v=6.2';
+import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, setDataProfile, storageGetAttachment, storageGetCache, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder, withFolderMirrorSuspended } from '../data/storage.js?v=6.2';
 import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=6.2';
 import { ensureDemoData, removeDemoData } from '../data/demo.js?v=6.2';
 import { esc, toast, fmt, scopedDom } from '../utils/dom.js?v=6.2';
@@ -97,6 +97,7 @@ function renderStorageTab(ctx) {
       <aside class="col-span-12 xl:col-span-2 rounded-lg border border-slate-200 bg-white p-4 space-y-5">
         ${storageRailGroup('storage', '存储模式', [
           ['当前模式', storageStatus.mode === 'folder' ? '本地文件夹存储' : '本地浏览器存储', storageStatus.mode === 'folder' ? 'badge-green' : 'badge-gray'],
+          ['当前资料库', storageStatus.profile === 'demo' ? '演示资料库' : '个人资料库', storageStatus.profile === 'demo' ? 'badge-blue' : 'badge-green'],
           ['存储引擎', storageStatus.mode === 'folder' ? 'JSON 文件 + IndexedDB 镜像' : 'IndexedDB', 'badge-blue'],
           ['可用空间', storageEstimate.label, 'badge-gray'],
         ])}
@@ -158,6 +159,8 @@ function renderStorageTab(ctx) {
           </section>
 
           <div class="flex flex-wrap gap-2">
+            <button id="btnPersonalProfile" class="h-10 px-4 text-sm rounded-lg border ${storageStatus.profile === 'personal' ? 'border-teal-600 bg-teal-50 text-teal-700' : 'border-slate-300 bg-white text-slate-700'}">个人资料库</button>
+            <button id="btnDemoProfile" class="h-10 px-4 text-sm rounded-lg border ${storageStatus.profile === 'demo' ? 'border-teal-600 bg-teal-50 text-teal-700' : 'border-slate-300 bg-white text-slate-700'}">演示资料库</button>
             <button id="btnFolderActivate" class="h-10 px-4 text-sm brand-bg text-white rounded-lg inline-flex items-center gap-1.5" ${storageStatus.supported ? '' : 'disabled'}>
               <span class="material-symbols-outlined text-[17px]">folder_open</span>选择文件夹
             </button>
@@ -461,6 +464,8 @@ function bindSettingsEvents(document = globalThis.document) {
   on('btnExport', exportAll);
   on('btnExportZip', exportZip);
   on('btnFolderActivate', activateFolder);
+  on('btnPersonalProfile', () => switchDataProfile('personal'));
+  on('btnDemoProfile', () => switchDataProfile('demo'));
   on('btnFolderReconnect', reconnectFolder);
   on('btnFolderSync', syncFolder);
   on('btnBrowserStorage', useBrowserStorage);
@@ -589,6 +594,13 @@ async function activateFolder() {
   } catch (err) {
     toast(folderErrorMessage(err) || '选择文件夹失败', 'error');
   }
+}
+
+async function switchDataProfile(profile) {
+  if (!confirm(`切换到${profile === 'demo' ? '演示' : '个人'}资料库？两个资料库相互隔离，不会删除当前资料。`)) return;
+  setDataProfile(profile);
+  toast(`已切换到${profile === 'demo' ? '演示' : '个人'}资料库`, 'success');
+  location.reload();
 }
 
 async function reconnectFolder() {

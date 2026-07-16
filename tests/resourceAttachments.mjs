@@ -122,7 +122,7 @@ async function testRevokedFolderPermission(idb) {
     error => error.code === 'ATTACHMENT_FOLDER_PERMISSION',
   );
   assert.equal((await resourceAttachmentRepo.findById(saved.id)).id, saved.id);
-  assert.equal((await idb.get(`__costdb_attachment:${saved.id}`)).size, saved.size);
+  assert.equal((await idb.get(`__costdb_attachment:personal:${saved.id}`)).size, saved.size);
   assert.equal(root.read(path).size, saved.size);
 }
 
@@ -254,7 +254,7 @@ async function testHashDedupeAndOwnership() {
 async function testCompensation(idb) {
   await resourceRepo.replaceAll([{ id: 'r1' }]);
   const binaryCount = [...idb.keys()].filter(key => String(key).startsWith('__costdb_attachment:')).length;
-  idb.failNextSet('resource_attachments');
+  idb.failNextSet('__costdb_profile:personal:resource_attachments');
   await assert.rejects(
     () => resourceAttachmentService.add({ resourceId: 'r1', file: file('%PDF-rollback', 'rollback.pdf', 'application/pdf') }),
     error => error.code === 'ATTACHMENT_SAVE_FAILED',
@@ -263,7 +263,7 @@ async function testCompensation(idb) {
   assert.deepEqual(await resourceAttachmentRepo.all(), []);
 
   const saved = await resourceAttachmentService.add({ resourceId: 'r1', file: file('%PDF-remove-rollback', 'remove.pdf', 'application/pdf') });
-  idb.failNextSet('resource_attachments');
+  idb.failNextSet('__costdb_profile:personal:resource_attachments');
   await assert.rejects(
     () => resourceAttachmentService.remove(saved.id),
     error => error.code === 'ATTACHMENT_REMOVE_FAILED',
@@ -298,7 +298,7 @@ async function testMissingBlobDegradation(idb) {
   await idb.set('__costdb_storage_mode', 'indexeddb');
   await resourceRepo.replaceAll([{ id: 'r1' }]);
   const saved = await resourceAttachmentService.add({ resourceId: 'r1', file: file('%PDF-missing', 'missing.pdf', 'application/pdf') });
-  await idb.del(`__costdb_attachment:${saved.id}`);
+  await idb.del(`__costdb_attachment:personal:${saved.id}`);
   await assert.rejects(
     () => resourceAttachmentService.open(saved.id),
     error => error.code === 'ATTACHMENT_MISSING' && error.attachmentId === saved.id,
