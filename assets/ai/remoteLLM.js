@@ -13,7 +13,7 @@ export async function callLLM(text, history = [], options = {}) {
     quotaRepo.all(), projectRepo.all(), indicatorRepo.all(), boqRepo.all(), versionRepo.all(), experienceCardRepo.all(),
   ]);
   const currentProjectId = window.__app?.state?.currentProjectId;
-  const currentProject = projects.find(p => p.id === currentProjectId) || projects[0] || null;
+  const currentProject = projects.find(p => p.id === currentProjectId) || null;
   const currentLines = currentProject ? boq.filter(b => b.projectId === currentProject.id) : [];
   const categoryCost = {};
   currentLines.forEach(line => {
@@ -83,7 +83,7 @@ export async function callLLM(text, history = [], options = {}) {
     return text.toLowerCase().split(/\s+/).some(w => w.length > 1 && blob.includes(w));
   }).slice(0, 12).map(q => ({ name: q.name, unit: q.unit, price: q.priceTotal, cat: q.category }));
 
-  const remoteContext = options.anonymize === false ? ctx : sanitizeRemoteContext({ ...ctx, currentLines });
+  const remoteContext = sanitizeRemoteContext({ ...ctx, currentLines }, options.shareScope || {});
   const responseContract = `
 返回 JSON 对象，不要使用 Markdown 代码块：
 {"summary":"一句结论","sections":[{"title":"依据","content":"..."}],"evidence":[{"label":"数据依据","detail":"..."}],"risks":["..."],"nextQuestions":["..."],"confidence":"high|medium|low"}`;

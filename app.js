@@ -223,7 +223,7 @@ function exportAll() {
 async function renderStorageBadge() {
   const status = await getStorageStatus();
   const label = status.mode === 'folder'
-    ? `本地文件夹${status.connected ? '' : ' · 待授权'}`
+    ? `本地文件夹${status.pendingSync ? ' · 待同步' : status.connected ? '' : ' · 待授权'}`
     : 'IndexedDB';
   const fullLabel = status.mode === 'folder'
     ? `数据保存在本机 · ${label}`
@@ -234,6 +234,16 @@ async function renderStorageBadge() {
   if (sidebar) sidebar.textContent = label;
   if (footer) footer.textContent = status.mode === 'folder' ? '本地文件夹存储' : '浏览器本地存储';
   if (header) header.textContent = fullLabel;
+  let warning = document.getElementById('storageSyncWarning');
+  if (status.pendingSync && !warning) {
+    warning = document.createElement('button');
+    warning.id = 'storageSyncWarning'; warning.type = 'button';
+    warning.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-[70] rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-900 shadow-sm';
+    warning.textContent = '本地文件夹待同步：数据暂仅保存在浏览器。点击前往处理';
+    warning.onclick = () => go('settings', { section: 'storage' });
+    document.body.appendChild(warning);
+  }
+  if (!status.pendingSync) warning?.remove();
 }
 
 async function runGlobalSearch(keyword, { openFirst = false } = {}) {

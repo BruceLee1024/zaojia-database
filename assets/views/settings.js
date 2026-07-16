@@ -106,6 +106,8 @@ function renderStorageTab(ctx) {
         ])}
         ${storageRailGroup('sync', '最近同步', [
           ['同步状态', storageStatus.pendingSync ? '待同步' : '同步正常', storageStatus.pendingSync ? 'badge-yellow' : 'badge-green'],
+          ['上次成功', formatTime(storageStatus.syncMeta?.lastSuccessAt), 'badge-gray'],
+          ['失败原因', storageStatus.syncMeta?.error || '-', storageStatus.pendingSync ? 'badge-yellow' : 'badge-gray'],
           ['镜像缓存', '浏览器 IndexedDB', 'badge-gray'],
         ])}
       </aside>

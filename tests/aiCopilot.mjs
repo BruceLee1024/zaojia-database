@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createAiResponse, parseRemoteResponse, sanitizeRemoteContext } from '../assets/services/aiTaskService.js?v=ai-copilot-test';
+import { buildAiSharePreview, createAiResponse, parseRemoteResponse, sanitizeRemoteContext } from '../assets/services/aiTaskService.js?v=ai-copilot-test';
 import { aiSessionRepo } from '../assets/data/repository.js?v=6.3';
 import { createAiSession, listAiSessions, saveAiSessionMessage } from '../assets/services/aiSessionService.js?v=ai-copilot-test';
 
@@ -26,12 +26,16 @@ export function testAiCopilot() {
   assert.equal(fallback.source, 'remote');
 
   const context = sanitizeRemoteContext({
-    currentProject: { id: 'project-1', name: '个人污水厂项目', totalCost: 100 },
-    currentLines: [{ id: 'line-1', name: '池壁', qty: 20, unitPrice: 600 }],
+    currentProject: { id: 'project-1', name: '个人污水厂项目', client: '客户', type: '水厂', totalCost: 100 },
+    currentLines: [{ id: 'line-1', name: '池壁', feature: '项目地址', qty: 20, unitPrice: 600 }],
   });
-  assert.equal(context.currentProject.name, '当前项目');
-  assert.equal(context.currentLines[0].id, undefined);
-  assert.equal(context.currentLines[0].name, '池壁');
+  assert.equal(context.currentProject.name, undefined);
+  assert.equal(context.currentProject.client, undefined);
+  assert.equal(context.boqSummary.length, 0);
+  const withSummary = sanitizeRemoteContext({ currentProject: { name: '项目' }, currentLines: [{ name: '池壁', qty: 20, unitPrice: 600, amount: 12000 }] }, { boqSummary: true });
+  assert.equal(withSummary.boqSummary[0].name, undefined);
+  assert.equal(withSummary.boqSummary[0].amount, 12000);
+  assert.equal(buildAiSharePreview({ currentProject: { id: 'p' }, currentLines: [{ id: 'l' }] }, {}).excluded.join(' ').includes('客户'), true);
 }
 
 export async function testAiSessionPersistence() {

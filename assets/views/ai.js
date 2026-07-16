@@ -1,11 +1,11 @@
 // 视图：AI 造价工作副驾。本地规则优先；远端调用按会话授权。
 import { tryLocalCommand } from '../ai/localCommands.js?v=6.2';
 import { callLLM } from '../ai/remoteLLM.js?v=6.2';
-import { createAiResponse, parseRemoteResponse } from '../services/aiTaskService.js?v=6.2';
+import { buildAiSharePreview, createAiResponse, parseRemoteResponse } from '../services/aiTaskService.js?v=6.2';
 import { createAiSession, listAiSessions, saveAiSessionMessage } from '../services/aiSessionService.js?v=6.2';
 
 let aiReturnFocus = null;
-let remoteConsentGranted = false;
+let remoteConsentGranted = null;
 let activeSessionId = '';
 let activeProjectId = '';
 let restoring = false;
@@ -206,15 +206,17 @@ export async function send(text) {
   thinking.textContent = '正在准备远端请求，等待你的确认…';
   try {
     if (!remoteConsentGranted) {
-      const approved = confirm('本次会向你配置的模型发送去标识化的当前项目摘要、最多 30 条清单、5 个报价版本摘要、30 条指标和 8 条相关经验；不会发送 API Key，也不会自动修改资料。是否继续？');
+      const preview = buildAiSharePreview({ currentProject: window.__app?.state?.currentProjectId ? { id: window.__app.state.currentProjectId } : null }, {});
+      const approved = confirm(`本次仅向已配置模型发送匿名汇总：${preview.projectIncluded ? '当前项目汇总' : '不发送项目资料'}、指标统计；不会发送项目名称、客户、地址、编号、供应商、附件或经验正文。是否继续？`);
       if (!approved) {
         thinking.textContent = '已取消远端请求。你仍可使用本地审查、对标和资料检索。';
         return;
       }
-      remoteConsentGranted = true;
+      remoteConsentGranted = { boqSummary: approved && confirm('是否额外发送最多 30 条去名称化清单的数量、单价和合价摘要？取消则只发送汇总。') };
     }
     thinking.textContent = '远端模型正在生成…';
     const reply = await callLLM(value, await getRemoteHistory(), {
+      shareScope: remoteConsentGranted || {},
       onDelta: partial => { thinking.textContent = partial; },
     });
     const response = parseRemoteResponse(reply);

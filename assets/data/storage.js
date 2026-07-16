@@ -4,6 +4,7 @@ import { idb } from './idb-bridge.js?v=6.2';
 const STORAGE_MODE_KEY = '__costdb_storage_mode';
 const DIRECTORY_HANDLE_KEY = '__costdb_directory_handle';
 const PENDING_SYNC_KEY = 'costdb_folder_pending_sync';
+const SYNC_META_KEY = 'costdb_folder_sync_meta';
 const STORE_DIR = 'stores';
 const BACKUP_DIR = 'backups';
 const ATTACHMENT_DIR = 'attachments';
@@ -41,16 +42,16 @@ export async function storageSet(store, value) {
   if (await getStorageMode() !== 'folder') return;
   const handle = await getStoredDirectoryHandle();
   if (!handle || !(await hasPermission(handle, 'readwrite'))) {
-    markPendingSync(true);
+    markPendingSync(true, { error: '本地文件夹未授权，数据仅保存在浏览器镜像。', stores: [store] });
     return;
   }
   return enqueueFolderMutation(async () => {
     try {
       await writeStoreToDirectory(handle, store, value);
       await updateManifest(handle, [store]);
-      markPendingSync(false);
+      markPendingSync(false, { stores: [store] });
     } catch (err) {
-      markPendingSync(true);
+      markPendingSync(true, { error: String(err?.message || '写入本地文件夹失败'), stores: [store] });
       console.error(`[storage] write folder store failed: ${store}`, err);
     }
   });
@@ -170,6 +171,7 @@ export async function getStorageStatus() {
     permission,
     connected: mode === 'folder' && Boolean(handle) && permission === 'granted',
     pendingSync: localStorage.getItem(PENDING_SYNC_KEY) === 'true',
+    syncMeta: readSyncMeta(),
   };
 }
 
@@ -452,8 +454,16 @@ async function requestPermission(handle, mode) {
   return await handle.requestPermission({ mode }) === 'granted';
 }
 
-function markPendingSync(value) {
+function markPendingSync(value, meta = {}) {
   localStorage.setItem(PENDING_SYNC_KEY, value ? 'true' : 'false');
+  const previous = readSyncMeta();
+  localStorage.setItem(SYNC_META_KEY, JSON.stringify(value
+    ? { ...previous, lastErrorAt: new Date().toISOString(), error: meta.error || previous.error || '', stores: [...new Set([...(previous.stores || []), ...(meta.stores || [])])] }
+    : { lastSuccessAt: new Date().toISOString(), lastErrorAt: '', error: '', stores: meta.stores || [] }));
+}
+
+function readSyncMeta() {
+  try { return JSON.parse(localStorage.getItem(SYNC_META_KEY) || '{}') || {}; } catch { return {}; }
 }
 
 function timestampForFile() {

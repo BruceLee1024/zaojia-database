@@ -320,6 +320,11 @@
 </style>
 </head>
 <body class="overflow-hidden">
+<script>
+  if (location.protocol === 'file:') {
+    document.documentElement.innerHTML = '<head><meta charset="utf-8"><title>请通过本地服务打开</title></head><body style="margin:0;background:#f8fafc;color:#0f172a;font:16px system-ui"><main style="max-width:640px;margin:12vh auto;padding:32px;background:#fff;border:1px solid #dbe4ef;border-radius:12px"><h1 style="margin-top:0">请通过本地服务打开工作台</h1><p>当前 file:// 打开方式会阻止模块与演示资料正常加载，不能用于正式数据操作。</p><pre style="padding:14px;background:#f1f5f9;border-radius:8px;overflow:auto">cd "' + location.pathname.split('/app/')[0] + '"\npython3 -m http.server 8000</pre><p>随后访问 <a href="http://localhost:8000/app/">http://localhost:8000/app/</a>。</p></main></body>';
+  }
+</script>
 
 <div class="flex h-screen app-shell">
   <!-- 侧边栏 -->
