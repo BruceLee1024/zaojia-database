@@ -1,5 +1,5 @@
 // 项目服务
-import { projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=6.2';
+import { projectRepo, boqRepo, versionRepo, dataCandidateRepo, dataFactRepo, dataJobRepo, dataQualityReportRepo, projectLifecycleEventRepo } from '../data/repository.js?v=6.2';
 import { uid } from '../utils/dom.js?v=6.2';
 import { recomputeProjectCost } from './boqService.js?v=6.2';
 import { dataEngineService } from './dataEngineService.js?v=6.2';
@@ -75,14 +75,21 @@ export const projectService = {
   async remove(id) {
     const project = await projectRepo.findById(id);
     if (!project) return;
-    await recordProjectLifecycleEvent(id, 'delete_requested', { name: project.name || '' });
-    await projectRepo.remove(id);
-    // 级联删清单
-    const boq = await boqRepo.all();
-    await boqRepo.replaceAll(boq.filter(b => b.projectId !== id));
-    const versions = await versionRepo.all();
-    await versionRepo.replaceAll(versions.filter(v => v.projectId !== id));
-    await dataEngineService.discardProjectArtifacts(id, { includeVersions: true });
+    const snapshot = await snapshotProjectStores();
+    const event = await recordProjectLifecycleEvent(id, 'delete_requested', { name: project.name || '' });
+    try {
+      await projectRepo.replaceAll(snapshot.projects.filter(item => item.id !== id));
+      await boqRepo.replaceAll(snapshot.boq.filter(item => item.projectId !== id));
+      await versionRepo.replaceAll(snapshot.versions.filter(item => item.projectId !== id));
+      await dataEngineService.discardProjectArtifacts(id, { includeVersions: true });
+      await recordProjectLifecycleEvent(id, 'deleted', { deletionRequestId: event.id, name: project.name || '' });
+    } catch (cause) {
+      try { await restoreProjectStores(snapshot); }
+      catch (rollbackCause) {
+        throw Object.assign(new Error('删除项目失败，且原数据未能完全恢复。'), { code: 'PROJECT_DELETE_PARTIAL_RECOVERY', cause, rollbackCause });
+      }
+      throw Object.assign(new Error('删除项目失败，原数据已恢复。'), { code: 'PROJECT_DELETE_ROLLED_BACK', cause });
+    }
   },
 
   async archive(id, { snapshotName = '' } = {}) {
@@ -137,3 +144,18 @@ export const projectService = {
     return await recomputeProjectCost(id);
   },
 };
+
+async function snapshotProjectStores() {
+  const [projects, boq, versions, facts, candidates, jobs, reports, events] = await Promise.all([
+    projectRepo.all(), boqRepo.all(), versionRepo.all(), dataFactRepo.all(), dataCandidateRepo.all(), dataJobRepo.all(), dataQualityReportRepo.all(), projectLifecycleEventRepo.all(),
+  ]);
+  return { projects, boq, versions, facts, candidates, jobs, reports, events };
+}
+
+async function restoreProjectStores(snapshot) {
+  await Promise.all([
+    projectRepo.replaceAll(snapshot.projects), boqRepo.replaceAll(snapshot.boq), versionRepo.replaceAll(snapshot.versions),
+    dataFactRepo.replaceAll(snapshot.facts), dataCandidateRepo.replaceAll(snapshot.candidates), dataJobRepo.replaceAll(snapshot.jobs),
+    dataQualityReportRepo.replaceAll(snapshot.reports), projectLifecycleEventRepo.replaceAll(snapshot.events),
+  ]);
+}
