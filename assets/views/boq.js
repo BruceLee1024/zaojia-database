@@ -23,6 +23,7 @@ const boqState = {
   page: 1,
   selectedIds: new Set(),
   activeId: '',
+  detailTab: 'content',
   treeKeyword: '',
   treeGroup: '',
   detailCollapsed: localStorage.getItem('boq_detail_collapsed') === 'true',
@@ -31,43 +32,6 @@ const boqState = {
 let searchTimer = null;
 // 明细区在桌面端是主要编辑面板，不应只留给表单一小段可视空间。
 // 使用新 key，避免旧版偏小的本地偏好延续到新版布局。
-let boqDetailHeight = Number(localStorage.getItem('boq_detail_height_v2') || 430);
-const BOQ_DETAIL_MIN_HEIGHT = 300;
-
-function clampBoqDetailHeight(value) {
-  const max = Math.max(360, Math.floor(window.innerHeight * 0.7));
-  return Math.min(Math.max(value, BOQ_DETAIL_MIN_HEIGHT), max);
-}
-
-function applyBoqDetailHeight(document = globalThis.document) {
-  const detail = document.getElementById('boqDetail');
-  const body = document.getElementById('boqDetailBody');
-  if (!detail) return;
-  boqDetailHeight = clampBoqDetailHeight(boqDetailHeight);
-  detail.style.height = `${boqDetailHeight}px`;
-  if (body) body.style.maxHeight = `${Math.max(160, boqDetailHeight - 116)}px`;
-  localStorage.setItem('boq_detail_height_v2', String(boqDetailHeight));
-}
-
-function startBoqResize(e) {
-  e.preventDefault();
-  const startY = e.clientY;
-  const startHeight = boqDetailHeight;
-  document.body.style.userSelect = 'none';
-  document.body.style.cursor = 'row-resize';
-  const move = ev => {
-    boqDetailHeight = clampBoqDetailHeight(startHeight + startY - ev.clientY);
-    applyBoqDetailHeight();
-  };
-  const up = () => {
-    document.body.style.userSelect = '';
-    document.body.style.cursor = '';
-    window.removeEventListener('pointermove', move);
-    window.removeEventListener('pointerup', up);
-  };
-  window.addEventListener('pointermove', move);
-  window.addEventListener('pointerup', up);
-}
 
 export async function render(workspace = document.getElementById('workspace')) {
   const document = scopedDom(workspace);
@@ -129,7 +93,7 @@ export async function render(workspace = document.getElementById('workspace')) {
       ${boqNextBanner(workbench)}
       ${boqToolbar(selectedCount)}
 
-      <div class="boq-main-grid grid grid-cols-[300px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
+      <div class="boq-main-grid grid grid-cols-[260px_minmax(0,1fr)_380px] gap-3 flex-1 min-h-0">
         <div class="boq-desktop-tree">${projectTree(proj, boq)}</div>
         <div class="min-w-0 min-h-0 flex flex-col gap-3">
           <section class="bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden flex-1 min-h-[220px]">
@@ -146,7 +110,7 @@ export async function render(workspace = document.getElementById('workspace')) {
             </div>
             <div id="boqMobileList" class="boq-mobile-list mobile-card-list"></div>
             <div class="mobile-table overflow-auto scroll-thin flex-1 min-h-0">
-              <table class="w-full text-sm table-fixed">
+              <table class="w-full min-w-[1120px] text-sm table-fixed">
                 <thead><tr class="text-left border-b border-slate-200 bg-white sticky top-0">
                   <th class="py-3 px-3 w-10"><input id="boqSelectAll" type="checkbox" ${filteredBoq.length && filteredBoq.every(b => boqState.selectedIds.has(b.id)) ? 'checked' : ''} /></th>
                   <th class="py-3 px-2 w-10">序</th>
@@ -173,10 +137,10 @@ export async function render(workspace = document.getElementById('workspace')) {
             </div>
           </section>
 
-          <section id="boqDetail" class="card shrink-0 overflow-hidden" style="height:${boqState.detailCollapsed ? 52 : clampBoqDetailHeight(boqDetailHeight)}px">
-            ${detailPanel(activeLine, activeRecommendations, librarySource)}
-          </section>
         </div>
+        <aside id="boqDetail" class="boq-detail-inspector card min-h-0 overflow-hidden">
+          ${detailPanel(activeLine, activeRecommendations, librarySource)}
+        </aside>
       </div>
     </div>
   `;
@@ -301,7 +265,10 @@ export async function render(workspace = document.getElementById('workspace')) {
   mobileList.querySelectorAll('[data-mobile-boq-open]').forEach(button => button.onclick = () => {
     boqState.activeId = button.dataset.mobileBoqOpen;
     const line = boq.find(item => item.id === boqState.activeId);
-    if (line) openModal('清单详情', detailPanel(line, [], null));
+    if (line) {
+      openModal('清单详情', detailPanel(line, [], null));
+      bindDetailActions(line, proj);
+    }
   });
   mobileList.querySelectorAll('[data-mobile-boq-select]').forEach(input => input.onchange = event => {
     event.target.checked ? boqState.selectedIds.add(event.target.dataset.mobileBoqSelect) : boqState.selectedIds.delete(event.target.dataset.mobileBoqSelect);
@@ -310,7 +277,7 @@ export async function render(workspace = document.getElementById('workspace')) {
 
   const tbody = document.getElementById('boqList');
   tbody.innerHTML = pageRows.map((b, i) => `
-    <tr class="border-b border-slate-100 hover:bg-slate-50/80 ${b.id === boqState.activeId ? 'bg-teal-50/60' : ''}" data-id="${b.id}" draggable="true">
+    <tr class="border-b border-slate-100 hover:bg-slate-50/80 ${b.id === boqState.activeId ? 'bg-teal-50 ring-1 ring-inset ring-teal-200' : ''}" data-id="${b.id}" draggable="true">
       <td class="px-3 py-2"><input type="checkbox" data-select="${b.id}" ${boqState.selectedIds.has(b.id) ? 'checked' : ''} /></td>
       <td class="px-2 py-2 text-slate-400">${pageStart + i + 1}</td>
       <td class="px-2"><input class="w-full bg-transparent text-slate-700 border-0 px-0 py-1" value="${esc(b.code || '')}" /></td>
@@ -378,30 +345,7 @@ export async function render(workspace = document.getElementById('workspace')) {
     boqState.page = 1;
     render();
   });
-  document.getElementById('boqResize')?.addEventListener('pointerdown', startBoqResize);
-  document.getElementById('detailToggle')?.addEventListener('click', () => {
-    boqState.detailCollapsed = !boqState.detailCollapsed;
-    localStorage.setItem('boq_detail_collapsed', String(boqState.detailCollapsed));
-    render();
-  });
-  document.getElementById('detailSave')?.addEventListener('click', () => saveDetail(activeLine?.id));
-  document.getElementById('detailAiFill')?.addEventListener('click', () => showAiLineAssist(activeLine, proj));
-  document.querySelectorAll('[data-replace-quota]').forEach(btn => btn.onclick = async () => {
-    if (!activeLine) return;
-    if (!confirm('用该定额替换当前清单的名称、特征、单位和综合单价？工程量和系数会保留。')) return;
-    await boqService.replaceQuota(activeLine.id, btn.dataset.replaceQuota);
-    toast('已替换关联定额', 'success');
-    render();
-  });
-  document.getElementById('detailDelete')?.addEventListener('click', async () => {
-    if (!activeLine || !confirm('删除该清单项？')) return;
-    await boqService.remove(activeLine.id);
-    boqState.selectedIds.delete(activeLine.id);
-    boqState.activeId = '';
-    toast('已删除清单项', 'success');
-    render();
-  });
-  if (!boqState.detailCollapsed) applyBoqDetailHeight(document);
+  bindDetailActions(activeLine, proj);
 }
 
 function boqMobileCard(line, index) {
@@ -791,7 +735,9 @@ function lineRisks(line) {
 
 function riskBadges(line) {
   const risks = lineRisks(line);
-  return risks.length ? `<div class="flex flex-wrap gap-1">${risks.map(r => `<span class="badge ${r.cls}">${r.label}</span>`).join('')}</div>` : '<span class="badge badge-green">正常</span>';
+  if (!risks.length) return '<span class="badge badge-green">正常</span>';
+  const [primary, ...rest] = risks;
+  return `<div class="flex items-center gap-1 whitespace-nowrap" title="${esc(risks.map(risk => risk.label).join('、'))}"><span class="badge ${primary.cls}">${primary.label}</span>${rest.length ? `<span class="badge badge-gray">+${rest.length}</span>` : ''}</div>`;
 }
 
 function groupByCategory(lines) {
@@ -811,7 +757,9 @@ function boqMetric(label, value, suffix = '', cls = '') {
 }
 
 function detailPanel(line, recommendations = [], librarySource = null) {
-  const collapsed = boqState.detailCollapsed;
+  const collapsed = false;
+  const activeTab = ['content', 'pricing', 'relation'].includes(boqState.detailTab) ? boqState.detailTab : 'content';
+  const tabClass = key => `detail-tab inline-flex h-9 min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold ${activeTab === key ? 'bg-white text-teal-800 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'}`;
   const header = `
     <div class="px-4 py-3 border-b border-slate-200 bg-white shrink-0">
       <div class="flex items-center justify-between gap-3">
@@ -822,15 +770,12 @@ function detailPanel(line, recommendations = [], librarySource = null) {
           </div>
           <div class="mt-1 text-xs text-slate-500 truncate" title="${esc(line?.name || '')}">${line ? `${esc(line.name || '')} · ${esc(groupLabel(classifyLineGroup(line)))}` : '选择一行后查看和编辑明细'}</div>
         </div>
-        <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          <button id="detailToggle" type="button" class="inline-flex h-9 items-center gap-1 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50" aria-expanded="${!collapsed}" aria-controls="boqDetailBody"><span class="material-symbols-outlined text-[17px]">${collapsed ? 'unfold_more' : 'unfold_less'}</span>${collapsed ? '展开' : '收起'}</button>
-          ${line && !collapsed ? '<button id="detailAiFill" type="button" class="inline-flex h-9 items-center gap-1 rounded border border-teal-300 bg-teal-50 px-3 text-sm text-teal-700 hover:bg-teal-100"><span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 补全</button><button id="detailDelete" type="button" class="h-9 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">删除</button><button id="detailSave" type="button" class="inline-flex h-9 items-center gap-1 rounded brand-bg px-3 text-sm text-white"><span class="material-symbols-outlined text-[17px]">save</span>保存</button>' : ''}
-        </div>
+        <div class="shrink-0 text-right"><div class="text-[11px] text-slate-500">当前合价</div><div class="font-semibold tabular-nums text-slate-900">${line ? fmtMoney(line.amount || 0) : '-'}</div></div>
       </div>
+      ${line ? `<div class="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1" role="tablist" aria-label="清单明细分类"><button data-detail-tab="content" class="${tabClass('content')}" role="tab" aria-selected="${activeTab === 'content'}" tabindex="${activeTab === 'content' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">description</span><span class="truncate">清单内容</span></button><button data-detail-tab="pricing" class="${tabClass('pricing')}" role="tab" aria-selected="${activeTab === 'pricing'}" tabindex="${activeTab === 'pricing' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">payments</span><span class="truncate">计价归属</span></button><button data-detail-tab="relation" class="${tabClass('relation')}" role="tab" aria-selected="${activeTab === 'relation'}" tabindex="${activeTab === 'relation' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">link</span><span class="truncate">定额关联</span></button></div>` : ''}
     </div>`;
   if (!line) {
     return `<div class="h-full flex flex-col bg-white">
-      ${collapsed ? '' : resizeHandle()}
       ${header}
       <div class="flex-1 flex items-center justify-center text-center text-slate-400">
         <div>
@@ -847,12 +792,11 @@ function detailPanel(line, recommendations = [], librarySource = null) {
     return `<div class="h-full flex flex-col bg-white">${header}</div>`;
   }
   return `<div class="h-full flex flex-col bg-slate-50">
-    ${resizeHandle()}
     ${header}
 
     <div id="boqDetailBody" class="flex-1 overflow-auto scroll-thin p-4">
-      <div class="boq-detail-form-grid grid grid-cols-[360px_minmax(0,1fr)] gap-4">
-        <section class="bg-white border border-slate-200 rounded-xl p-4">
+      <div class="boq-detail-form-grid space-y-4">
+        <section data-detail-pane="pricing" class="detail-pane ${activeTab === 'pricing' ? '' : 'hidden'} bg-white border border-slate-200 rounded-xl p-4">
           <div class="mb-4 flex items-center justify-between">
             <div>
               <div class="font-medium text-slate-800">基础信息</div>
@@ -885,11 +829,11 @@ function detailPanel(line, recommendations = [], librarySource = null) {
           </div>
         </section>
 
-        <section class="bg-white border border-slate-200 rounded-xl p-4">
+        <section data-detail-pane="content" class="detail-pane ${activeTab === 'content' ? '' : 'hidden'} bg-white border border-slate-200 rounded-xl p-4">
           <div class="mb-4 flex items-center justify-between gap-3">
             <div>
               <div class="font-medium text-slate-800">清单内容</div>
-              <div class="mt-1 text-xs text-slate-500">名称、特征与定额引用</div>
+              <div class="mt-1 text-xs text-slate-500">名称与项目特征</div>
             </div>
             <div class="rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-right">
               <div class="text-[11px] text-slate-500">当前合价</div>
@@ -903,38 +847,57 @@ function detailPanel(line, recommendations = [], librarySource = null) {
             <label class="col-span-2 block text-xs font-medium text-slate-500">项目特征
               <textarea id="detailFeature" rows="4" class="mt-1 w-full resize-y rounded border border-slate-300 px-2 py-2 text-sm">${esc(line.feature || '')}</textarea>
             </label>
-            ${renderBoqResourceReference(buildBoqResourceViewModel(line))}
-            <div class="col-span-2 rounded border border-slate-200 bg-white p-3">
-              <div class="mb-2 flex items-center justify-between">
-                <div>
-                  <div class="font-medium text-slate-800">关联定额推荐</div>
-                  <div class="mt-1 text-xs text-slate-500">按名称、特征、单位和结构分组匹配，可一键替换当前清单定额。</div>
-                </div>
-                ${line.quotaItemId ? '<span class="badge badge-green">已匹配</span>' : '<span class="badge badge-yellow">未匹配</span>'}
-              </div>
-              <div class="grid grid-cols-1 xl:grid-cols-2 gap-2">
-                ${recommendations.length ? recommendations.map(item => `
-                  <button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50">
-                    <div class="truncate font-medium text-slate-800" title="${esc(item.name || '')}">${esc(item.name || '')}</div>
-                    <div class="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
-                      <span class="truncate">${esc(item.unit || '-')} · 匹配 ${Number(item.score || 0).toFixed(1)}</span>
-                      <span class="${hasMissingPrice(item.priceTotal) ? 'text-amber-700' : 'text-slate-700'}">${hasMissingPrice(item.priceTotal) ? '缺单价' : fmtMoney(item.priceTotal)}</span>
-                    </div>
-                  </button>
-                `).join('') : '<div class="col-span-2 rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}
-              </div>
-            </div>
+            <button id="detailAiFill" type="button" class="col-span-2 inline-flex h-9 items-center justify-center gap-1 rounded border border-teal-300 bg-teal-50 px-3 text-sm text-teal-700 hover:bg-teal-100"><span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 补全项目特征</button>
           </div>
+        </section>
+        <section data-detail-pane="relation" class="detail-pane ${activeTab === 'relation' ? '' : 'hidden'} bg-white border border-slate-200 rounded-xl p-4">
+          <div class="mb-3 flex items-center justify-between"><div><div class="font-medium text-slate-800">定额与资源关联</div><div class="mt-1 text-xs text-slate-500">查看价格口径，并从推荐项替换当前清单定额。</div></div>${line.quotaItemId ? '<span class="badge badge-green">已匹配</span>' : '<span class="badge badge-yellow">未匹配</span>'}</div>
+          ${renderBoqResourceReference(buildBoqResourceViewModel(line))}
+          <div class="mt-3 grid grid-cols-1 gap-2">${recommendations.length ? recommendations.map(item => `<button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50"><div class="truncate font-medium text-slate-800">${esc(item.name || '')}</div><div class="mt-1 flex justify-between text-xs text-slate-500"><span>${esc(item.unit || '-')} · 匹配 ${Number(item.score || 0).toFixed(1)}</span><span>${hasMissingPrice(item.priceTotal) ? '缺单价' : fmtMoney(item.priceTotal)}</span></div></button>`).join('') : '<div class="rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}</div>
         </section>
       </div>
     </div>
+    <div class="flex items-center justify-between gap-2 border-t border-slate-200 bg-white p-3"><button id="detailDelete" type="button" class="h-9 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">删除</button><button id="detailSave" type="button" class="inline-flex h-9 items-center gap-1 rounded brand-bg px-3 text-sm text-white"><span class="material-symbols-outlined text-[17px]">save</span>保存明细</button></div>
   </div>`;
 }
 
-function resizeHandle() {
-  return `<div id="boqResize" class="group flex h-3 shrink-0 cursor-row-resize items-center justify-center border-b border-slate-200 bg-slate-100 hover:bg-teal-50" title="拖动调整明细区高度" role="separator" aria-label="拖动调整清单明细编辑区高度">
-    <span class="h-1 w-10 rounded-full bg-slate-300 transition-colors group-hover:bg-teal-400"></span>
-  </div>`;
+function bindDetailActions(line, project) {
+  document.querySelectorAll('[data-detail-tab]').forEach(button => button.addEventListener('click', () => {
+    const tab = button.dataset.detailTab;
+    boqState.detailTab = tab;
+    document.querySelectorAll('[data-detail-tab]').forEach(item => {
+      const selected = item === button;
+      item.className = `detail-tab inline-flex h-9 min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold ${selected ? 'bg-white text-teal-800 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'}`;
+      item.setAttribute('aria-selected', String(selected));
+      item.tabIndex = selected ? 0 : -1;
+    });
+    document.querySelectorAll('[data-detail-pane]').forEach(pane => pane.classList.toggle('hidden', pane.dataset.detailPane !== tab));
+  }));
+  document.querySelectorAll('[data-detail-tab]').forEach(button => button.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = [...document.querySelectorAll('[data-detail-tab]')];
+    const offset = event.key === 'ArrowRight' ? 1 : -1;
+    const next = tabs[(tabs.indexOf(button) + offset + tabs.length) % tabs.length];
+    next?.focus();
+    next?.click();
+  }));
+  document.getElementById('detailSave')?.addEventListener('click', () => saveDetail(line?.id));
+  document.getElementById('detailAiFill')?.addEventListener('click', () => showAiLineAssist(line, project));
+  document.querySelectorAll('[data-replace-quota]').forEach(btn => btn.onclick = async () => {
+    if (!line || !confirm('用该定额替换当前清单的名称、特征、单位和综合单价？工程量和系数会保留。')) return;
+    await boqService.replaceQuota(line.id, btn.dataset.replaceQuota);
+    toast('已替换关联定额', 'success');
+    render();
+  });
+  document.getElementById('detailDelete')?.addEventListener('click', async () => {
+    if (!line || !confirm('删除该清单项？')) return;
+    await boqService.remove(line.id);
+    boqState.selectedIds.delete(line.id);
+    boqState.activeId = '';
+    toast('已删除清单项', 'success');
+    render();
+  });
 }
 
 function bindRowEvents(tr, projectId) {

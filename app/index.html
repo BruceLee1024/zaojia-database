@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>个人造价工作台 · 本地工程造价资料库</title>
+<title>工程造价工作台 · 本地工程造价资料库</title>
 
 <!-- 依赖：本地 vendor / SheetJS(Excel 解析导出) / Chart.js(图表) / idb-keyval(IndexedDB) -->
 <link href="../assets/vendor/material-symbols/material-symbols.css" rel="stylesheet" />
@@ -225,6 +225,12 @@
   .mobile-nav-sheet { display: none; }
   .mobile-card-list { display: none; }
   .mobile-scroll-hint { display: none; }
+  .boq-detail-inspector { display: flex; min-width: 0; }
+  .boq-detail-inspector > div { width: 100%; }
+  @media (max-width: 1180px) {
+    .boq-main-grid { grid-template-columns: minmax(0, 1fr) 360px !important; }
+    .boq-desktop-tree { display: none !important; }
+  }
   @media (max-width: 1100px) {
     body.ai-open .app-shell { padding-right: 0; }
     .ai-drawer { width: min(520px, calc(100vw - 24px)); }
@@ -335,20 +341,20 @@
   <aside class="desktop-sidebar bg-slate-900 text-white w-[240px] flex flex-col flex-shrink-0 border-r border-slate-800">
     <div class="px-5 py-5 border-b border-slate-800">
       <div class="flex items-center gap-3">
-        <div class="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-2xl text-teal-100">S</div>
+        <div class="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xl text-teal-100">造</div>
         <div>
-          <div class="font-semibold leading-tight">个人造价工作台</div>
-          <div class="text-[11px] text-slate-400">定额 · 报价 · 案例参考</div>
+          <div class="font-semibold leading-tight">工程造价工作台</div>
+          <div class="text-[11px] text-slate-400">清单 · 定额 · 价格 · 案例</div>
         </div>
       </div>
       <div class="mt-4 grid grid-cols-2 gap-2 text-[11px]">
         <div class="sidebar-stat px-3 py-2">
-          <div class="text-slate-500">模式</div>
-          <div class="mt-0.5 font-semibold text-teal-100">本地版</div>
+          <div class="text-slate-500">资料库</div>
+          <div id="sidebarProfileLabel" class="mt-0.5 font-semibold text-teal-100">个人资料</div>
         </div>
         <div class="sidebar-stat px-3 py-2">
-          <div class="text-slate-500">数据</div>
-          <div id="sidebarStorageLabel" class="mt-0.5 font-semibold text-teal-100">IndexedDB</div>
+          <div class="text-slate-500">存储</div>
+          <div id="sidebarStorageLabel" class="mt-0.5 font-semibold text-teal-100">浏览器本地</div>
         </div>
       </div>
     </div>

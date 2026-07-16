@@ -224,14 +224,16 @@ async function renderStorageBadge() {
   const status = await getStorageStatus();
   const label = status.mode === 'folder'
     ? `本地文件夹${status.pendingSync ? ' · 待同步' : status.connected ? '' : ' · 待授权'}`
-    : 'IndexedDB';
+    : '浏览器本地';
   const fullLabel = status.mode === 'folder'
     ? `数据保存在本机 · ${label}`
     : '数据保存在本机 · 浏览器存储';
   const sidebar = document.getElementById('sidebarStorageLabel');
+  const sidebarProfile = document.getElementById('sidebarProfileLabel');
   const footer = document.getElementById('footerStorageLabel');
   const header = document.getElementById('headerStorageLabel');
   if (sidebar) sidebar.textContent = label;
+  if (sidebarProfile) sidebarProfile.textContent = status.profile === 'demo' ? '演示资料' : '个人资料';
   if (footer) footer.textContent = status.mode === 'folder' ? '本地文件夹存储' : '浏览器本地存储';
   if (header) header.textContent = fullLabel;
   let warning = document.getElementById('storageSyncWarning');
