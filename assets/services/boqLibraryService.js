@@ -1,9 +1,9 @@
 // 独立清单库：标准清单条目维护与套用到项目
-import { boqLibraryRepo, boqRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.2';
-import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.2';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.2';
-import { uid } from '../utils/dom.js?v=6.2';
-import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.2';
+import { boqLibraryRepo, boqRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.3';
+import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.3';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
+import { uid } from '../utils/dom.js?v=6.3';
+import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.3';
 
 const now = () => new Date().toISOString();
 const clean = value => String(value ?? '').trim();

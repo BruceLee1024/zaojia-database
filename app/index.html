@@ -137,6 +137,10 @@
   .library-list-pane, .library-detail-pane { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
   .library-list-pane { min-width: 0; }
   .library-detail-pane { min-width: 0; }
+  /* 清单明细编辑：在较窄的桌面窗口中先纵向排列，避免基础字段与正文表单相互挤压。 */
+  @media (max-width: 1180px) {
+    .boq-detail-form-grid { grid-template-columns: 1fr !important; }
+  }
   @media (max-width: 1024px) {
     .library-toolbar-main { align-items: flex-start; flex-wrap: wrap; }
     .library-toolbar-actions { width: 100%; margin-left: 0; }
@@ -463,6 +467,6 @@
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="../app.js?v=6.2"></script>
+<script type="module" src="../app.js?v=6.3"></script>
 </body>
 </html>

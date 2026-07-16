@@ -1,14 +1,14 @@
 // 工程量清单服务
-import { boqRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.2';
-import { uid } from '../utils/dom.js?v=6.2';
-import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.2';
-import { calculateAmount } from '../utils/costing.js?v=6.2';
-import { hasMissingPrice } from '../utils/costing.js?v=6.2';
-import { localDateKey } from '../utils/localDate.js?v=6.2';
-import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.2';
-import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.2';
-import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.2';
-import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.2';
+import { boqRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.3';
+import { uid } from '../utils/dom.js?v=6.3';
+import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.3';
+import { calculateAmount } from '../utils/costing.js?v=6.3';
+import { hasMissingPrice } from '../utils/costing.js?v=6.3';
+import { localDateKey } from '../utils/localDate.js?v=6.3';
+import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.3';
+import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.3';
+import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.3';
+import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.3';
 
 const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 

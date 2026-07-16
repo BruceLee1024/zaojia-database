@@ -1,19 +1,19 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, resourcePriceRepo } from '../data/repository.js?v=6.2';
-import { boqService, groupForLine } from '../services/boqService.js?v=6.2';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.2';
-import { projectService } from '../services/projectService.js?v=6.2';
-import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.2';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
-import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.2';
-import { openReview } from './experience.js?v=6.2';
-import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.2';
-import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=6.2';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.2';
-import { categoryGuess } from '../utils/stats.js?v=6.2';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.2';
-import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.2';
-import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.2';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, resourcePriceRepo } from '../data/repository.js?v=6.3';
+import { boqService, groupForLine } from '../services/boqService.js?v=6.3';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.3';
+import { projectService } from '../services/projectService.js?v=6.3';
+import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.3';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.3';
+import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.3';
+import { openReview } from './experience.js?v=6.3';
+import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.3';
+import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=6.3';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
+import { categoryGuess } from '../utils/stats.js?v=6.3';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.3';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.3';
+import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.3';
 
 const BOQ_PAGE_SIZE = 500;
 const boqState = {
@@ -29,11 +29,13 @@ const boqState = {
   expandedProjectIds: new Set(),
 };
 let searchTimer = null;
-let boqDetailHeight = Number(localStorage.getItem('boq_detail_height') || 320);
-const BOQ_DETAIL_MIN_HEIGHT = 180;
+// 明细区在桌面端是主要编辑面板，不应只留给表单一小段可视空间。
+// 使用新 key，避免旧版偏小的本地偏好延续到新版布局。
+let boqDetailHeight = Number(localStorage.getItem('boq_detail_height_v2') || 430);
+const BOQ_DETAIL_MIN_HEIGHT = 300;
 
 function clampBoqDetailHeight(value) {
-  const max = Math.max(260, Math.floor(window.innerHeight * 0.7));
+  const max = Math.max(360, Math.floor(window.innerHeight * 0.7));
   return Math.min(Math.max(value, BOQ_DETAIL_MIN_HEIGHT), max);
 }
 
@@ -43,8 +45,8 @@ function applyBoqDetailHeight(document = globalThis.document) {
   if (!detail) return;
   boqDetailHeight = clampBoqDetailHeight(boqDetailHeight);
   detail.style.height = `${boqDetailHeight}px`;
-  if (body) body.style.maxHeight = `${Math.max(80, boqDetailHeight - 116)}px`;
-  localStorage.setItem('boq_detail_height', String(boqDetailHeight));
+  if (body) body.style.maxHeight = `${Math.max(160, boqDetailHeight - 116)}px`;
+  localStorage.setItem('boq_detail_height_v2', String(boqDetailHeight));
 }
 
 function startBoqResize(e) {
@@ -812,7 +814,7 @@ function detailPanel(line, recommendations = [], librarySource = null) {
   const collapsed = boqState.detailCollapsed;
   const header = `
     <div class="px-4 py-3 border-b border-slate-200 bg-white shrink-0">
-      <div class="flex items-center justify-between gap-4">
+      <div class="flex items-center justify-between gap-3">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <div class="font-semibold text-slate-800">清单明细编辑</div>
@@ -820,15 +822,15 @@ function detailPanel(line, recommendations = [], librarySource = null) {
           </div>
           <div class="mt-1 text-xs text-slate-500 truncate" title="${esc(line?.name || '')}">${line ? `${esc(line.name || '')} · ${esc(groupLabel(classifyLineGroup(line)))}` : '选择一行后查看和编辑明细'}</div>
         </div>
-        <div class="flex items-center gap-2">
-          <button id="detailToggle" class="px-3 py-1.5 text-sm rounded border border-slate-300 bg-white hover:bg-slate-50">${collapsed ? '展开明细' : '收起明细'}</button>
-          ${line && !collapsed ? '<button id="detailAiFill" class="px-3 py-1.5 text-sm rounded border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100 inline-flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 补全明细</button><button id="detailDelete" class="px-3 py-1.5 text-sm rounded border border-red-200 text-red-600 hover:bg-red-50">删除</button><button id="detailSave" class="px-3 py-1.5 text-sm rounded brand-bg text-white">保存明细</button>' : ''}
+        <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <button id="detailToggle" type="button" class="inline-flex h-9 items-center gap-1 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50" aria-expanded="${!collapsed}" aria-controls="boqDetailBody"><span class="material-symbols-outlined text-[17px]">${collapsed ? 'unfold_more' : 'unfold_less'}</span>${collapsed ? '展开' : '收起'}</button>
+          ${line && !collapsed ? '<button id="detailAiFill" type="button" class="inline-flex h-9 items-center gap-1 rounded border border-teal-300 bg-teal-50 px-3 text-sm text-teal-700 hover:bg-teal-100"><span class="material-symbols-outlined text-[16px]">auto_awesome</span>AI 补全</button><button id="detailDelete" type="button" class="h-9 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">删除</button><button id="detailSave" type="button" class="inline-flex h-9 items-center gap-1 rounded brand-bg px-3 text-sm text-white"><span class="material-symbols-outlined text-[17px]">save</span>保存</button>' : ''}
         </div>
       </div>
     </div>`;
   if (!line) {
     return `<div class="h-full flex flex-col bg-white">
-      ${collapsed ? '' : '<div id="boqResize" class="h-2 cursor-row-resize bg-slate-100 hover:bg-teal-100 border-b border-slate-200" title="拖动调整明细区高度"></div>'}
+      ${collapsed ? '' : resizeHandle()}
       ${header}
       <div class="flex-1 flex items-center justify-center text-center text-slate-400">
         <div>
@@ -845,22 +847,28 @@ function detailPanel(line, recommendations = [], librarySource = null) {
     return `<div class="h-full flex flex-col bg-white">${header}</div>`;
   }
   return `<div class="h-full flex flex-col bg-slate-50">
-    <div id="boqResize" class="h-2 cursor-row-resize bg-slate-100 hover:bg-teal-100 border-b border-slate-200 shrink-0" title="拖动调整明细区高度"></div>
+    ${resizeHandle()}
     ${header}
 
     <div id="boqDetailBody" class="flex-1 overflow-auto scroll-thin p-4">
-      <div class="grid grid-cols-[320px_minmax(0,1fr)] gap-4">
+      <div class="boq-detail-form-grid grid grid-cols-[360px_minmax(0,1fr)] gap-4">
         <section class="bg-white border border-slate-200 rounded-xl p-4">
-          <div class="mb-3 font-medium text-slate-800">基础信息</div>
-          <div class="space-y-3">
+          <div class="mb-4 flex items-center justify-between">
+            <div>
+              <div class="font-medium text-slate-800">基础信息</div>
+              <div class="mt-1 text-xs text-slate-500">计价与归属字段</div>
+            </div>
+            <span class="material-symbols-outlined text-slate-400" aria-hidden="true">tune</span>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
             <label class="block text-xs font-medium text-slate-500">项目编码
               <input id="detailCode" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(line.code || '')}" />
             </label>
             <label class="block text-xs font-medium text-slate-500">单位
               <input id="detailUnit" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(line.unit || '')}" />
             </label>
-            ${librarySource ? `<div class="rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800"><div class="font-medium">来自清单库</div><div class="mt-1">${esc(librarySource.code || '未编码')} · ${esc(librarySource.name || '')}</div></div>` : ''}
-            <label class="block text-xs font-medium text-slate-500">结构分组
+            ${librarySource ? `<div class="col-span-2 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800"><div class="font-medium">来自清单库</div><div class="mt-1 truncate" title="${esc(librarySource.name || '')}">${esc(librarySource.code || '未编码')} · ${esc(librarySource.name || '')}</div></div>` : ''}
+            <label class="col-span-2 block text-xs font-medium text-slate-500">结构分组
               <select id="detailStructureGroup" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">
                 ${structureGroups([line]).map(g => `<option value="${esc(g.id)}" ${classifyLineGroup(line) === g.id ? 'selected' : ''}>${esc(g.label)}</option>`).join('')}
               </select>
@@ -871,14 +879,23 @@ function detailPanel(line, recommendations = [], librarySource = null) {
             <label class="block text-xs font-medium text-slate-500">综合单价
               <input id="detailUnitPrice" type="number" step="0.01" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm text-right tabular-nums" value="${line.unitPrice || 0}" />
             </label>
-            <label class="block text-xs font-medium text-slate-500">调整系数
+            <label class="col-span-2 block text-xs font-medium text-slate-500">调整系数
               <input id="detailFactor" type="number" step="0.001" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm text-right tabular-nums" value="${line.factor || 1}" />
             </label>
           </div>
         </section>
 
         <section class="bg-white border border-slate-200 rounded-xl p-4">
-          <div class="mb-3 font-medium text-slate-800">清单内容</div>
+          <div class="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <div class="font-medium text-slate-800">清单内容</div>
+              <div class="mt-1 text-xs text-slate-500">名称、特征与定额引用</div>
+            </div>
+            <div class="rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-right">
+              <div class="text-[11px] text-slate-500">当前合价</div>
+              <div class="mt-0.5 font-semibold tabular-nums text-slate-900">${fmtMoney(line.amount || 0)}</div>
+            </div>
+          </div>
           <div class="grid grid-cols-2 gap-3">
             <label class="col-span-2 block text-xs font-medium text-slate-500">清单名称
               <input id="detailName" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(line.name || '')}" />
@@ -886,10 +903,6 @@ function detailPanel(line, recommendations = [], librarySource = null) {
             <label class="col-span-2 block text-xs font-medium text-slate-500">项目特征
               <textarea id="detailFeature" rows="4" class="mt-1 w-full resize-y rounded border border-slate-300 px-2 py-2 text-sm">${esc(line.feature || '')}</textarea>
             </label>
-            <div class="col-span-2 rounded border border-slate-200 bg-slate-50 p-3">
-              <div class="text-xs text-slate-500">合价</div>
-              <div class="mt-1 text-xl font-semibold tabular-nums text-slate-900">${fmtMoney(line.amount || 0)}</div>
-            </div>
             ${renderBoqResourceReference(buildBoqResourceViewModel(line))}
             <div class="col-span-2 rounded border border-slate-200 bg-white p-3">
               <div class="mb-2 flex items-center justify-between">
@@ -899,7 +912,7 @@ function detailPanel(line, recommendations = [], librarySource = null) {
                 </div>
                 ${line.quotaItemId ? '<span class="badge badge-green">已匹配</span>' : '<span class="badge badge-yellow">未匹配</span>'}
               </div>
-              <div class="grid grid-cols-2 gap-2">
+              <div class="grid grid-cols-1 xl:grid-cols-2 gap-2">
                 ${recommendations.length ? recommendations.map(item => `
                   <button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50">
                     <div class="truncate font-medium text-slate-800" title="${esc(item.name || '')}">${esc(item.name || '')}</div>
@@ -915,6 +928,12 @@ function detailPanel(line, recommendations = [], librarySource = null) {
         </section>
       </div>
     </div>
+  </div>`;
+}
+
+function resizeHandle() {
+  return `<div id="boqResize" class="group flex h-3 shrink-0 cursor-row-resize items-center justify-center border-b border-slate-200 bg-slate-100 hover:bg-teal-50" title="拖动调整明细区高度" role="separator" aria-label="拖动调整清单明细编辑区高度">
+    <span class="h-1 w-10 rounded-full bg-slate-300 transition-colors group-hover:bg-teal-400"></span>
   </div>`;
 }
 

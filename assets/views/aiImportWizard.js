@@ -1,14 +1,14 @@
 // AI 自由格式清单导入向导。标准表头自动采用，模型仅补充模糊映射建议。
-import { readWorkbookSummary } from '../data/excel.js?v=6.2';
-import { recognizeBoqImport, getRecognitionFields } from '../services/aiImportRecognitionService.js?v=6.2';
-import { boqService } from '../services/boqService.js?v=6.2';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.2';
-import { projectRepo } from '../data/repository.js?v=6.2';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.2';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.2';
-import { categoryGuess } from '../utils/stats.js?v=6.2';
-import { normalizeImportHeader } from '../services/importMappingService.js?v=6.2';
-import { esc, toast } from '../utils/dom.js?v=6.2';
+import { readWorkbookSummary } from '../data/excel.js?v=6.3';
+import { recognizeBoqImport, getRecognitionFields } from '../services/aiImportRecognitionService.js?v=6.3';
+import { boqService } from '../services/boqService.js?v=6.3';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.3';
+import { projectRepo } from '../data/repository.js?v=6.3';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.3';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
+import { categoryGuess } from '../utils/stats.js?v=6.3';
+import { normalizeImportHeader } from '../services/importMappingService.js?v=6.3';
+import { esc, toast } from '../utils/dom.js?v=6.3';
 
 const state = {
   targetType: 'project_boq', projectId: '', fileName: '', sheets: [], sheetIndex: -1,

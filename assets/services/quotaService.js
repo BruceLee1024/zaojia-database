@@ -1,9 +1,9 @@
 // 定额库服务
-import { quotaRepo, boqRepo, boqLibraryRepo } from '../data/repository.js?v=6.2';
-import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=6.2';
-import { uid } from '../utils/dom.js?v=6.2';
-import { hasMissingPrice } from '../utils/costing.js?v=6.2';
-import { normalizeQuotaBreakdown } from '../utils/quotaBreakdown.js?v=6.2';
+import { quotaRepo, boqRepo, boqLibraryRepo } from '../data/repository.js?v=6.3';
+import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=6.3';
+import { uid } from '../utils/dom.js?v=6.3';
+import { hasMissingPrice } from '../utils/costing.js?v=6.3';
+import { normalizeQuotaBreakdown } from '../utils/quotaBreakdown.js?v=6.3';
 
 export const quotaService = {
   /** 列出所有定额，支持分类/关键字过滤 */
