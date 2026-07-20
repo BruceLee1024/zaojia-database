@@ -860,28 +860,7 @@ async function addSelectedToBoq() {
 }
 
 async function importExcel() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.xlsx,.xls';
-  input.onchange = async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    try {
-      const r = await quotaService.importFromExcel(file);
-      localStorage.setItem('quota_last_import', JSON.stringify({
-        fileName: file.name,
-        importedAt: new Date().toISOString(),
-        success: r.success,
-        missingPrice: r.missingPrice,
-      }));
-      showImportResult(r);
-      toast(`导入完成：成功 ${r.success} / 失败 ${r.failed} / 缺单价 ${r.missingPrice}`, r.failed ? 'error' : 'success');
-      await render();
-    } catch (err) {
-      toast('导入失败：' + err.message, 'error');
-    }
-  };
-  input.click();
+  await window.__app.go('ai-import', { targetType: 'quota' });
 }
 
 function showImportResult(r) {

@@ -185,8 +185,8 @@ export const boqService = {
   },
 
   /** 导入 Excel 转换后的清单行 */
-  async importLines(projectId, rows, { mode = 'append' } = {}) {
-    const [all, quotaItems] = await Promise.all([boqRepo.all(), quotaRepo.all()]);
+  async importLines(projectId, rows, { mode = 'append', amountRule = 'calculated' } = {}) {
+    const [all, quotaItems, originalProjects] = await Promise.all([boqRepo.all(), quotaRepo.all(), projectRepo.all()]);
     const imported = [];
     const warnings = [];
 
@@ -204,7 +204,9 @@ export const boqService = {
         factor: Number(row.factor || 1) || 1,
         qty: Number(row.qty || 0) || 0,
         unitPrice: Number(row.unitPrice || 0) || 0,
-        amount: calculateAmount(row.qty, row.unitPrice, row.factor || 1),
+        amount: amountRule === 'sourceAmount' && Number.isFinite(Number(row.amount))
+          ? Number(row.amount)
+          : calculateAmount(row.qty, row.unitPrice, row.factor || 1),
         priceMissing: hasMissingPrice(row.unitPrice),
         structureGroup: row.structureGroup || groupForLine(row),
       });
@@ -213,8 +215,19 @@ export const boqService = {
     const next = mode === 'replace'
       ? [...all.filter(line => line.projectId !== projectId), ...imported]
       : [...all, ...imported];
-    await boqRepo.replaceAll(next);
-    const total = await recomputeProjectCost(projectId);
+    let total;
+    try {
+      await boqRepo.replaceAll(next);
+      total = await recomputeProjectCost(projectId);
+    } catch (cause) {
+      const rollback = await Promise.allSettled([boqRepo.replaceAll(all), projectRepo.replaceAll(originalProjects)]);
+      const rollbackCauses = rollback.filter(result => result.status === 'rejected').map(result => result.reason);
+      const error = new Error(rollbackCauses.length ? '清单导入失败，且原数据未能完全恢复' : '清单导入失败，已恢复导入前数据');
+      error.code = rollbackCauses.length ? 'BOQ_IMPORT_PARTIAL_RECOVERY' : 'BOQ_IMPORT_ROLLED_BACK';
+      error.cause = cause;
+      error.rollbackCauses = rollbackCauses;
+      throw error;
+    }
     return {
       total: rows.length,
       success: imported.length,

@@ -93,9 +93,15 @@ export const quotaService = {
   /** 从 Excel 导入（定额库格式） */
   async importFromExcel(file) {
     const rows = await parseExcel(file);
+    const normalizedRows = rows.map(row => detectRowKind(row) === 'quota' ? rowToQuotaItem(row) : null);
+    return this.importRows(normalizedRows, { sourceRows: rows });
+  },
+
+  /** 导入已经统一引擎标准化的定额行。 */
+  async importRows(inputRows = [], { sourceRows = null } = {}) {
     const items = await quotaRepo.all();
     const result = {
-      total: rows.length,
+      total: inputRows.length,
       success: 0,
       failed: 0,
       missingPrice: 0,
@@ -105,13 +111,14 @@ export const quotaService = {
       warnings: [],
     };
 
-    if (!rows.length) {
+    if (!inputRows.length) {
       result.warnings.push('文件为空或第一个工作表没有可读取的数据。');
       return result;
     }
 
-    rows.forEach((r, idx) => {
-      const kind = detectRowKind(r);
+    inputRows.forEach((input, idx) => {
+      const original = sourceRows?.[idx];
+      const kind = original ? detectRowKind(original) : input ? 'quota' : 'unknown';
       if (kind === 'boq') {
         result.skipped++;
         result.warnings.push(`第 ${idx + 2} 行是工程量清单格式，已跳过。`);
@@ -122,7 +129,7 @@ export const quotaService = {
         result.warnings.push(`第 ${idx + 2} 行无法识别表头或缺少清单名称。`);
         return;
       }
-      const item = rowToQuotaItem(r);
+      const item = original ? rowToQuotaItem(original) : { ...input, priceTotal: Number(input?.priceTotal || 0), priceMissing: hasMissingPrice(input?.priceTotal) };
       if (!item.name) {
         result.failed++;
         result.warnings.push(`第 ${idx + 2} 行缺少清单名称，未导入。`);

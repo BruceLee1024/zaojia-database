@@ -1,18 +1,29 @@
-// AI 自由格式清单导入向导。标准表头自动采用，模型仅补充模糊映射建议。
-import { readWorkbookSummary } from '../data/excel.js?v=6.3';
-import { recognizeBoqImport, getRecognitionFields } from '../services/aiImportRecognitionService.js?v=6.3';
-import { boqService } from '../services/boqService.js?v=6.3';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.3';
+// 统一表格导入向导：五类目标共用文件、数据区、层级映射、预览和写入流程。
+import { parseImportFile } from '../data/excel.js?v=6.3';
+import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.3';
+import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.3';
+import { getImportSchema } from '../services/importSchemaService.js?v=6.3';
+import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.3';
+import { analyzeImport, commitImport } from '../services/importWorkflowService.js?v=6.3';
+import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.3';
 import { projectRepo } from '../data/repository.js?v=6.3';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.3';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { categoryGuess } from '../utils/stats.js?v=6.3';
-import { normalizeImportHeader } from '../services/importMappingService.js?v=6.3';
 import { esc, toast } from '../utils/dom.js?v=6.3';
 
+const TARGETS = {
+  project_boq: { label: '项目工程量清单', back: 'importer' },
+  boq_library: { label: '我的清单库', back: 'boq-library' },
+  quota: { label: '常用定额', back: 'quota' },
+  material: { label: '材料库', back: 'materials' },
+  equipment: { label: '设备库', back: 'equipment' },
+};
+
 const state = {
-  targetType: 'project_boq', projectId: '', fileName: '', sheets: [], sheetIndex: -1,
-  step: 'upload', recognition: null, fieldState: {}, combinedMapping: null, amountRule: 'calculated', importMode: 'append', busy: false, routeSignature: '',
+  targetType: 'project_boq', projectId: '', routeSignature: '', step: 'upload', busy: false,
+  fileName: '', workbook: null, regions: [], selectedRegionIds: new Set(),
+  mappingByRegion: {}, fieldMetaBySignature: {}, fixedByRegion: {}, aiStatusBySignature: {},
+  templateBySignature: {}, templateNameBySignature: {}, templateScopeBySignature: {},
+  csvEncoding: '', csvDelimiter: '',
+  amountRule: 'calculated', importMode: 'append', updateExisting: true, issueOnly: false, issueSeverity: '', preview: null, report: null,
 };
 
 export function normalizeWizardStep(step, { recognition, hasSheet } = {}) {
@@ -21,151 +32,146 @@ export function normalizeWizardStep(step, { recognition, hasSheet } = {}) {
 }
 
 export async function render(workspace = document.getElementById('workspace')) {
-  const params = window.__app.state.routeParams || {};
-  const targetType = params.targetType === 'boq_library' ? 'boq_library' : 'project_boq';
-  const requestedProjectId = params.projectId || window.__app.state.currentProjectId || '';
-  const routeSignature = `${targetType}:${requestedProjectId}`;
-  if (state.routeSignature !== routeSignature) {
-    Object.assign(state, {
-      targetType, projectId: requestedProjectId, fileName: '', sheets: [], sheetIndex: -1,
-      step: 'upload', recognition: null, fieldState: {}, combinedMapping: null, amountRule: 'calculated', importMode: 'append', busy: false, routeSignature,
-    });
-  } else {
-    state.targetType = targetType;
-    state.projectId = requestedProjectId || state.projectId;
-  }
-  if (state.targetType === 'project_boq' && !state.projectId) {
-    const projects = await projectRepo.all();
-    state.projectId = projects[0]?.id || '';
-  }
-  state.step = normalizeWizardStep(state.step, { recognition: state.recognition, hasSheet: Boolean(currentSheet()) });
+  const params = window.__app?.state?.routeParams || {};
+  const targetType = TARGETS[params.targetType] ? params.targetType : 'project_boq';
+  const requestedProjectId = params.projectId || window.__app?.state?.currentProjectId || '';
+  const signature = `${targetType}:${requestedProjectId}`;
+  if (state.routeSignature !== signature) resetState(targetType, requestedProjectId, signature);
+  if (targetType === 'project_boq' && !state.projectId) state.projectId = (await projectRepo.all())[0]?.id || '';
   expose(workspace);
   await paint(workspace);
 }
 
+function resetState(targetType, projectId, routeSignature) {
+  Object.assign(state, {
+    targetType, projectId, routeSignature, step: 'upload', busy: false, fileName: '', workbook: null, regions: [],
+    selectedRegionIds: new Set(), mappingByRegion: {}, fieldMetaBySignature: {}, fixedByRegion: {}, aiStatusBySignature: {},
+    templateBySignature: {}, templateNameBySignature: {}, templateScopeBySignature: {},
+    csvEncoding: '', csvDelimiter: '',
+    amountRule: 'calculated', importMode: 'append', updateExisting: true, issueOnly: false, issueSeverity: '', preview: null, report: null,
+  });
+}
+
 function expose(workspace) {
   window.__aiImport = {
+    cancel: () => window.__app.go(TARGETS[state.targetType].back),
+    setTarget: value => window.__app.go('ai-import', { targetType: value, projectId: state.projectId }),
     chooseFile: file => chooseFile(workspace, file),
-    selectSheet: index => selectSheet(workspace, index),
-    runRecognition: () => runRecognition(workspace),
-    setSource: (key, source) => setSource(workspace, key, source),
-    setFixedValue,
-    confirmField: (key, confirmed) => confirmField(workspace, key, confirmed),
-    confirmCombinedMapping: confirmed => confirmCombinedMapping(workspace, confirmed),
-    disableCombinedMapping: () => disableCombinedMapping(workspace),
-    setAmountRule: rule => setAmountRule(workspace, rule),
+    setCsvEncoding: value => { state.csvEncoding = value; },
+    setCsvDelimiter: value => { state.csvDelimiter = value; },
+    toggleRegion: (id, checked) => { checked ? state.selectedRegionIds.add(id) : state.selectedRegionIds.delete(id); paint(workspace); },
+    toggleHidden: checked => { state.regions.filter(region => region.hidden).forEach(region => checked ? state.selectedRegionIds.add(region.id) : state.selectedRegionIds.delete(region.id)); paint(workspace); },
+    adjustRegion: id => adjustRegion(workspace, id),
+    prepareMapping: () => prepareMapping(workspace),
+    setMapping: (signature, key, value) => setGroupMapping(workspace, signature, key, value),
+    setFixed: (signature, key, value) => setGroupFixed(workspace, signature, key, value),
+    applyTemplate: (signature, templateId) => applyTemplate(workspace, signature, templateId),
+    setTemplateName: (signature, value) => { state.templateNameBySignature[signature] = value; },
+    setTemplateScope: (signature, value) => { state.templateScopeBySignature[signature] = value; paint(workspace); },
+    saveTemplate: signature => saveTemplate(workspace, signature),
+    setAmountRule: value => { state.amountRule = value; paint(workspace); },
     setProject: value => { state.projectId = value; paint(workspace); },
     setImportMode: value => { state.importMode = value; paint(workspace); },
-    back: () => { state.step = state.step === 'confirm' ? 'sheet' : 'upload'; paint(workspace); },
-    save: () => importConfirmed(workspace),
-    goSettings: () => window.__app.go('settings', { section: 'ai' }),
-    cancel: () => window.__app.go(state.targetType === 'boq_library' ? 'boq-library' : 'importer'),
+    setUpdateExisting: value => { state.updateExisting = value; },
+    setIssueOnly: value => { state.issueOnly = value; paint(workspace); },
+    setIssueSeverity: value => { state.issueSeverity = value; paint(workspace); },
+    buildPreview: () => buildPreview(workspace),
+    commit: () => commit(workspace),
+    back: () => { state.step = state.step === 'mapping' ? 'regions' : state.step === 'preview' ? 'mapping' : 'upload'; paint(workspace); },
   };
 }
 
 async function paint(workspace) {
-  const title = state.targetType === 'boq_library' ? 'AI 导入我的清单库' : 'AI 导入项目工程量清单';
-  const projectOptions = state.targetType === 'project_boq' ? await projectRepo.all() : [];
-  workspace.innerHTML = `
-    <div class="page-frame min-h-full p-5">
-      <div class="mb-5 flex items-start gap-3"><button onclick="window.__aiImport.cancel()" class="mt-0.5 h-9 w-9 border border-slate-300 bg-white text-slate-600" title="返回"><span class="material-symbols-outlined">arrow_back</span></button><div><h1 class="text-xl font-semibold text-slate-900">${title}</h1><p class="mt-1 text-sm text-slate-500">上传任意常见 Excel，AI 只识别字段结构；逐字段确认后才会写入本机数据。</p></div></div>
-      <div class="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">发送给已配置 AI 服务的内容仅包括：工作表名称、表头和前 50 行样本；不会发送整份文件或本机项目资料。</div>
-      ${stepper()}
-      ${state.step === 'upload' ? uploadPanel(projectOptions) : state.step === 'sheet' ? sheetPanel() : confirmPanel(projectOptions)}
-    </div>`;
+  const target = TARGETS[state.targetType];
+  const projects = state.targetType === 'project_boq' ? await projectRepo.all() : [];
+  workspace.innerHTML = `<div class="page-frame min-h-full p-5">
+    <header class="mb-5 flex items-start gap-3"><button onclick="window.__aiImport.cancel()" class="mt-0.5 h-9 w-9 border border-slate-300 bg-white" aria-label="返回"><span class="material-symbols-outlined">arrow_back</span></button><div><h1 class="text-xl font-semibold text-slate-950">导入${esc(target.label)}</h1><p class="mt-1 text-sm text-slate-500">支持 Excel / CSV、多工作表、多数据区及 1–6 层合并表头。写入前始终需要确认预览。</p></div></header>
+    ${stepper()}
+    ${state.step === 'upload' ? uploadPanel(projects) : state.step === 'regions' ? regionsPanel() : state.step === 'mapping' ? mappingPanel(projects) : state.step === 'preview' ? previewPanel(projects) : resultPanel()}
+  </div>`;
   bindUpload(workspace);
 }
 
 function stepper() {
-  const labels = [['upload', '1. 上传文件'], ['sheet', '2. 选择工作表'], ['confirm', '3. 确认字段并导入']];
-  const order = { upload: 0, sheet: 1, confirm: 2 };
-  return `<div class="mb-5 flex items-center gap-2 text-sm">${labels.map(([key, label], index) => `<div class="flex items-center gap-2 ${order[state.step] >= index ? 'text-teal-700 font-medium' : 'text-slate-400'}"><span class="h-6 w-6 rounded-full border flex items-center justify-center text-xs ${order[state.step] >= index ? 'border-teal-500 bg-teal-50' : 'border-slate-300'}">${index + 1}</span>${label}${index < labels.length - 1 ? '<span class="mx-2 h-px w-12 bg-slate-200"></span>' : ''}</div>`).join('')}</div>`;
+  const steps = [['upload', '上传'], ['regions', '数据区'], ['mapping', '字段映射'], ['preview', '质量预览'], ['result', '导入报告']];
+  const active = Math.max(0, steps.findIndex(([key]) => key === state.step));
+  return `<ol class="mb-5 flex flex-wrap items-center gap-2 text-xs" aria-label="导入步骤">${steps.map(([key, label], index) => `<li class="flex items-center gap-2 ${index <= active ? 'font-medium text-teal-700' : 'text-slate-400'}"><span class="flex h-6 w-6 items-center justify-center rounded-full border ${index <= active ? 'border-teal-500 bg-teal-50' : 'border-slate-300'}">${index + 1}</span>${label}${index < steps.length - 1 ? '<span class="mx-1 h-px w-8 bg-slate-200"></span>' : ''}</li>`).join('')}</ol>`;
 }
 
 function uploadPanel(projects) {
-  const target = state.targetType === 'boq_library' ? '标准清单库条目' : '当前项目工程量清单';
-  return `<section class="rounded-lg border border-slate-200 bg-white p-6"><h2 class="text-base font-semibold text-slate-900">上传 Excel</h2><p class="mt-2 text-sm text-slate-500">导入目标：${target}。支持 .xlsx、.xls；请在下一步选择实际清单所在的工作表。</p>${state.targetType === 'project_boq' ? projectPicker(projects) : ''}<label id="aiImportDrop" class="mt-5 flex min-h-48 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-6 text-center hover:border-teal-400 hover:bg-teal-50/30"><span class="material-symbols-outlined text-4xl text-teal-700">upload_file</span><span class="mt-3 font-medium text-slate-800">选择或拖入 Excel 文件</span><span class="mt-1 text-xs text-slate-500">文件先在浏览器本地解析</span><input id="aiImportFile" type="file" accept=".xlsx,.xls" class="hidden" /></label></section>`;
+  return `<section class="rounded-lg border border-slate-200 bg-white p-6"><h2 class="font-semibold text-slate-900">选择数据文件</h2><p class="mt-1 text-sm text-slate-500">支持 .xlsx、.xls、.csv；CSV 会自动尝试 UTF-8 和 GB18030。</p><div class="mt-4 flex flex-wrap gap-3">${targetPicker()}${state.targetType === 'project_boq' ? projectPicker(projects) : ''}</div><div class="mt-4 flex flex-wrap gap-3 text-sm"><label>CSV 编码<select onchange="window.__aiImport.setCsvEncoding(this.value)" class="ml-2 h-9 border border-slate-300 bg-white px-2"><option value="">自动识别</option><option value="utf-8">UTF-8</option><option value="gb18030">GBK / GB18030</option></select></label><label>CSV 分隔符<select onchange="window.__aiImport.setCsvDelimiter(this.value)" class="ml-2 h-9 border border-slate-300 bg-white px-2"><option value="">自动识别</option><option value=",">逗号</option><option value="tab">制表符</option><option value=";">分号</option></select></label></div><label id="unifiedImportDrop" class="mt-5 flex min-h-48 cursor-pointer flex-col items-center justify-center border-2 border-dashed border-slate-300 bg-slate-50 px-6 text-center hover:border-teal-400 hover:bg-teal-50/30"><span class="material-symbols-outlined text-4xl text-teal-700">upload_file</span><span class="mt-3 font-medium text-slate-800">选择或拖入表格</span><span class="mt-1 text-xs text-slate-500">文件先在浏览器本地解析；AI 只接收表头路径和有限样本</span><input id="unifiedImportFile" type="file" accept=".xlsx,.xls,.csv" class="hidden"></label></section>`;
 }
 
-function sheetPanel() {
-  return `<section class="rounded-lg border border-slate-200 bg-white p-5"><div class="flex items-center"><div><h2 class="font-semibold text-slate-900">选择要识别的工作表</h2><p class="mt-1 text-sm text-slate-500">${esc(state.fileName)} · 请选择包含清单表头和数据的工作表。</p></div><button onclick="window.__aiImport.back()" class="ml-auto h-9 px-3 text-sm border border-slate-300 bg-white">重新选择文件</button></div><div class="mt-5 grid gap-3">${state.sheets.map((sheet, index) => `<label class="cursor-pointer rounded-lg border p-4 ${state.sheetIndex === index ? 'border-teal-500 bg-teal-50' : 'border-slate-200 bg-white'}"><div class="flex items-center gap-3"><input type="radio" name="aiSheet" value="${index}" ${state.sheetIndex === index ? 'checked' : ''} onchange="window.__aiImport.selectSheet(this.value)" /><div class="min-w-0 flex-1"><div class="font-medium text-slate-900">${esc(sheet.name)}</div><div class="mt-1 text-xs text-slate-500">${sheet.rowCount} 行 · ${sheet.headers.length ? `识别到 ${sheet.headers.length} 列：${esc(sheet.headers.slice(0, 6).join('、'))}` : '未识别候选表头'}</div></div></div>${combinedColumnNotice(sheet)}${sheet.previewRows.length ? `<div class="mt-3 overflow-auto rounded border border-slate-200"><table class="w-full text-xs"><thead class="bg-slate-50"><tr>${sheet.headers.slice(0, 6).map(header => `<th class="p-2 text-left">${esc(header)}</th>`).join('')}</tr></thead><tbody>${sheet.previewRows.slice(0, 2).map(row => `<tr class="border-t">${sheet.headers.slice(0, 6).map(header => `<td class="whitespace-pre-line p-2 align-top text-slate-600">${esc(row[header])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : ''}</label>`).join('')}</div><div class="mt-5 flex justify-end"><button onclick="window.__aiImport.runRecognition()" ${state.sheetIndex < 0 || state.busy ? 'disabled' : ''} class="h-10 px-4 text-sm brand-bg text-white disabled:opacity-50">${state.busy ? 'AI 识别中…' : '开始 AI 识别'}</button></div></section>`;
+function regionsPanel() {
+  const selected = state.selectedRegionIds.size;
+  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden"><div class="border-b border-slate-200 p-5"><div class="flex flex-wrap items-start gap-3"><div><h2 class="font-semibold text-slate-900">选择要导入的数据区</h2><p class="mt-1 text-sm text-slate-500">${esc(state.fileName)} · 发现 ${state.regions.length} 个候选数据区，已选 ${selected} 个。</p></div><label class="ml-auto text-xs text-slate-600"><input type="checkbox" onchange="window.__aiImport.toggleHidden(this.checked)"> 包含隐藏工作表</label></div>${(state.workbook?.warnings || []).length ? warningBox(state.workbook.warnings) : ''}</div><div class="divide-y divide-slate-100">${state.regions.map(regionCard).join('') || '<div class="p-10 text-center text-slate-400">没有发现可用数据区</div>'}</div><footer class="flex justify-between border-t border-slate-200 bg-slate-50 p-4"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">重新选文件</button><button onclick="window.__aiImport.prepareMapping()" ${selected && !state.busy ? '' : 'disabled'} class="h-9 px-4 brand-bg text-white text-sm disabled:opacity-40">${state.busy ? 'AI 与本地规则分析中…' : '继续字段映射'}</button></footer></section>`;
 }
 
-function combinedColumnNotice(sheet) {
-  const combinedHeader = sheet.headers.find(header => normalizeImportHeader(header) === '项目名称项目特征');
-  if (!combinedHeader) return '';
-  return `<div class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><strong>检测到合并来源列「${esc(combinedHeader)}」。</strong>这不是把相邻两列拼错：原工作表在同一列中提供名称和特征。若单元格内以换行分隔，导入时会取第一行作为“清单名称”、其余内容作为“项目特征”；预览已保留换行。若原单元格没有换行，请在下一步手动确认，不会自动猜测拆分位置。</div>`;
+function regionCard(region) {
+  const checked = state.selectedRegionIds.has(region.id);
+  const pathPreview = region.columns.slice(0, 6).map(column => column.displayName).join('、');
+  return `<article class="p-4 ${checked ? 'bg-teal-50/30' : ''}"><div class="flex items-start gap-3"><input type="checkbox" class="mt-1" ${checked ? 'checked' : ''} onchange="window.__aiImport.toggleRegion(${inlineArg(region.id)}, this.checked)" aria-label="选择${esc(region.sheetName)}"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><h3 class="font-medium text-slate-900">${esc(region.sheetName)}${region.title ? ` · ${esc(region.title)}` : ''}</h3>${region.hidden ? '<span class="badge badge-gray">隐藏表</span>' : ''}<span class="badge ${region.confidence === 'high' || region.confidence === 'manual' ? 'badge-green' : 'badge-yellow'}">${region.confidence === 'manual' ? '人工确认' : `${region.confidence === 'high' ? '高' : region.confidence === 'medium' ? '中' : '低'}置信`}</span></div><p class="mt-1 text-xs text-slate-500">表头第 ${region.headerStart + 1}–${region.headerEnd + 1} 行 · 数据 ${region.rows.length} 行 · 自动跳过 ${region.skippedRows.length} 行</p><p class="mt-2 text-xs text-slate-600">列路径：${esc(pathPreview)}${region.columns.length > 6 ? '…' : ''}</p><div class="mt-3 flex flex-wrap items-end gap-2 text-xs"><label>表头起始行<input id="regionStart-${safeId(region.id)}" type="number" min="1" value="${region.headerStart + 1}" class="ml-1 h-8 w-20 border border-slate-300 px-2"></label><label>结束行<input id="regionEnd-${safeId(region.id)}" type="number" min="1" max="${region.headerStart + 6}" value="${region.headerEnd + 1}" class="ml-1 h-8 w-20 border border-slate-300 px-2"></label><button onclick="window.__aiImport.adjustRegion(${inlineArg(region.id)})" class="h-8 px-3 border border-slate-300 bg-white">重新识别</button></div>${region.warnings?.length ? warningBox(region.warnings) : ''}</div></div></article>`;
 }
 
-function confirmPanel(projects) {
-  const fields = getRecognitionFields(state.targetType);
-  const selected = currentSheet();
-  if (!state.recognition || !selected) return incompleteRecognitionPanel();
-  const regularFields = fields.filter(field => !isCombinedField(field.key));
-  const confirmedCount = fields.filter(field => state.fieldState[field.key]?.confirmed).length;
-  const blockingReasons = getImportBlockingReasons(fields, state.fieldState, { targetType: state.targetType, projectId: state.projectId });
-  const valid = blockingReasons.length === 0;
-  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden"><div class="p-5 border-b border-slate-200"><div class="flex items-start gap-3"><div><h2 class="font-semibold text-slate-900">确认“系统字段 ← Excel 列”的对应关系</h2><p class="mt-1 text-sm text-slate-500">系统会先自动采用标准表头和高置信度匹配；只有你改过或识别不确定的字段才需要确认。</p></div><button onclick="window.__aiImport.back()" class="ml-auto h-9 px-3 text-sm border border-slate-300 bg-white">返回工作表</button></div>${mappingGuide()}${combinedMappingPanel()}${recognitionBasisPanel(selected)}${state.recognition.warnings?.length ? `<div class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">${state.recognition.warnings.map(esc).join('；')}</div>` : ''}</div><div class="mobile-card-list divide-y divide-slate-100">${regularFields.map(field => mobileFieldCard(field, selected)).join('')}</div><div class="mobile-table overflow-auto"><table class="w-full min-w-[960px] text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="p-3">① 系统字段（要保存什么）</th><th class="p-3">② Excel 来源列（从哪列取值）</th><th class="p-3">③ 该列样本值</th><th class="p-3">AI / 规则为什么这样建议</th><th class="p-3 w-24 text-center">④ 状态</th></tr></thead><tbody>${regularFields.map(field => fieldRow(field, selected)).join('')}</tbody></table></div><div class="border-t border-slate-200 bg-slate-50 p-5"><div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-5"><div>${state.targetType === 'project_boq' ? projectPicker(projects) + importModePicker() + amountRulePicker() : '<div class="text-sm text-slate-600">将按编码优先、名称 + 特征 + 单位兜底规则更新或新增清单库条目。</div>'}<div class="mt-3 text-xs ${valid ? 'text-teal-700' : 'text-amber-700'}">已采用 ${confirmedCount} / ${fields.length} 个字段。${valid ? '可以导入。' : `还不能导入：${esc(blockingReasons.join('；'))}`}</div></div><div class="flex items-end justify-end gap-2"><button onclick="window.__aiImport.cancel()" class="h-10 px-4 text-sm border border-slate-300 bg-white">取消</button><button onclick="window.__aiImport.save()" ${valid || state.busy ? '' : 'disabled'} class="h-10 px-4 text-sm brand-bg text-white disabled:opacity-50">${state.busy ? '导入中…' : state.targetType === 'boq_library' ? '确认导入清单库' : '确认导入项目清单'}</button></div></div></div></section>`;
+function mappingPanel(projects) {
+  const groups = groupSelectedRegions();
+  return `<section class="space-y-4"><div class="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">AI 默认对低置信字段提供建议；模型不可用时会自动保留本地映射。来源列使用完整路径，同名“单价”不会互相覆盖。</div>${groups.map(mappingGroup).join('')}<footer class="sticky bottom-0 flex justify-between border border-slate-200 bg-white p-4"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">返回数据区</button><button onclick="window.__aiImport.buildPreview()" class="h-9 px-4 brand-bg text-white text-sm">生成质量预览</button></footer></section>`;
 }
 
-function isCombinedField(key) { return state.combinedMapping?.status === 'ready' && (key === 'name' || key === 'feature'); }
-
-function combinedMappingPanel() {
-  const mapping = state.combinedMapping;
-  if (!mapping) return '';
-  if (mapping.status !== 'ready') return `<div class="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950"><strong>合并列无法安全拆分。</strong>「${esc(mapping.source)}」的样本中有 ${mapping.sampleCount - mapping.validSampleCount} 行没有换行后的项目特征。系统不会猜测文本边界；请在下方手动只映射“清单名称”，或返回工作表选择正确的独立列。</div>`;
-  return `<div class="mt-4 rounded-md border border-teal-300 bg-teal-50 p-4 text-sm text-teal-950"><div class="flex items-start gap-3"><div><div class="font-semibold">已自动识别“名称 + 特征”合并列</div><div class="mt-1 text-xs text-teal-800">来源列：Excel「${esc(mapping.source)}」 · 拆分规则：首行 → 清单名称；其余非空行 → 项目特征。</div></div><button onclick="window.__aiImport.disableCombinedMapping()" class="ml-auto h-8 shrink-0 border border-teal-300 bg-white px-2 text-xs text-teal-900">改为手动映射</button></div><div class="mt-3 grid gap-2">${mapping.preview.map((item, index) => `<div class="rounded border border-teal-200 bg-white px-3 py-2 text-xs"><span class="mr-2 text-teal-700">样本 ${index + 1}</span><strong>${esc(item.name)}</strong><span class="mx-2 text-teal-500">→</span><span class="whitespace-pre-line text-slate-700">${esc(item.feature)}</span></div>`).join('')}</div><div class="mt-3 text-xs font-medium text-teal-800">已自动采用；如拆分结果不符合原表，可改为手动映射。</div></div>`;
+function mappingGroup(group) {
+  const representative = group.regions[0];
+  const schema = getImportSchema(state.targetType);
+  const mapping = state.mappingByRegion[representative.id] || {};
+  const fixed = state.fixedByRegion[representative.id] || {};
+  const ai = state.aiStatusBySignature[group.signature];
+  const fields = schema.fields.map(field => {
+    const source = mapping[field.key] || '';
+    const meta = state.fieldMetaBySignature[group.signature]?.[field.key] || {};
+    const column = representative.columns.find(item => item.id === (source || meta.candidateSource));
+    const sample = column ? representative.rows.find(row => String(row.values[column.id] ?? '').trim())?.values[column.id] : fixed[field.key];
+    const status = source ? '已映射' : Object.prototype.hasOwnProperty.call(fixed, field.key) ? '固定值' : meta.candidateSource ? `建议确认（${confidenceLabel(meta.confidence)}）` : field.required ? '待补充' : '不导入';
+    const statusTone = source || Object.prototype.hasOwnProperty.call(fixed, field.key) ? 'text-teal-700' : meta.candidateSource || field.required ? 'text-amber-700' : 'text-slate-400';
+    const control = mappingControl(group.signature, field, representative.columns, source, fixed, meta);
+    return { field, sample: esc(sample == null || sample === '' ? '-' : String(sample).slice(0, 80)), status, statusTone, control };
+  });
+  const desktopRows = fields.map(item => `<tr class="border-t border-slate-100"><td class="p-3 font-medium text-slate-800">${esc(item.field.label)}${item.field.required ? '<span class="text-red-600"> *</span>' : ''}</td><td class="p-3">${item.control}</td><td class="p-3 text-slate-600">${item.sample}</td><td class="p-3 text-xs ${item.statusTone}">${item.status}</td></tr>`).join('');
+  const mobileCards = fields.map(item => `<section class="border-t border-slate-100 p-4"><div class="flex items-center justify-between gap-2"><h3 class="font-medium text-slate-800">${esc(item.field.label)}${item.field.required ? '<span class="text-red-600"> *</span>' : ''}</h3><span class="text-xs ${item.statusTone}">${item.status}</span></div><div class="mt-3">${item.control}</div><p class="mt-2 truncate text-xs text-slate-500">样本：${item.sample}</p></section>`).join('');
+  return `<article class="rounded-lg border border-slate-200 bg-white overflow-hidden"><header class="border-b border-slate-200 p-4"><div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="font-semibold text-slate-900">${esc(representative.sheetName)}${group.regions.length > 1 ? ` 等 ${group.regions.length} 个同结构数据区` : ''}</h2><p class="mt-1 text-xs ${ai?.degraded ? 'text-amber-700' : 'text-slate-500'}">${esc(ai?.degraded ? ai.degradationReason : ai?.summary || '本地规则已完成映射')}</p></div>${templateControls(group)}</div></header><div class="md:hidden">${mobileCards}</div><div class="hidden overflow-auto md:block"><table class="w-full min-w-[780px] text-sm"><thead class="bg-slate-50 text-left text-xs text-slate-500"><tr><th class="p-3">系统字段</th><th class="p-3">Excel 完整列路径</th><th class="p-3">样本</th><th class="p-3">状态</th></tr></thead><tbody>${desktopRows}</tbody></table></div></article>`;
 }
 
-function mappingGuide() {
-  return `<div class="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-xs text-teal-950"><div class="flex flex-wrap items-center gap-x-2 gap-y-1"><strong>怎么看这张表：</strong><span>系统字段「清单名称」</span><span class="font-semibold text-teal-700">←</span><span>Excel 来源列「项目名称」</span><span class="text-teal-700">表示把 Excel 每一行的“项目名称”写入清单库的“清单名称”。</span></div><div class="mt-1 text-teal-800">系统会先按标准表头自动匹配并直接采用；只有没有标准列或置信度不足时，才需要在中间下拉框修改并确认。没有对应数据的可选字段会自动设为“不导入”。带 <span class="text-red-600">*</span> 的字段仍必须有来源列或固定值。</div></div>`;
+function templateControls(group) {
+  const templates = listMappingTemplates({ projectId: state.projectId }).filter(template => template.targetType === state.targetType);
+  const signature = group.signature;
+  const scope = state.templateScopeBySignature[signature] || 'global';
+  const name = state.templateNameBySignature[signature] || '';
+  const selected = state.templateBySignature[signature] || '';
+  const options = templates.map(template => `<option value="${esc(template.id)}" ${selected === template.id ? 'selected' : ''}>${esc(template.name)}${template.scope === 'project' ? '（项目）' : ''}</option>`).join('');
+  return `<div class="w-full space-y-2 text-xs sm:w-auto"><label class="block text-slate-600">应用模板 <select onchange="window.__aiImport.applyTemplate(${inlineArg(signature)},this.value)" class="ml-1 h-8 max-w-52 border border-slate-300 bg-white px-2"><option value="">选择已保存模板</option>${options}</select></label><div class="flex flex-wrap gap-1"><input value="${esc(name)}" oninput="window.__aiImport.setTemplateName(${inlineArg(signature)},this.value)" class="h-8 min-w-36 border border-slate-300 px-2" placeholder="模板名称"><select onchange="window.__aiImport.setTemplateScope(${inlineArg(signature)},this.value)" class="h-8 border border-slate-300 bg-white px-2"><option value="global" ${scope === 'global' ? 'selected' : ''}>全局</option>${state.projectId ? `<option value="project" ${scope === 'project' ? 'selected' : ''}>当前项目</option>` : ''}</select><button onclick="window.__aiImport.saveTemplate(${inlineArg(signature)})" class="h-8 border border-teal-300 bg-teal-50 px-2 text-teal-800">保存映射</button></div></div>`;
 }
 
-function incompleteRecognitionPanel() {
-  return `<section class="rounded-lg border border-amber-200 bg-amber-50 p-6"><h2 class="font-semibold text-amber-900">尚未完成 AI 识别</h2><p class="mt-2 text-sm text-amber-800">请先选择工作表并运行 AI 识别。AI 建议只会基于该工作表的列名和前 50 行样本生成。</p><button onclick="window.__aiImport.back()" class="mt-4 h-9 px-3 text-sm border border-amber-300 bg-white text-amber-900">返回选择工作表</button></section>`;
+function mappingControl(signature, field, columns, source, fixed, meta = {}) {
+  const hasFixed = Object.prototype.hasOwnProperty.call(fixed, field.key);
+  const candidate = !source && meta.candidateSource ? columns.find(item => item.id === meta.candidateSource) : null;
+  return `<div><div class="flex flex-col gap-2 sm:flex-row"><select onchange="window.__aiImport.setMapping(${inlineArg(signature)},${inlineArg(field.key)},this.value)" class="h-9 min-w-0 flex-1 border border-slate-300 bg-white px-2"><option value="">不导入</option><option value="__fixed__" ${hasFixed ? 'selected' : ''}>固定值</option>${columns.map(item => `<option value="${esc(item.id)}" ${source === item.id ? 'selected' : ''}>${esc(item.displayName)}${item.unitHint ? ` (${esc(item.unitHint)})` : ''}</option>`).join('')}</select>${hasFixed ? `<input value="${esc(fixed[field.key])}" oninput="window.__aiImport.setFixed(${inlineArg(signature)},${inlineArg(field.key)},this.value)" class="h-9 min-w-0 flex-1 border border-slate-300 px-2" placeholder="固定值">` : ''}</div>${candidate ? `<p class="mt-1 text-xs text-amber-700">候选：${esc(candidate.displayName)}，需要人工确认</p>` : ''}</div>`;
 }
 
-function recognitionBasisPanel(sheet) {
-  const analysis = state.recognition.analysis || {};
-  const headers = analysis.headers?.length ? analysis.headers : sheet.headers;
-  const sampleRowCount = analysis.sampleRowCount ?? Math.min(sheet.rows.length, 50);
-  return `<div class="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950"><div class="font-semibold">AI 的建议依据</div><div class="mt-1">已分析工作表「${esc(analysis.sheetName || sheet.name)}」的 ${analysis.headerCount || headers.length} 个列名和 ${sampleRowCount} 行样本（最多 50 行）。建议来自你在“AI 设置”中配置的模型对列名和样本值的判断，不会读取清单库、定额库或其他项目资料。</div>${state.recognition.sheetUnderstanding ? `<div class="mt-1">表格理解：${esc(state.recognition.sheetUnderstanding)}</div>` : ''}<div class="mt-1 text-blue-800">已传入列：${esc(headers.slice(0, 12).join('、'))}${headers.length > 12 ? ' 等' : ''}</div></div>`;
+function confidenceLabel(value) { return value === 'high' ? '高' : value === 'medium' ? '中' : value === 'low' ? '低' : '未知'; }
+
+function previewPanel(projects) {
+  const preview = state.preview;
+  if (!preview) return '<div class="p-10 text-center text-slate-400">请先生成预览</div>';
+  const rows = preview.rows.filter(row => (!state.issueOnly || row.issues.length) && (!state.issueSeverity || row.issues.some(issue => issue.severity === state.issueSeverity))).slice(0, 100);
+  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden"><header class="border-b border-slate-200 p-5"><h2 class="font-semibold text-slate-900">质量预览</h2><div class="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-6">${metric('数据区', preview.counts.regions)}${metric('读取明细', preview.counts.total)}${metric('可导入', preview.counts.valid, 'teal')}${metric('无效', preview.counts.invalid, 'red')}${metric('自动跳过', preview.counts.skipped)}${metric('警告', preview.counts.warnings, 'amber')}</div><div class="mt-3 flex flex-wrap items-center gap-3 text-xs"><label><input type="checkbox" ${state.issueOnly ? 'checked' : ''} onchange="window.__aiImport.setIssueOnly(this.checked)"> 只看问题行</label><label>问题级别<select onchange="window.__aiImport.setIssueSeverity(this.value)" class="ml-2 h-8 border border-slate-300 bg-white px-2"><option value="">全部</option><option value="error" ${state.issueSeverity === 'error' ? 'selected' : ''}>错误</option><option value="warning" ${state.issueSeverity === 'warning' ? 'selected' : ''}>警告</option></select></label><button onclick="window.__aiImport.back()" class="text-teal-700 hover:underline">返回修改映射</button><span class="text-slate-400">当前显示 ${rows.length} 行</span></div>${preview.issues.length ? warningBox(preview.issues.slice(0, 20).map(issue => `${issue.sheetName} 第 ${issue.sourceRowNumber} 行：${issue.message}`)) : ''}</header><div class="max-h-[480px] overflow-auto"><table class="w-full min-w-[760px] text-xs"><thead class="sticky top-0 bg-slate-50 text-left text-slate-500"><tr><th class="p-2">来源</th><th class="p-2">名称</th><th class="p-2">单位</th><th class="p-2 text-right">数量/默认量</th><th class="p-2 text-right">单价</th><th class="p-2">检查</th></tr></thead><tbody>${rows.map(row => `<tr class="border-t ${row.importable ? '' : 'bg-red-50/50'}"><td class="p-2 text-slate-500">${esc(row.sheetName)}:${row.sourceRowNumber}</td><td class="p-2 font-medium text-slate-800">${esc(row.data.name || '-')}</td><td class="p-2">${esc(row.data.unit || '-')}</td><td class="p-2 text-right">${esc(row.data.qty ?? row.data.defaultQty ?? '-')}</td><td class="p-2 text-right">${esc(row.data.unitPrice ?? row.data.priceTotal ?? '-')}</td><td class="p-2 ${row.issues.some(issue => issue.severity === 'error') ? 'text-red-700' : row.issues.length ? 'text-amber-700' : 'text-teal-700'}">${esc(row.issues.map(issue => issue.message).join('；') || '通过')}</td></tr>`).join('')}</tbody></table></div><footer class="border-t border-slate-200 bg-slate-50 p-4"><div class="grid gap-4 lg:grid-cols-[1fr_auto]">${commitOptions(projects)}<div class="flex items-end gap-2"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">返回映射</button><button onclick="window.__aiImport.commit()" ${preview.counts.valid && !state.busy ? '' : 'disabled'} class="h-9 px-4 brand-bg text-white text-sm disabled:opacity-40">${state.busy ? '导入中…' : `确认导入 ${preview.counts.valid} 行`}</button></div></div></footer></section>`;
 }
 
-function fieldRow(field, sheet) {
-  const value = state.fieldState[field.key] || emptyField(field);
-  const sample = value.sourceType === 'column' ? sheet?.rows?.find(row => String(row[value.source] ?? '').trim() !== '')?.[value.source] : value.fixedValue;
-  const options = ['<option value="">不导入（没有对应列）</option>', '<option value="__fixed__">固定值（每行相同）</option>'].concat((sheet?.headers || []).map(header => `<option value="${esc(header)}">Excel 列：${esc(header)}</option>`)).join('');
-  const selected = value.sourceType === 'fixed' ? '__fixed__' : value.sourceType === 'column' ? value.source : '';
-  const noMatch = value.sourceType === 'none';
-  const alternatives = value.alternatives?.length ? `<div class="mt-1 text-xs text-slate-500">候选列：${esc(value.alternatives.join('、'))}</div>` : '';
-  const status = noMatch
-    ? field.required
-      ? '<span class="text-xs text-amber-700">请选择来源</span>'
-      : '<span class="text-xs text-slate-500">不导入</span>'
-    : value.autoMatched
-      ? '<span class="inline-flex rounded-full bg-teal-100 px-2 py-1 text-xs font-medium text-teal-800">已自动匹配</span>'
-      : value.confirmed
-        ? '<span class="inline-flex rounded-full bg-teal-100 px-2 py-1 text-xs font-medium text-teal-800">已确认</span>'
-        : `<label class="inline-flex cursor-pointer items-center gap-1 text-xs text-amber-800"><input type="checkbox" onchange="window.__aiImport.confirmField('${field.key}', this.checked)" />确认</label>`;
-  return `<tr class="border-t border-slate-100 ${value.confirmed ? 'bg-teal-50/30' : ''}"><td class="p-3"><div class="font-medium text-slate-800">${field.label}${field.required ? '<span class="ml-1 text-red-500">*</span>' : ''}</div></td><td class="p-3"><select onchange="window.__aiImport.setSource('${field.key}', this.value)" class="h-9 min-w-56 rounded border border-slate-300 bg-white px-2 text-sm">${options.replace(`value="${esc(selected)}"`, `value="${esc(selected)}" selected`)}</select>${value.sourceType === 'fixed' ? `<input value="${esc(value.fixedValue)}" oninput="window.__aiImport.setFixedValue('${field.key}', this.value)" placeholder="输入固定值" class="ml-2 h-9 w-40 rounded border border-slate-300 px-2 text-sm" />` : ''}</td><td class="p-3 text-slate-600">${esc(noMatch ? '没有可用来源列' : sample == null ? '-' : String(sample).slice(0, 80))}</td><td class="p-3"><span class="text-xs ${value.confidence === 'high' ? 'text-teal-700' : value.confidence === 'medium' ? 'text-amber-700' : 'text-slate-500'}">${value.confidence === 'high' ? '高' : value.confidence === 'medium' ? '中' : '低'}置信度</span><div class="mt-1 text-xs text-slate-500">${esc(value.reason || (noMatch ? '未匹配到来源列，请手动选择、设为固定值或不导入' : 'AI 识别建议'))}</div>${alternatives}</td><td class="p-3 text-center">${status}</td></tr>`;
+function resultPanel() {
+  const report = state.report;
+  return `<section class="rounded-lg border ${report?.warnings?.length ? 'border-amber-200 bg-amber-50' : 'border-teal-200 bg-teal-50'} p-6"><span class="material-symbols-outlined text-4xl ${report?.warnings?.length ? 'text-amber-700' : 'text-teal-700'}">${report?.warnings?.length ? 'warning' : 'check_circle'}</span><h2 class="mt-2 text-lg font-semibold text-slate-950">${report?.warnings?.length ? '导入完成，但有后处理警告' : '导入已完成'}</h2><p class="mt-2 text-sm text-slate-700">${esc(report?.sourceName || state.fileName)} · 尝试写入 ${report?.counts?.attempted || 0} 行，实际写入 ${report?.counts?.committed || 0} 行，未写入 ${report?.counts?.notWritten || 0} 行。</p><div class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">${metric('新增', report?.counts?.added)}${metric('更新', report?.counts?.updated)}${metric('重复/跳过', report?.counts?.duplicate)}${metric('冲突/失败', report?.counts?.conflict, report?.counts?.conflict ? 'red' : 'slate')}</div>${report?.warnings?.length ? warningBox(report.warnings) : ''}<button onclick="window.__aiImport.cancel()" class="mt-5 h-9 px-4 bg-teal-700 text-white text-sm">返回${esc(TARGETS[state.targetType].label)}</button></section>`;
 }
-
-function mobileFieldCard(field, sheet) {
-  const value = state.fieldState[field.key] || emptyField(field);
-  const sample = value.sourceType === 'column' ? sheet?.rows?.find(row => String(row[value.source] ?? '').trim() !== '')?.[value.source] : value.fixedValue;
-  const options = ['<option value="">不导入（没有对应列）</option>', '<option value="__fixed__">固定值（每行相同）</option>'].concat((sheet?.headers || []).map(header => `<option value="${esc(header)}">Excel 列：${esc(header)}</option>`)).join('');
-  const selected = value.sourceType === 'fixed' ? '__fixed__' : value.sourceType === 'column' ? value.source : '';
-  const needsConfirmation = value.sourceType !== 'none' && !value.autoMatched && !value.confirmed;
-  return `<section class="p-4 ${value.confirmed ? 'bg-teal-50/30' : 'bg-white'}"><div class="flex items-center justify-between gap-3"><label class="font-semibold text-slate-800">${field.label}${field.required ? '<span class="ml-1 text-red-500">*</span>' : ''}</label>${value.autoMatched ? '<span class="badge badge-green">已自动匹配</span>' : value.sourceType === 'none' ? `<span class="text-xs ${field.required ? 'text-amber-700' : 'text-slate-500'}">${field.required ? '请选择来源' : '不导入'}</span>` : `<label class="text-xs text-amber-800"><input type="checkbox" ${value.confirmed ? 'checked' : ''} onchange="window.__aiImport.confirmField('${field.key}', this.checked)" /> ${needsConfirmation ? '确认采用' : '已确认'}</label>`}</div><select onchange="window.__aiImport.setSource('${field.key}', this.value)" class="mt-3 h-10 w-full border border-slate-300 bg-white px-2 text-sm">${options.replace(`value="${esc(selected)}"`, `value="${esc(selected)}" selected`)}</select>${value.sourceType === 'fixed' ? `<input value="${esc(value.fixedValue)}" oninput="window.__aiImport.setFixedValue('${field.key}', this.value)" placeholder="输入固定值" class="mt-2 h-10 w-full border border-slate-300 px-2 text-sm" />` : ''}<div class="mt-2 text-xs text-slate-500">样本：${esc(value.sourceType === 'none' ? '没有可用来源列' : sample == null ? '-' : String(sample).slice(0, 80))}</div><div class="mt-1 text-xs ${value.confidence === 'high' ? 'text-teal-700' : value.confidence === 'medium' ? 'text-amber-700' : 'text-slate-500'}">${value.confidence === 'high' ? '高' : value.confidence === 'medium' ? '中' : '低'}置信度 · ${esc(value.reason || '请确认映射规则')}</div></section>`;
-}
-
-function projectPicker(projects) { return `<label class="mt-4 block text-sm text-slate-700">导入项目<select onchange="window.__aiImport.setProject(this.value)" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2">${projects.map(project => `<option value="${project.id}" ${project.id === state.projectId ? 'selected' : ''}>${esc(project.name)}</option>`).join('')}</select></label>`; }
-function importModePicker() { return `<div class="mt-4 text-sm"><div class="mb-1 text-slate-700">导入方式</div><label class="mr-4"><input type="radio" name="aiImportMode" ${state.importMode === 'append' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('append')" /> 追加</label><label><input type="radio" name="aiImportMode" ${state.importMode === 'replace' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('replace')" /> 覆盖当前清单</label></div>`; }
-function amountRulePicker() { return `<label class="mt-4 block text-sm text-slate-700">金额规则<select onchange="window.__aiImport.setAmountRule(this.value)" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2"><option value="calculated" ${state.amountRule === 'calculated' ? 'selected' : ''}>数量 × 综合单价</option><option value="sourceAmount" ${state.amountRule === 'sourceAmount' ? 'selected' : ''}>使用 Excel 合价</option><option value="deriveUnitPrice" ${state.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option></select></label>`; }
 
 function bindUpload(workspace) {
-  const input = workspace.querySelector('#aiImportFile'); const zone = workspace.querySelector('#aiImportDrop');
+  const input = workspace.querySelector('#unifiedImportFile');
+  const zone = workspace.querySelector('#unifiedImportDrop');
   if (!input || !zone) return;
   input.onchange = () => chooseFile(workspace, input.files?.[0]);
   zone.ondragover = event => { event.preventDefault(); zone.classList.add('border-teal-500'); };
@@ -175,70 +181,206 @@ function bindUpload(workspace) {
 
 async function chooseFile(workspace, file) {
   if (!file) return;
-  if (!/\.(xlsx|xls)$/i.test(file.name)) return toast('请选择 .xlsx 或 .xls 文件', 'error');
-  try { state.fileName = file.name; state.sheets = await readWorkbookSummary(file); state.sheetIndex = -1; state.recognition = null; state.fieldState = {}; state.combinedMapping = null; state.step = 'sheet'; await paint(workspace); }
-  catch (error) { toast(`文件解析失败：${error.message}`, 'error'); }
-}
-
-function selectSheet(workspace, index) { state.sheetIndex = Number(index); paint(workspace); }
-async function runRecognition(workspace) {
-  const sheet = currentSheet(); if (!sheet?.headers?.length || !sheet.rows.length) return toast('请选择含有可用表头和数据的工作表', 'error');
   state.busy = true; await paint(workspace);
   try {
-    state.recognition = await recognizeBoqImport({ targetType: state.targetType, sheetName: sheet.name, headers: sheet.headers, sampleRows: sheet.rows });
-    state.fieldState = state.recognition.fields;
-    state.combinedMapping = createCombinedMapping(sheet.combinedNameFeature);
-    if (state.combinedMapping?.status === 'ready') applyCombinedFieldState(state.combinedMapping);
-    if (state.combinedMapping?.status === 'invalid') clearUnsafeCombinedSuggestions(state.combinedMapping.source);
-    state.amountRule = state.recognition.amountRule;
-    state.step = 'confirm';
-  }
-  catch (error) { toast(error.message || 'AI 识别失败，请重试', 'error'); }
+    state.workbook = await parseImportFile(file, { csvEncoding: state.csvEncoding, csvDelimiter: state.csvDelimiter });
+    state.fileName = file.name;
+    state.regions = detectImportRegions(state.workbook, { schema: getImportSchema(state.targetType) });
+    state.selectedRegionIds = new Set(state.regions.filter(region => !region.hidden && region.rows.length && region.confidence !== 'low').map(region => region.id));
+    state.step = 'regions';
+    if (!state.regions.length) toast('未自动发现数据区，请检查文件表头', 'error');
+  } catch (error) { toast(error.message || '文件解析失败', 'error'); }
   finally { state.busy = false; await paint(workspace); }
 }
 
-function setSource(workspace, key, source) { const field = state.fieldState[key]; if (!field) return; state.fieldState[key] = { ...field, sourceType: source === '__fixed__' ? 'fixed' : source ? 'column' : 'none', source: source && source !== '__fixed__' ? source : '', fixedValue: source === '__fixed__' ? field.fixedValue : '', confirmed: false, autoMatched: false }; paint(workspace); }
-function setFixedValue(key, fixedValue) { state.fieldState[key] = { ...state.fieldState[key], fixedValue, confirmed: false, autoMatched: false }; }
-function confirmField(workspace, key, confirmed) { state.fieldState[key] = { ...state.fieldState[key], confirmed }; paint(workspace); }
-function createCombinedMapping(meta) { return meta ? { ...meta, confirmed: meta.status === 'ready', autoMatched: meta.status === 'ready' } : null; }
-function applyCombinedFieldState(mapping) {
-  ['name', 'feature'].forEach(key => {
-    const field = state.fieldState[key];
-    if (!field) return;
-    state.fieldState[key] = { ...field, sourceType: 'combined', source: mapping.source, fixedValue: '', transform: mapping.strategy, confidence: 'high', reason: '系统根据合并表头和换行样本识别为“名称 + 特征”列', confirmed: true, autoMatched: true };
-  });
-}
-function clearUnsafeCombinedSuggestions(source) {
-  ['name', 'feature'].forEach(key => {
-    const field = state.fieldState[key];
-    if (field?.source === source) state.fieldState[key] = { ...field, sourceType: 'none', source: '', fixedValue: '', confirmed: false, reason: '合并列没有稳定换行结构，需手动选择来源列' };
-  });
-}
-function confirmCombinedMapping(workspace, confirmed) {
-  if (state.combinedMapping?.status !== 'ready') return;
-  state.combinedMapping.confirmed = confirmed;
-  ['name', 'feature'].forEach(key => { state.fieldState[key] = { ...state.fieldState[key], confirmed }; });
+function adjustRegion(workspace, id) {
+  const index = state.regions.findIndex(region => region.id === id);
+  if (index < 0) return;
+  const current = state.regions[index];
+  const start = Math.max(0, Number(document.getElementById(`regionStart-${safeId(id)}`)?.value || 1) - 1);
+  const end = Math.min(current.matrix.length - 1, Math.max(start, Number(document.getElementById(`regionEnd-${safeId(id)}`)?.value || start + 1) - 1));
+  if (end - start + 1 > 6) return toast('表头最多选择 6 行', 'error');
+  const header = buildHeaderTree({ sheetName: current.sheetName, regionId: current.id, matrix: current.matrix, merges: current.merges, headerStart: start, headerEnd: end });
+  const rows = [];
+  const skippedRows = [];
+  for (let rowIndex = end + 1; rowIndex <= current.dataEnd; rowIndex += 1) {
+    const raw = current.matrix[rowIndex] || [];
+    const kind = classifyImportRow(raw, header.columns);
+    const row = { sourceRow: rowIndex, sourceRowNumber: rowIndex + 1, kind, raw, values: Object.fromEntries(header.columns.map(column => [column.id, raw[column.columnIndex] ?? ''])) };
+    (kind === 'detail' ? rows : skippedRows).push(row);
+  }
+  state.regions[index] = { ...current, headerStart: start, headerEnd: end, dataStart: end + 1, columns: header.columns, rows, skippedRows, title: header.title, warnings: header.warnings, signature: header.columns.map(column => column.normalizedPath.join('>')).join('|'), confidence: 'manual', manualRequired: false };
+  state.selectedRegionIds.add(current.id);
+  toast('已按手动表头范围重新识别', 'success');
   paint(workspace);
 }
-function disableCombinedMapping(workspace) {
-  if (!state.combinedMapping) return;
-  ['name', 'feature'].forEach(key => {
-    const field = state.fieldState[key];
-    state.fieldState[key] = { ...field, sourceType: 'none', source: '', fixedValue: '', transform: '', confirmed: false, confidence: 'low', reason: '请手动选择独立来源列，或将项目特征设为不导入' };
+
+async function prepareMapping(workspace) {
+  if (!state.selectedRegionIds.size) return;
+  if (selectedRegions().some(region => region.confidence === 'low')) return toast('低置信数据区必须先手动确认表头起止行', 'error');
+  state.busy = true; await paint(workspace);
+  try {
+    const groups = groupSelectedRegions();
+    for (const group of groups) {
+      const representative = group.regions[0];
+      const local = buildImportColumnMapping(representative.columns, representative.rows, state.targetType);
+      const recognized = await recognizeImportColumns({ targetType: state.targetType, signature: group.signature, columns: representative.columns, rows: representative.rows }, { localResult: local });
+      state.aiStatusBySignature[group.signature] = recognized;
+      group.regions.forEach(region => {
+        state.mappingByRegion[region.id] = translateMapping(recognized.mapping || local.mapping, representative.columns, region.columns);
+        state.fixedByRegion[region.id] ||= {};
+      });
+      state.fieldMetaBySignature[group.signature] = recognized.fields || local.fields;
+    }
+    state.step = 'mapping';
+  } finally { state.busy = false; await paint(workspace); }
+}
+
+function applyTemplate(workspace, signature, templateId) {
+  if (!templateId) return;
+  const group = groupSelectedRegions().find(item => item.signature === signature);
+  const template = listMappingTemplates({ projectId: state.projectId }).find(item => item.id === templateId && item.targetType === state.targetType);
+  if (!group || !template) return toast('未找到可用映射模板', 'error');
+  group.regions.forEach(region => {
+    const applied = applyHierarchicalTemplate(template, region.columns);
+    state.mappingByRegion[region.id] = applied.mapping;
+    state.fixedByRegion[region.id] = applied.fixedValues;
   });
-  state.combinedMapping = null;
+  state.amountRule = template.amountRule || state.amountRule;
+  state.templateBySignature[signature] = template.id;
+  markMappingTemplateUsed(template.id);
+  toast(`已应用模板“${template.name}”，请在预览前确认必填项`, 'success');
   paint(workspace);
 }
-function setAmountRule(workspace, amountRule) { state.amountRule = amountRule; paint(workspace); }
-function emptyField(def) { return { key: def.key, label: def.label, required: Boolean(def.required), sourceType: 'none', source: '', fixedValue: '', confidence: 'low', reason: '未识别', confirmed: false }; }
-function currentSheet() { return state.sheets[state.sheetIndex] || null; }
+
+function saveTemplate(workspace, signature) {
+  const group = groupSelectedRegions().find(item => item.signature === signature);
+  const name = String(state.templateNameBySignature[signature] || '').trim();
+  if (!group || !name) return toast('请输入模板名称', 'error');
+  const representative = group.regions[0];
+  const mapping = state.mappingByRegion[representative.id] || {};
+  const fixedValues = state.fixedByRegion[representative.id] || {};
+  const columnPaths = Object.fromEntries(Object.entries(mapping).flatMap(([key, columnId]) => {
+    const column = representative.columns.find(item => item.id === columnId);
+    return column ? [[key, column.normalizedPath.join('>')]] : [];
+  }));
+  try {
+    const template = saveMappingTemplate({
+      name, scope: state.templateScopeBySignature[signature] || 'global', projectId: state.projectId,
+      targetType: state.targetType, mapping: Object.fromEntries(Object.entries(mapping).map(([key, id]) => {
+        const column = representative.columns.find(item => item.id === id);
+        return [key, column?.displayName || ''];
+      })), columnPaths, fixedValues, amountRule: state.amountRule,
+      headerFingerprint: { version: 2, signature, columnCount: representative.columns.length },
+    });
+    state.templateBySignature[signature] = template.id;
+    state.templateNameBySignature[signature] = '';
+    toast(`已保存映射模板“${template.name}”`, 'success');
+    paint(workspace);
+  } catch (error) { toast(error.message || '保存模板失败', 'error'); }
+}
+
+export function applyHierarchicalTemplate(template = {}, columns = []) {
+  const mapping = {};
+  const savedPaths = template.columnPaths || {};
+  Object.entries(template.mapping || {}).forEach(([key, savedLabel]) => {
+    const savedPath = savedPaths[key];
+    const exact = savedPath && columns.find(column => column.normalizedPath.join('>') === savedPath);
+    const normalized = normalizeTemplateLabel(savedLabel);
+    const labelMatches = columns.filter(column => normalizeTemplateLabel(column.displayName) === normalized || normalizeTemplateLabel(column.leafName) === normalized);
+    const column = exact || (labelMatches.length === 1 ? labelMatches[0] : null);
+    mapping[key] = column?.id || '';
+  });
+  return { mapping, fixedValues: { ...(template.fixedValues || {}) } };
+}
+
+function normalizeTemplateLabel(value) {
+  return String(value || '').toLowerCase().replace(/[\s\r\n　()（）\[\]【】_\-/]/g, '');
+}
+
+function setGroupMapping(workspace, signature, key, value) {
+  const group = groupSelectedRegions().find(item => item.signature === signature);
+  if (!group) return;
+  const representative = group.regions[0];
+  group.regions.forEach(region => {
+    state.mappingByRegion[region.id] ||= {};
+    state.fixedByRegion[region.id] ||= {};
+    if (value === '__fixed__') { delete state.mappingByRegion[region.id][key]; state.fixedByRegion[region.id][key] = ''; }
+    else {
+      delete state.fixedByRegion[region.id][key];
+      state.mappingByRegion[region.id][key] = value ? translateColumnId(value, representative.columns, region.columns) : '';
+    }
+  });
+  paint(workspace);
+}
+
+function setGroupFixed(workspace, signature, key, value) {
+  const group = groupSelectedRegions().find(item => item.signature === signature);
+  group?.regions.forEach(region => { state.fixedByRegion[region.id] ||= {}; state.fixedByRegion[region.id][key] = value; });
+}
+
+function buildPreview(workspace) {
+  const schema = getImportSchema(state.targetType);
+  const missing = [];
+  for (const region of selectedRegions()) {
+    schema.fields.filter(field => field.required).forEach(field => {
+      if (!state.mappingByRegion[region.id]?.[field.key] && !String(state.fixedByRegion[region.id]?.[field.key] ?? '').trim()) missing.push(`${region.sheetName}：${field.label}`);
+    });
+  }
+  if (missing.length) return toast(`请先补齐必填映射：${[...new Set(missing)].join('、')}`, 'error');
+  state.preview = analyzeImport(state.regions, { targetType: state.targetType, mappings: state.mappingByRegion, fixedValues: state.fixedByRegion, amountRule: state.amountRule, selectedRegionIds: [...state.selectedRegionIds] });
+  state.step = 'preview';
+  paint(workspace);
+}
+
+async function commit(workspace) {
+  if (!state.preview?.counts?.valid) return;
+  if (state.targetType === 'project_boq' && state.importMode === 'replace' && !confirm('覆盖会删除当前项目现有清单，但不会删除已保存报价版本。确定覆盖？')) return;
+  state.busy = true; await paint(workspace);
+  try {
+    state.report = await commitImport(state.preview, { projectId: state.projectId, mode: state.importMode, updateExisting: state.updateExisting, sourceName: state.fileName });
+    saveImportHistory(state.report);
+    state.step = 'result';
+    toast(`导入完成：写入 ${state.report.counts.committed} 行`, 'success');
+  } catch (error) { toast(`导入失败：${error.message}`, 'error'); }
+  finally { state.busy = false; await paint(workspace); }
+}
+
+function commitOptions(projects) {
+  if (state.targetType === 'project_boq') return `<div>${projectPicker(projects)}<div class="mt-3 text-sm"><label class="mr-4"><input type="radio" name="unifiedMode" ${state.importMode === 'append' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('append')"> 追加</label><label><input type="radio" name="unifiedMode" ${state.importMode === 'replace' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('replace')"> 覆盖当前清单</label></div><label class="mt-3 block text-sm">金额规则 <select onchange="window.__aiImport.setAmountRule(this.value)" class="ml-2 h-9 border border-slate-300 bg-white px-2"><option value="calculated" ${state.amountRule === 'calculated' ? 'selected' : ''}>数量 × 综合单价</option><option value="sourceAmount" ${state.amountRule === 'sourceAmount' ? 'selected' : ''}>使用源合价</option><option value="deriveUnitPrice" ${state.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option></select></label></div>`;
+  if (state.targetType === 'material' || state.targetType === 'equipment') return '<label class="text-sm"><input type="checkbox" checked onchange="window.__aiImport.setUpdateExisting(this.checked)"> 更新已有同身份资源</label>';
+  return '<p class="text-sm text-slate-600">将按现有领域去重规则新增或更新数据。</p>';
+}
+
+function projectPicker(projects) { return `<label class="block text-sm text-slate-700">导入项目<select onchange="window.__aiImport.setProject(this.value)" class="ml-2 h-9 min-w-56 border border-slate-300 bg-white px-2">${projects.map(project => `<option value="${project.id}" ${project.id === state.projectId ? 'selected' : ''}>${esc(project.name)}</option>`).join('')}</select></label>`; }
+function targetPicker() { return `<label class="block text-sm text-slate-700">导入目标<select onchange="window.__aiImport.setTarget(this.value)" class="ml-2 h-9 min-w-48 border border-slate-300 bg-white px-2">${Object.entries(TARGETS).map(([key, target]) => `<option value="${key}" ${key === state.targetType ? 'selected' : ''}>${esc(target.label)}</option>`).join('')}</select></label>`; }
+function groupSelectedRegions() { const map = new Map(); selectedRegions().forEach(region => { const group = map.get(region.signature) || { signature: region.signature, regions: [] }; group.regions.push(region); map.set(region.signature, group); }); return [...map.values()]; }
+function selectedRegions() { return state.regions.filter(region => state.selectedRegionIds.has(region.id)); }
+function translateMapping(mapping, sourceColumns, targetColumns) { return Object.fromEntries(Object.entries(mapping || {}).map(([key, id]) => [key, translateColumnId(id, sourceColumns, targetColumns)])); }
+function translateColumnId(id, sourceColumns, targetColumns) { const source = sourceColumns.find(column => column.id === id); if (!source) return ''; return targetColumns.find(column => column.normalizedPath.join('>') === source.normalizedPath.join('>') && column.columnIndex === source.columnIndex)?.id || targetColumns.find(column => column.normalizedPath.join('>') === source.normalizedPath.join('>'))?.id || ''; }
+function metric(label, value, tone = 'slate') { const tones = { slate: 'text-slate-800', teal: 'text-teal-800', red: 'text-red-700', amber: 'text-amber-700' }; return `<div class="border border-slate-200 bg-white p-2"><div class="text-slate-500">${label}</div><div class="mt-1 text-lg font-semibold ${tones[tone]}">${Number(value || 0).toLocaleString('zh-CN')}</div></div>`; }
+function warningBox(items) { return `<div class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">${items.slice(0, 20).map(esc).join('；')}</div>`; }
+function safeId(value) { return String(value).replace(/[^a-z0-9_-]/gi, '_'); }
+function inlineArg(value) { return esc(JSON.stringify(String(value))); }
+function saveImportHistory(report) {
+  try {
+    const key = 'costdb_import_history_v1';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const history = Array.isArray(existing) ? existing : [];
+    history.unshift({
+      targetType: report.targetType, sourceName: report.sourceName, outcome: report.outcome,
+      attempted: report.counts?.attempted || 0, committed: report.counts?.committed || 0,
+      notWritten: report.counts?.notWritten || 0, importedAt: new Date().toISOString(),
+    });
+    localStorage.setItem(key, JSON.stringify(history.slice(0, 20)));
+  } catch {
+    // 本地摘要失败不影响已经完成的业务写入。
+  }
+}
 
 export function getImportBlockingReasons(fields = [], fieldState = {}, { targetType, projectId } = {}) {
   const reasons = [];
-  if (fields.some(field => {
-    const value = fieldState[field.key];
-    return value && value.sourceType !== 'none' && !value.confirmed;
-  })) reasons.push('请确认你修改过或识别不确定的字段');
+  if (fields.some(field => { const value = fieldState[field.key]; return value && value.sourceType !== 'none' && !value.confirmed; })) reasons.push('请确认你修改过或识别不确定的字段');
   fields.filter(field => field.required).forEach(field => {
     const value = fieldState[field.key] || {};
     if (!value.sourceType || value.sourceType === 'none') reasons.push(`“${field.label}”是必填字段：请选择 Excel 来源列或填写固定值`);
@@ -246,61 +388,14 @@ export function getImportBlockingReasons(fields = [], fieldState = {}, { targetT
   });
   if (targetType === 'project_boq' && !projectId) reasons.push('请选择导入项目');
   const used = new Map();
-  for (const field of fields) {
-    const value = fieldState[field.key];
-    if (value?.sourceType !== 'column') continue;
-    const previous = used.get(value.source);
-    const sharedNameFeature = (previous === 'name' || previous === 'feature') && (field.key === 'name' || field.key === 'feature') && normalizeImportHeader(value.source) === '项目名称项目特征';
-    if (previous && !sharedNameFeature) reasons.push(`Excel 列“${value.source}”不能同时映射到多个系统字段`);
-    used.set(value.source, field.key);
-  }
+  fields.forEach(field => { const value = fieldState[field.key]; if (value?.sourceType !== 'column') return; const previous = used.get(value.source); if (previous) reasons.push(`Excel 列「${value.source}」不能同时映射到多个系统字段`); used.set(value.source, field.key); });
   return [...new Set(reasons)];
 }
 
-function canImport() {
-  return getImportBlockingReasons(getRecognitionFields(state.targetType), state.fieldState, { targetType: state.targetType, projectId: state.projectId }).length === 0;
-}
-
-function mappedValue(row, key) { const field = state.fieldState[key]; return field?.sourceType === 'column' || field?.sourceType === 'combined' ? row[field.source] : field?.sourceType === 'fixed' ? field.fixedValue : ''; }
-function mappedNameFeature(row) { return splitImportedNameFeature(mappedValue(row, 'name'), mappedValue(row, 'feature'), { combined: state.fieldState.name?.sourceType === 'combined' && state.fieldState.feature?.sourceType === 'combined' }); }
 export function splitImportedNameFeature(name, feature, { combined = false } = {}) {
   const nameText = String(name || '').replace(/\r\n?/g, '\n').trim();
   const featureText = String(feature || '').replace(/\r\n?/g, '\n').trim();
-  const lines = nameText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  const usesSameCombinedColumn = combined || (nameText && featureText && nameText === featureText);
-  return {
-    name: lines[0] || nameText,
-    feature: (usesSameCombinedColumn ? lines.slice(1).join('\n') : featureText || lines.slice(1).join('\n')).trim(),
-  };
-}
-
-async function importConfirmed(workspace) {
-  if (!canImport()) return toast('请完成所有字段确认并补齐必填字段', 'error');
-  const rows = currentSheet().rows;
-  state.busy = true; await paint(workspace);
-  try {
-    if (state.targetType === 'boq_library') {
-      const result = await boqLibraryService.importRows(rows.map(row => { const split = mappedNameFeature(row); return { major: mappedValue(row, 'major'), code: mappedValue(row, 'code'), name: split.name, feature: split.feature, unit: mappedValue(row, 'unit'), defaultQty: Number(mappedValue(row, 'defaultQty')) || 0, scope: mappedValue(row, 'scope'), structureGroup: mappedValue(row, 'structureGroup'), quotaRefs: mappedValue(row, 'quotaRefs'), source: mappedValue(row, 'source'), version: mappedValue(row, 'version'), note: mappedValue(row, 'note') }; }));
-      toast(`清单库导入完成：新增 ${result.added} 条，更新 ${result.updated} 条`, 'success'); window.__app.go('boq-library'); return;
-    }
-    if (state.importMode === 'replace' && !confirm('覆盖会删除当前项目现有清单，但不会删除已保存报价版本。确定覆盖？')) return;
-    const lines = rows.map(row => { const split = mappedNameFeature(row); const qty = Number(mappedValue(row, 'qty')) || 0; const sourcePrice = Number(mappedValue(row, 'unitPrice')) || 0; const sourceAmount = Number(mappedValue(row, 'amount')) || 0; const unitPrice = state.amountRule === 'deriveUnitPrice' && !sourcePrice && qty > 0 ? sourceAmount / qty : sourcePrice; return { code: mappedValue(row, 'code'), name: split.name, feature: split.feature, unit: mappedValue(row, 'unit'), qty, factor: 1, unitPrice, amount: state.amountRule === 'sourceAmount' && sourceAmount > 0 ? sourceAmount : calculateAmount(qty, unitPrice, 1), priceMissing: hasMissingPrice(unitPrice), process: mappedValue(row, 'process'), structureGroup: mappedValue(row, 'costCategory') || categoryGuess(split.name) }; }).filter(row => row.name && row.unit && row.qty > 0);
-    if (!lines.length) throw new Error('没有可导入的有效清单行');
-    const result = await boqService.importLines(state.projectId, lines, { mode: state.importMode });
-    await dataEngineService.ingestBOQ(state.projectId, { sourceType: 'ai_excel_import', sourceId: state.fileName });
-    if (workspace.isInvalidated) return;
-    window.__app.state.currentProjectId = state.projectId;
-    toast(`项目清单导入完成：成功 ${result.success} 条，缺单价 ${result.missingPrice} 条`, 'success');
-    window.__app.go('importer', {
-      mode: 'hub',
-      importResult: {
-        projectId: state.projectId,
-        success: result.success,
-        missingPrice: result.missingPrice,
-        total: lines.length,
-        sourceName: state.fileName || '项目工程量清单',
-      },
-    });
-  } catch (error) { toast(`导入失败：${error.message}`, 'error'); }
-  finally { state.busy = false; }
+  const lines = nameText.split('\n').map(line => line.trim()).filter(Boolean);
+  const same = combined || (nameText && featureText && nameText === featureText);
+  return { name: lines[0] || nameText, feature: (same ? lines.slice(1).join('\n') : featureText || lines.slice(1).join('\n')).trim() };
 }
