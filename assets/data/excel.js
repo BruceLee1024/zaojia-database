@@ -5,6 +5,7 @@
 import { categoryGuess } from '../utils/stats.js?v=6.3';
 import { calculateAmount } from '../utils/costing.js?v=6.3';
 import { normalizeImportHeader } from '../services/importMappingService.js?v=6.3';
+import { detectImportRegions } from './importEngine.js?v=6.3';
 
 const HEADER_QUOTA  = ['清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'];
 const HEADER_BOQ    = ['序号', '项目编码', '项目名称', '项目特征', '计量单位', '工程数量', '综合单价', '合价'];
@@ -32,18 +33,65 @@ function splitNameFeature(row) {
 
 /** 从 file 解析为行数据 */
 export async function parseExcel(file) {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
-  for (const sheetName of wb.SheetNames) {
-    const matrix = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' });
-    try {
-      const rows = rowsFromSheetMatrix(matrix);
-      if (rows.length) return rows;
-    } catch {
-      // 继续寻找第一个具有可识别清单表头的工作表。
-    }
-  }
+  const workbook = await parseImportFile(file);
+  const region = detectImportRegions(workbook).find(item => !item.hidden && item.rows.length);
+  if (region) return legacyRowsFromRegion(region);
   throw new Error('未能识别清单表头，请确认文件包含项目名称、单位、工程量等字段。');
+}
+
+/**
+ * 读取完整导入工作簿，保留合并区域、可见性、原始矩阵和公式警告。
+ */
+export async function parseImportFile(file, options = {}) {
+  if (!file?.arrayBuffer) throw new Error('请选择可读取的表格文件');
+  const fileName = String(file.name || '未命名表格');
+  const extension = (fileName.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
+  if (!['xlsx', 'xls', 'csv'].includes(extension)) throw new Error('仅支持 .xlsx、.xls 和 .csv 文件');
+  const maxFileSizeBytes = Number(options.maxFileSizeBytes || 200 * 1024 * 1024);
+  if (Number(file.size || 0) > maxFileSizeBytes) throw new Error(`文件超过 ${Math.round(maxFileSizeBytes / 1024 / 1024)}MB 上限，请拆分后导入`);
+  if (!globalThis.XLSX?.read || !globalThis.XLSX?.utils?.sheet_to_json) throw new Error('Excel 解析组件未加载');
+  const buffer = await file.arrayBuffer();
+  let workbook;
+  let csvMeta = null;
+  const warnings = [];
+  try {
+    if (extension === 'csv') {
+      const decoded = decodeCsvBuffer(buffer, options.csvEncoding, options.csvDelimiter);
+      csvMeta = { encoding: decoded.encoding, delimiter: decoded.delimiter, delimiterConfidence: decoded.delimiterConfidence };
+      warnings.push(...decoded.warnings);
+      workbook = XLSX.read(decoded.text, { type: 'string', raw: true, cellText: true, cellFormula: true, nodim: true, FS: decoded.delimiter });
+    } else {
+      workbook = XLSX.read(buffer, { type: 'array', cellText: true, cellFormula: true, cellNF: true, nodim: true });
+    }
+  } catch (error) {
+    throw new Error(`文件解析失败：${error.message || '文件损坏或格式不支持'}`);
+  }
+  const sheets = (workbook.SheetNames || []).map((name, index) => {
+    const worksheet = workbook.Sheets[name];
+    const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: true, blankrows: true });
+    const formulaWarnings = findFormulaWarnings(worksheet, name);
+    return {
+      name,
+      index,
+      hidden: Number(workbook.Workbook?.Sheets?.[index]?.Hidden || 0) > 0,
+      visibility: Number(workbook.Workbook?.Sheets?.[index]?.Hidden || 0),
+      matrix,
+      merges: (worksheet?.['!merges'] || []).map(range => ({ s: { ...range.s }, e: { ...range.e } })),
+      ref: worksheet?.['!ref'] || '',
+      fullRef: worksheet?.['!fullref'] || '',
+      warnings: formulaWarnings,
+    };
+  });
+  sheets.forEach(sheet => warnings.push(...sheet.warnings));
+  if (!sheets.some(sheet => sheet.matrix.some(row => row.some(cell => String(cell ?? '').trim())))) throw new Error('文件中没有可读取的数据');
+  return {
+    fileName,
+    fileType: extension,
+    size: Number(file.size || buffer.byteLength || 0),
+    sheets,
+    warnings: [...new Set(warnings)],
+    csv: csvMeta,
+  };
 }
 
 /**
@@ -51,13 +99,89 @@ export async function parseExcel(file) {
  * 真正的字段合法性仍由确认页控制。
  */
 export async function readWorkbookSummary(file) {
-  const buf = await file.arrayBuffer();
-  const workbook = XLSX.read(buf, { type: 'array' });
-  const sheets = workbook.SheetNames.map(name => ({
-    name,
-    matrix: XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' }),
-  }));
-  return summarizeSheetMatrices(sheets);
+  const workbook = await parseImportFile(file);
+  return summarizeSheetMatrices(workbook.sheets).map(sheet => {
+    const source = workbook.sheets.find(item => item.name === sheet.name);
+    return {
+    ...sheet,
+    hidden: Boolean(source?.hidden),
+    merges: source?.merges || [],
+    warnings: source?.warnings || [],
+    };
+  });
+}
+
+function legacyRowsFromRegion(region) {
+  const labels = new Map();
+  const seen = new Map();
+  region.columns.forEach(column => {
+    const base = column.path.length === 1
+      ? `${column.leaf}${column.unitHint ? ` ${column.unitHint}` : ''}`
+      : `${column.path.join(' ')}${column.unitHint ? ` ${column.unitHint}` : ''}`;
+    const count = (seen.get(base) || 0) + 1;
+    seen.set(base, count);
+    labels.set(column.id, count === 1 ? base : `${base}_${count}`);
+  });
+  return region.rows.map(row => Object.fromEntries(region.columns.map(column => [labels.get(column.id), row.values[column.id] ?? ''])));
+}
+
+export function decodeCsvBuffer(buffer, requestedEncoding = '', requestedDelimiter = '') {
+  const bytes = new Uint8Array(buffer);
+  const warnings = [];
+  const normalized = String(requestedEncoding || '').toLowerCase();
+  const encodings = normalized ? [normalized] : ['utf-8', 'gb18030'];
+  for (const encoding of encodings) {
+    try {
+      const text = new TextDecoder(encoding, { fatal: encoding === 'utf-8' }).decode(bytes).replace(/^\ufeff/, '');
+      if (!normalized && encoding !== 'utf-8') warnings.push(`CSV 未能按 UTF-8 解码，已改用 ${encoding.toUpperCase()}`);
+      const delimiterResult = detectCsvDelimiter(text, requestedDelimiter);
+      warnings.push(...delimiterResult.warnings);
+      return { text, encoding, delimiter: delimiterResult.delimiter, delimiterConfidence: delimiterResult.confidence, warnings };
+    } catch {
+      // 继续尝试下一种常见编码。
+    }
+  }
+  throw new Error('CSV 编码无法识别，请手动选择 UTF-8 或 GB18030');
+}
+
+function detectCsvDelimiter(text, requestedDelimiter = '') {
+  const allowed = [',', '\t', ';'];
+  const explicit = requestedDelimiter === 'tab' ? '\t' : requestedDelimiter;
+  if (allowed.includes(explicit)) return { delimiter: explicit, confidence: 1, warnings: [] };
+  const lines = String(text || '').split(/\r?\n/).filter(line => line.trim()).slice(0, 12);
+  const scores = allowed.map(delimiter => {
+    const counts = lines.map(line => countCsvDelimiter(line, delimiter));
+    const positive = counts.filter(Boolean);
+    const common = positive.length ? Math.max(...positive.map(count => positive.filter(value => value === count).length)) : 0;
+    return { delimiter, score: positive.length ? (positive.length / Math.max(1, lines.length)) * 0.6 + (common / positive.length) * 0.4 : 0 };
+  }).sort((a, b) => b.score - a.score);
+  const best = scores[0] || { delimiter: ',', score: 0 };
+  const confidence = Math.max(0, Math.min(1, best.score - (scores[1]?.score || 0) * 0.35));
+  return {
+    delimiter: best.score ? best.delimiter : ',',
+    confidence,
+    warnings: confidence < 0.6 ? ['CSV 分隔符识别置信度较低，可在上传页手动选择'] : [],
+  };
+}
+
+function countCsvDelimiter(line, delimiter) {
+  let quoted = false;
+  let count = 0;
+  for (let index = 0; index < line.length; index += 1) {
+    if (line[index] === '"') quoted = !quoted;
+    else if (!quoted && line[index] === delimiter) count += 1;
+  }
+  return count;
+}
+
+function findFormulaWarnings(worksheet, sheetName) {
+  const warnings = [];
+  if (!worksheet || Array.isArray(worksheet)) return warnings;
+  Object.entries(worksheet).forEach(([address, cell]) => {
+    if (address.startsWith('!') || !cell?.f) return;
+    if (cell.v === undefined || cell.v === null || cell.v === '') warnings.push(`工作表「${sheetName}」${address} 的公式没有可用缓存结果`);
+  });
+  return warnings.slice(0, 50);
 }
 
 export function summarizeSheetMatrices(sheets = []) {

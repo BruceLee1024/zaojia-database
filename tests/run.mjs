@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { testResourceHealth } from './resourceHealth.mjs';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.3';
-import { detectCombinedNameFeatureMeta, detectRowKind, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.3';
-import { applyMappingTemplate, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.3';
+import { decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.3';
+import { buildHeaderTree, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.3';
+import { applyMappingTemplate, buildImportColumnMapping, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.3';
+import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../assets/services/importSchemaService.js?v=6.3';
+import { analyzeImport, mergeCommitRows } from '../assets/services/importWorkflowService.js?v=6.3';
 import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js?v=6.3';
 import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.3';
-import { createRecognitionRequest, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.3';
-import { getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js?v=6.3';
+import { createHierarchicalRecognitionRequest, createRecognitionRequest, validateColumnRecognitionPayload, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.3';
+import { applyHierarchicalTemplate, getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js?v=6.3';
 import { normalizeHubImportResult } from '../assets/views/importer.js?v=6.3';
 import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js?v=6.3';
 import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js?v=6.3';
@@ -208,6 +213,26 @@ function testMappingTemplates() {
   assert.equal(applied.amountRule, 'calculated');
   deleteMappingTemplate(projectTemplate.id, { storage });
   assert.equal(listMappingTemplates({ projectId: 'p-1' }, { storage }).length, 1);
+
+  const legacyStorage = memoryStorage();
+  legacyStorage.setItem('costdb_import_mapping_templates_v1', JSON.stringify([{ id: 'legacy', name: '旧模板', scope: 'global', mapping: { name: '项目名称' } }]));
+  const migrated = listMappingTemplates({}, { storage: legacyStorage })[0];
+  assert.equal(migrated.version, 2);
+  assert.equal(migrated.targetType, 'project_boq');
+  assert.deepEqual(migrated.columnPaths, {});
+
+  const hierarchical = applyHierarchicalTemplate({
+    mapping: { name: '名称', unitPrice: '单价' },
+    columnPaths: { name: '项目>名称', unitPrice: '综合单价组成>材料费>单价' },
+    fixedValues: { process: '土建' },
+  }, [
+    { id: 'c0', displayName: '项目 / 名称', leafName: '名称', normalizedPath: ['项目', '名称'] },
+    { id: 'c1', displayName: '综合单价组成 / 材料费 / 单价', leafName: '单价', normalizedPath: ['综合单价组成', '材料费', '单价'] },
+    { id: 'c2', displayName: '综合单价组成 / 人工费 / 单价', leafName: '单价', normalizedPath: ['综合单价组成', '人工费', '单价'] },
+  ]);
+  assert.equal(hierarchical.mapping.name, 'c0');
+  assert.equal(hierarchical.mapping.unitPrice, 'c1');
+  assert.deepEqual(hierarchical.fixedValues, { process: '土建' });
 }
 
 function testImportPricingRules() {
@@ -278,6 +303,196 @@ function testSheetHeaderDetection() {
   assert.equal(rows[0]['工程量 m3'], 12.5);
   assert.equal(rows[0]['综合单价 含税'], 680);
   assert.throws(() => rowsFromSheetMatrix([['产品水池扩建工程'], ['说明：请填写完整']]), /未能识别/);
+}
+
+function testMergedHeaderTreeAndRegions() {
+  const matrix = [
+    ['污水厂工程量清单', '', '', '', '', '', ''],
+    ['项目信息', '', '', '费用构成', '', '', ''],
+    ['序号', '名称特征', '', '人工费', '', '材料费', ''],
+    ['', '项目名称', '项目特征', '单价', '合价', '单价', '合价'],
+    [1, '池壁混凝土', 'C30 P8', 120, 1200, 680, 6800],
+    [2, '池底混凝土', 'C35 P8', 130, 1300, 700, 7000],
+    ['', '合计', '', '', 2500, '', 13800],
+    ['序号', '项目名称', '项目特征', '人工单价', '人工合价', '材料单价', '材料合价'],
+    [3, '池顶混凝土', 'C30', 110, 1100, 650, 6500],
+  ];
+  const merges = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
+    { s: { r: 1, c: 3 }, e: { r: 1, c: 6 } },
+    { s: { r: 2, c: 0 }, e: { r: 3, c: 0 } },
+    { s: { r: 2, c: 1 }, e: { r: 2, c: 2 } },
+    { s: { r: 2, c: 3 }, e: { r: 2, c: 4 } },
+    { s: { r: 2, c: 5 }, e: { r: 2, c: 6 } },
+  ];
+
+  const expanded = expandMergedHeaderGrid(matrix, merges, 1, 3);
+  assert.equal(expanded.grid[1][4], '费用构成');
+  assert.equal(expanded.grid[2][0], '序号');
+
+  const header = buildHeaderTree({ sheetName: '清单', regionId: '清单:1', matrix, merges, headerStart: 1, headerEnd: 3 });
+  assert.equal(header.columns.length, 7);
+  assert.equal(header.columns[3].displayName, '费用构成 / 人工费 / 单价');
+  assert.equal(header.columns[5].displayName, '费用构成 / 材料费 / 单价');
+  assert.notEqual(header.columns[3].id, header.columns[5].id);
+
+  const regions = detectImportRegions({ sheets: [{ name: '清单', matrix, merges, hidden: false }] });
+  assert.equal(regions.length >= 2, true);
+  assert.equal(regions[0].columns.some(column => column.path.length >= 3), true);
+  assert.equal(regions.flatMap(region => region.rows).some(row => row.sourceRow === 6), false);
+
+  const englishResource = detectImportRegions({ sheets: [{
+    name: 'Materials', hidden: false, merges: [],
+    matrix: [['name', 'specModel', 'unit', 'unitPrice'], ['PAC', '25kg/bag', 'kg', 2.8]],
+  }] }, { schema: getImportSchema('material') });
+  assert.equal(englishResource.length, 1);
+  assert.equal(englishResource[0].rows.length, 1);
+  assert.equal(englishResource[0].columns[0].leaf, 'name');
+
+  const cityValuesAreNotHeaders = detectImportRegions({ sheets: [{
+    name: 'MaterialCities', hidden: false, merges: [],
+    matrix: [
+      ['name', 'unit', 'province', 'city'],
+      ['PAC', 'kg', '北京市', '北京市'],
+      ['PAM', 'kg', '上海市', '上海市'],
+      ['石灰', 't', '广东省', '广州市'],
+    ],
+  }] }, { schema: getImportSchema('material') });
+  assert.equal(cityValuesAreNotHeaders.length, 1);
+  assert.equal(cityValuesAreNotHeaders[0].rows.length, 3);
+
+  const manualFallback = detectImportRegions({ sheets: [{
+    name: '自定义资料', hidden: false, merges: [],
+    matrix: [['对象描述', '计价口径'], ['池壁施工', '包工包料']],
+  }] }, { schema: getImportSchema('project_boq') });
+  assert.equal(manualFallback.length, 1);
+  assert.equal(manualFallback[0].confidence, 'low');
+  assert.equal(manualFallback[0].manualRequired, true);
+}
+
+function testUnifiedImportSchemaAndHierarchicalMapping() {
+  const columns = [
+    { id: 'c1', columnIndex: 0, path: ['项目信息', '项目名称'], leaf: '项目名称', displayName: '项目信息 / 项目名称' },
+    { id: 'c2', columnIndex: 1, path: ['清单费用', '综合单价'], leaf: '综合单价', displayName: '清单费用 / 综合单价' },
+    { id: 'c3', columnIndex: 2, path: ['费用组成', '材料费', '单价'], leaf: '单价', displayName: '费用组成 / 材料费 / 单价' },
+    { id: 'c4', columnIndex: 3, path: ['项目信息', '单位'], leaf: '单位', displayName: '项目信息 / 单位' },
+    { id: 'c5', columnIndex: 4, path: ['数量', '工程量'], leaf: '工程量', displayName: '数量 / 工程量' },
+  ];
+  const rows = [{ values: { c1: '池壁混凝土', c2: '680', c3: '520', c4: 'm3', c5: '12.5' } }];
+  const result = buildImportColumnMapping(columns, rows, 'project_boq');
+  assert.equal(result.mapping.name, 'c1');
+  assert.equal(result.mapping.unitPrice, 'c2');
+  assert.equal(result.mapping.unitPrice === 'c3', false);
+  assert.equal(result.mapping.unit, 'c4');
+  assert.equal(result.mapping.qty, 'c5');
+  assert.equal(getImportSchema('equipment').fields.some(field => field.key === 'specModel'), true);
+  assert.equal(normalizeImportNumber('￥1,280.50'), 1280.5);
+  assert.equal(normalizeImportNumber('（125.00）'), -125);
+  assert.equal(normalizeImportNumber('5%'), 0.05);
+  assert.equal(normalizeImportDate('2026年7月20日'), '2026-07-20');
+}
+
+function testUnifiedImportAnalysis() {
+  const region = {
+    id: 'sheet:1', signature: 'sig', sheetName: '清单', skippedRows: [],
+    columns: [
+      { id: 'name', columnIndex: 0, path: ['项目名称'], leaf: '项目名称', displayName: '项目名称' },
+      { id: 'unit', columnIndex: 1, path: ['单位'], leaf: '单位', displayName: '单位' },
+      { id: 'qty', columnIndex: 2, path: ['工程量'], leaf: '工程量', displayName: '工程量' },
+      { id: 'price', columnIndex: 3, path: ['综合单价'], leaf: '综合单价', displayName: '综合单价' },
+    ],
+    rows: [
+      { sourceRow: 4, sourceRowNumber: 5, kind: 'detail', values: { name: '池壁混凝土', unit: 'm3', qty: '12.5', price: '￥680' } },
+      { sourceRow: 5, sourceRowNumber: 6, kind: 'detail', values: { name: '无工程量项', unit: '项', qty: '', price: '' } },
+    ],
+  };
+  const preview = analyzeImport([region], { targetType: 'project_boq' });
+  assert.equal(preview.counts.valid, 1);
+  assert.equal(preview.counts.invalid, 1);
+  assert.equal(preview.rows[0].data.amount, 8500);
+  assert.equal(preview.rows[0].sourceRowNumber, 5);
+
+  const contextRegion = {
+    id: 'sheet:context', signature: 'context', sheetName: '上下文',
+    columns: [
+      { id: 'process', columnIndex: 0, path: ['专业'], leaf: '专业', displayName: '专业' },
+      { id: 'name', columnIndex: 1, path: ['项目名称'], leaf: '项目名称', displayName: '项目名称' },
+      { id: 'unit', columnIndex: 2, path: ['单位'], leaf: '单位', displayName: '单位' },
+      { id: 'qty', columnIndex: 3, path: ['工程量'], leaf: '工程量', displayName: '工程量' },
+    ],
+    rows: [
+      { sourceRow: 2, sourceRowNumber: 3, kind: 'detail', values: { process: '土建专业', name: '池壁', unit: 'm3', qty: 1 } },
+      { sourceRow: 3, sourceRowNumber: 4, kind: 'detail', values: { process: '', name: '池底', unit: 'm3', qty: 2 } },
+    ],
+    skippedRows: [],
+  };
+  const inherited = analyzeImport([contextRegion], { targetType: 'project_boq', mappings: { context: { process: 'process', name: 'name', unit: 'unit', qty: 'qty' } } });
+  assert.equal(inherited.rows[1].data.process, '土建专业');
+  assert.equal(inherited.rows[1].data.name, '池底');
+
+  const reportRows = mergeCommitRows([
+    { id: 'r1', importable: true, sheetName: '材料', sourceRowNumber: 2, issues: [] },
+    { id: 'r2', importable: false, sheetName: '材料', sourceRowNumber: 3, issues: [{ severity: 'error', message: '缺少名称' }] },
+    { id: 'r3', importable: true, sheetName: '材料', sourceRowNumber: 4, issues: [] },
+  ], { rows: [
+    { index: 0, status: 'created', priceStatus: 'created', errors: [] },
+    { index: 1, status: 'error', priceStatus: 'none', errors: ['身份冲突'] },
+  ] }, 'material');
+  assert.deepEqual(reportRows.map(row => row.status), ['created', 'invalid', 'error']);
+  assert.equal(reportRows[2].issues[0].message, '身份冲突');
+}
+
+async function testPhysicalWorkbookParsing() {
+  if (!globalThis.XLSX) {
+    const context = { ArrayBuffer, Uint8Array, DataView, TextEncoder, TextDecoder };
+    vm.createContext(context);
+    vm.runInContext(readFileSync(new URL('../assets/vendor/xlsx/xlsx.full.min.js', import.meta.url), 'utf8'), context);
+    globalThis.XLSX = context.XLSX;
+  }
+  assert.equal(globalThis.XLSX.version, '0.20.3');
+  await assert.rejects(() => parseImportFile(new File([new Uint8Array(11)], 'oversized.csv'), { maxFileSizeBytes: 10 }), /文件超过/);
+  for (const [extension, bookType] of [['xlsx', 'xlsx'], ['xls', 'biff8']]) {
+    const workbook = XLSX.utils.book_new();
+    const visible = XLSX.utils.aoa_to_sheet([
+      ['工程量清单', '', '', ''],
+      ['项目信息', '', '费用', ''],
+      ['项目名称', '单位', '工程量', '综合单价'],
+      ['池壁混凝土', 'm3', 12.5, 680],
+    ]);
+    visible['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } }, { s: { r: 1, c: 2 }, e: { r: 1, c: 3 } }];
+    XLSX.utils.book_append_sheet(workbook, visible, '清单');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['项目名称', '单位'], ['隐藏项', '项']]), '隐藏表');
+    workbook.Workbook = { Sheets: [{ Hidden: 0 }, { Hidden: 1 }] };
+    const written = XLSX.write(workbook, { type: 'array', bookType });
+    const bytes = new Uint8Array(written.byteLength);
+    bytes.set(new Uint8Array(written));
+    const parsed = await parseImportFile(new File([bytes], `sample.${extension}`));
+    assert.equal(parsed.fileType, extension);
+    assert.equal(parsed.sheets.length, 2);
+    assert.equal(parsed.sheets[0].merges.length, 3);
+    assert.equal(parsed.sheets[1].hidden, true);
+  }
+  const csvBytes = new TextEncoder().encode('\ufeff项目名称;单位;工程量;综合单价\n池壁混凝土;m3;12.5;680');
+  const decoded = decodeCsvBuffer(csvBytes.buffer);
+  assert.equal(decoded.encoding, 'utf-8');
+  assert.equal(decoded.delimiter, ';');
+  const csv = await parseImportFile(new File([csvBytes], 'sample.csv'));
+  assert.equal(csv.csv.delimiter, ';');
+  assert.equal(csv.sheets[0].matrix[1][0], '池壁混凝土');
+}
+
+function testHierarchicalAiRecognitionValidation() {
+  const request = createHierarchicalRecognitionRequest({
+    targetType: 'project_boq', signature: 'sig',
+    columns: [{ id: 'c1', path: ['项目信息', '项目名称'], leaf: '项目名称', unitHint: '' }, { id: 'c2', path: ['费用', '综合单价'], leaf: '综合单价', unitHint: '元/m3' }],
+    rows: [{ values: { c1: '池壁混凝土', c2: 680 } }],
+  });
+  assert.equal(request.columns[0].samples[0], '池壁混凝土');
+  const result = validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'name', columnId: 'c1', confidence: 'high', reason: '完整路径匹配' }] }, request, { mapping: {} });
+  assert.equal(result.mapping.name, 'c1');
+  assert.throws(() => validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'unknown', columnId: 'c1' }] }, request), /不支持的字段/);
+  assert.throws(() => validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'name', columnId: 'c1' }, { fieldKey: 'feature', columnId: 'c1' }] }, request), /重复列映射/);
 }
 
 function testCombinedNameFeatureColumnMetadata() {
@@ -494,6 +709,11 @@ testImportPricingRules();
 testBoqLibraryItemIdentity();
 testBoqLibraryEditPayload();
 testSheetHeaderDetection();
+testMergedHeaderTreeAndRegions();
+testUnifiedImportSchemaAndHierarchicalMapping();
+testUnifiedImportAnalysis();
+testHierarchicalAiRecognitionValidation();
+await testPhysicalWorkbookParsing();
 testCombinedNameFeatureColumnMetadata();
 testAiImportRecognitionContract();
 testAiImportWizardSafety();

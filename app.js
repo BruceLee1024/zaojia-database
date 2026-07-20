@@ -19,7 +19,7 @@ import { createLatestCoordinator, createLatestWorkspaceCoordinator, createWorksp
 
 const VIEWS = [
   { id: 'dashboard',  label: '我的概览',   icon: ICONS.navigation.overview, group: '我的工作台', desc: '继续最近工作' },
-  { id: 'importer',   label: '导入资料',   icon: ICONS.navigation.import, group: '我的工作台', desc: '清单、定额与备份' },
+  { id: 'importer',   label: '导入资料',   icon: ICONS.navigation.import, group: '我的工作台', desc: '清单、定额、材料和设备' },
   { id: 'ai-import',  label: 'AI 导入',    icon: ICONS.resource.ai, group: '我的工作台', desc: '自由格式清单识别', hidden: true },
   { id: 'quota',      label: '我的定额库', icon: ICONS.navigation.quota, group: '我的工作台', desc: '常用价格参考' },
   { id: 'materials',  label: '我的材料库', icon: ICONS.navigation.materials, group: '我的工作台', desc: '材料主数据与价格' },

@@ -235,7 +235,7 @@ function exposeActions(workspace, generation) {
     preferPrice: async (resourceId, priceId) => { await resourceService.setPreferredPrice(resourceId, priceId); if (!isResourceContextCurrent(context)) return; toast('已设为首选价格', 'success'); await refresh(workspace, generation); await loadPriceHistory(resourceId, workspace, generation); },
     withdrawPrice: async (resourceId, priceId) => { if (!confirm('撤回这条价格快照？历史记录和附件仍保留。')) return; await resourcePriceService.withdraw(priceId); if (!isResourceContextCurrent(context)) return; await refresh(workspace, generation); await loadPriceHistory(resourceId, workspace, generation); },
     addToProject: id => showAddToProject(id, context),
-    importExcel: () => window.__app.go('resource-import', { resourceType: state.resourceType }),
+    importExcel: () => window.__app.go('ai-import', { targetType: state.resourceType }),
     downloadTemplate: () => exportResourceTemplate(state.resourceType),
   };
 }

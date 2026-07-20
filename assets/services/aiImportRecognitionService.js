@@ -2,6 +2,7 @@
 // 标准表头由本地规则优先自动匹配，AI 只负责补充模糊列的建议。
 import { getAIConfig } from './aiService.js?v=6.3';
 import { normalizeImportHeader } from './importMappingService.js?v=6.3';
+import { getImportSchema } from './importSchemaService.js?v=6.3';
 
 const PROJECT_FIELDS = [
   { key: 'code', label: '清单编码', aliases: ['项目编码', '清单编码', '编码'], kind: 'text' },
@@ -34,9 +35,92 @@ const AMOUNT_RULES = new Set(['calculated', 'sourceAmount', 'deriveUnitPrice']);
 const CONFIDENCE = new Set(['high', 'medium', 'low']);
 
 export function getRecognitionFields(targetType) {
-  if (targetType === 'project_boq') return PROJECT_FIELDS.map(field => ({ ...field }));
-  if (targetType === 'boq_library') return LIBRARY_FIELDS.map(field => ({ ...field }));
-  throw new Error('不支持的导入目标');
+  return getImportSchema(targetType).fields.map(field => ({ ...field }));
+}
+
+export function createHierarchicalRecognitionRequest({ targetType, signature = '', columns = [], rows = [] } = {}) {
+  const availableFields = getRecognitionFields(targetType).map(field => ({
+    key: field.key, label: field.label, required: Boolean(field.required), aliases: field.aliases, kind: field.kind,
+  }));
+  return {
+    targetType,
+    signature: String(signature || ''),
+    columns: columns.map(column => ({
+      id: column.id,
+      path: [...(column.path || [])],
+      leaf: column.leaf || '',
+      unitHint: column.unitHint || '',
+      samples: rows.slice(0, 50).map(row => row?.values?.[column.id]).filter(value => value !== '' && value != null).slice(0, 8),
+    })),
+    availableFields,
+  };
+}
+
+export async function recognizeImportColumns(input, { fetchImpl = fetch, localResult = null, timeoutMs = 15000 } = {}) {
+  const request = createHierarchicalRecognitionRequest(input);
+  const cfg = getAIConfig();
+  if (!cfg.api_key) return { ...(localResult || {}), degraded: true, degradationReason: '未配置 AI 模型，已使用本地映射' };
+  try {
+    const controller = new AbortController();
+    let timeout;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeout = setTimeout(() => { controller.abort(); reject(new Error('请求超时')); }, Math.max(1000, timeoutMs));
+    });
+    let response;
+    try {
+      response = await Promise.race([fetchImpl(`${cfg.base_url.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: cfg.model, temperature: 0, response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: hierarchicalRecognitionPrompt() },
+            { role: 'user', content: JSON.stringify(request) },
+          ],
+        }),
+      }), timeoutPromise]);
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = JSON.parse(stripCodeFence((await response.json())?.choices?.[0]?.message?.content || ''));
+    return validateColumnRecognitionPayload(payload, request, localResult);
+  } catch (error) {
+    return { ...(localResult || {}), degraded: true, degradationReason: `AI 识别失败（${error.message || '未知错误'}），已使用本地映射` };
+  }
+}
+
+export function validateColumnRecognitionPayload(payload, request, localResult = null) {
+  const fieldKeys = new Set(request.availableFields.map(field => field.key));
+  const columnIds = new Set(request.columns.map(column => column.id));
+  const mapping = { ...(localResult?.mapping || {}) };
+  const assigned = new Map(Object.entries(mapping).filter(([, columnId]) => columnId).map(([fieldKey, columnId]) => [columnId, fieldKey]));
+  const suggestions = Array.isArray(payload?.suggestions) ? payload.suggestions : [];
+  suggestions.forEach(item => {
+    const fieldKey = String(item?.fieldKey || '');
+    const columnId = String(item?.columnId || '');
+    if (!fieldKeys.has(fieldKey)) throw new Error(`AI 返回了不支持的字段：${fieldKey}`);
+    if (!columnIds.has(columnId)) throw new Error(`AI 返回的列 ${columnId} 不存在`);
+    const occupiedBy = assigned.get(columnId);
+    if (occupiedBy && occupiedBy !== fieldKey) throw new Error(`AI 返回了重复列映射：${columnId}`);
+    if (item.confidence === 'high' || !mapping[fieldKey]) {
+      if (mapping[fieldKey]) assigned.delete(mapping[fieldKey]);
+      mapping[fieldKey] = columnId;
+      assigned.set(columnId, fieldKey);
+    }
+  });
+  return {
+    ...(localResult || {}),
+    mapping,
+    suggestions: suggestions.map(item => ({
+      fieldKey: String(item.fieldKey), columnId: String(item.columnId),
+      confidence: CONFIDENCE.has(item.confidence) ? item.confidence : 'low', reason: String(item.reason || 'AI 识别建议'),
+    })),
+    summary: String(payload?.summary || 'AI 已补充层级表头映射'),
+    degraded: false,
+    degradationReason: '',
+  };
 }
 
 export function createRecognitionRequest({ targetType, sheetName = '', headers = [], sampleRows = [], availableFields } = {}) {
@@ -221,6 +305,10 @@ function unique(values) { return [...new Set(values.filter(Boolean))]; }
 
 function recognitionSystemPrompt() {
   return `你是工程量清单 Excel 字段识别器。只返回 JSON 对象，不能返回 Markdown 或解释文字。\n字段必须来自 availableFields，source 必须精确等于 headers 中的列名。每个字段返回 sourceType(column/fixed/none)、source、fixedValue、confidence(high/medium/low)、reason、alternatives。不要猜测不存在的列，不要填入业务数据。amountRule 只能是 calculated、sourceAmount 或 deriveUnitPrice。`;
+}
+
+function hierarchicalRecognitionPrompt() {
+  return `你是工程造价表格的层级表头映射器。只返回 JSON 对象，格式为 {"summary":"","suggestions":[{"fieldKey":"","columnId":"","confidence":"high|medium|low","reason":""}]}。fieldKey 必须来自 availableFields，columnId 必须精确来自 columns.id。必须结合完整 path、leaf、unitHint 和 samples，不得因为多个叶子都叫“单价”而忽略父级语义。不要返回不存在的列或字段。`;
 }
 
 function pickRow(row, headers) {

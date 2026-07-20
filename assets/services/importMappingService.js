@@ -1,4 +1,5 @@
 // Excel 导入字段映射：表头语义与样本值双重校验，默认只确认高置信字段。
+import { getImportSchema } from './importSchemaService.js?v=6.3';
 
 export const IMPORT_FIELD_DEFS = [
   { key: 'name', label: '清单名称', required: true, aliases: ['项目名称', '清单名称', '工程名称', '名称', '项目名称项目特征'], kind: 'text' },
@@ -55,6 +56,44 @@ export function buildImportMapping(headers = [], sampleRows = []) {
   });
 
   return { mapping, fields };
+}
+
+/** 针对层级表头列的统一映射，返回稳定列 ID 而不是可重复的叶子名称。 */
+export function buildImportColumnMapping(columns = [], sampleRows = [], targetType = 'project_boq') {
+  const schema = getImportSchema(targetType);
+  const used = new Set();
+  const mapping = {};
+  const fields = {};
+  schema.fields.forEach(def => {
+    const candidates = columns
+      .map(column => scoreImportColumn(def, column, sampleRows))
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+    const candidate = candidates.find(item => !used.has(item.column.id)) || null;
+    const confidence = candidate ? confidenceFor(candidate.score) : 'none';
+    const confirmed = confidence === 'high';
+    const source = confirmed ? candidate.column.id : '';
+    if (source) used.add(source);
+    mapping[def.key] = source;
+    fields[def.key] = {
+      key: def.key,
+      label: def.label,
+      required: Boolean(def.required),
+      kind: def.kind,
+      source,
+      candidateSource: candidate?.column.id || '',
+      candidateLabel: candidate?.column.displayName || '',
+      alternatives: candidates.slice(0, 3).map(item => item.column.id),
+      confidence,
+      status: source ? 'confirmed' : candidate ? 'needs-review' : 'missing',
+      reason: candidate
+        ? `${confidence === 'high' ? '已根据' : '请确认'}完整表头路径「${candidate.column.displayName}」`
+        : '未找到可识别的来源列',
+      confirmed,
+      sourceType: source ? 'column' : 'none',
+    };
+  });
+  return { targetType, mapping, fields };
 }
 
 export function createHeaderFingerprint(headers = []) {
@@ -163,6 +202,35 @@ function scoreCandidate(def, source) {
     score += 8;
   }
   return { header: source.header, score, profile: source.profile };
+}
+
+function scoreImportColumn(def, column, rows) {
+  const leaf = normalizeImportHeader(column.leaf);
+  const path = normalizeImportHeader((column.path || []).join(' '));
+  let semantic = 0;
+  for (const alias of def.aliases || []) {
+    const normalized = normalizeImportHeader(alias);
+    if (!normalized) continue;
+    if (leaf === normalized) semantic = Math.max(semantic, 94);
+    else if (path === normalized) semantic = Math.max(semantic, 92);
+    else if (leaf.includes(normalized) || normalized.includes(leaf)) semantic = Math.max(semantic, 82);
+    else if (path.includes(normalized)) semantic = Math.max(semantic, 76);
+  }
+  if (!semantic) return null;
+  const fullPath = String((column.path || []).join(' '));
+  if ((def.positiveContext || []).some(value => normalizeImportHeader(fullPath).includes(normalizeImportHeader(value)))) semantic += 8;
+  if ((def.negativeContext || []).some(value => normalizeImportHeader(fullPath).includes(normalizeImportHeader(value)))) semantic -= 25;
+  const values = rows.slice(0, 50).map(row => row?.values?.[column.id]).filter(value => value !== '' && value != null);
+  if (def.kind === 'number' || def.kind === 'money' || def.kind === 'percent') {
+    const numericRate = values.length ? values.filter(isNumericValue).length / values.length : 0;
+    if (values.length && numericRate < 0.5) return null;
+    semantic += numericRate >= 0.8 ? 8 : 0;
+  }
+  if (def.kind === 'unit' && values.length) {
+    const unitRate = values.filter(value => /^(?:m|m2|m3|㎡|m²|m³|t|kg|套|台|项|根|座|块|个|组|工日)$/i.test(String(value).trim())).length / values.length;
+    if (unitRate >= 0.5) semantic += 8;
+  }
+  return { column, score: semantic };
 }
 
 function semanticHeaderScore(aliases, normalizedHeader) {

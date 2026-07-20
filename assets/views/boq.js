@@ -4,11 +4,10 @@ import { boqService, groupForLine } from '../services/boqService.js?v=6.3';
 import { boqLibraryService } from '../services/boqLibraryService.js?v=6.3';
 import { projectService } from '../services/projectService.js?v=6.3';
 import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.3';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.3';
 import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.3';
 import { openReview } from './experience.js?v=6.3';
 import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.3';
-import { parseExcel, detectRowKind, rowToBOQ, exportBOQExcel } from '../data/excel.js?v=6.3';
+import { exportBOQExcel } from '../data/excel.js?v=6.3';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
 import { categoryGuess } from '../utils/stats.js?v=6.3';
 import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.3';
@@ -1124,103 +1123,6 @@ async function pickBoqLibrary() {
   };
   document.getElementById('pickLibraryKw').oninput = event => renderChoices(event.target.value);
   renderChoices();
-}
-
-function importBOQExcel(projectId, currentLineCount = 0) {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.xlsx,.xls';
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    try {
-      const rows = await parseExcel(file);
-      const boqRows = rows
-        .filter(row => detectRowKind(row) === 'boq')
-        .map(row => rowToBOQ(row, projectId))
-        .filter(row => row.name);
-      if (!boqRows.length) {
-        toast('没有识别到工程量清单表头，请检查 Excel 格式', 'error');
-        return;
-      }
-      const missing = boqRows.filter(row => hasMissingPrice(row.unitPrice)).length;
-      const preview = boqRows.slice(0, 5);
-      openModal('导入工程量清单', `
-        <div class="space-y-4 text-sm">
-          <div class="rounded border border-slate-200 bg-slate-50 p-3">
-            <div class="font-medium text-slate-800">${esc(file.name)}</div>
-            <div class="mt-1 text-slate-500">识别到 ${boqRows.length} 条清单，缺单价 ${missing} 条。当前项目已有 ${currentLineCount} 条清单。</div>
-          </div>
-          <div>
-            <div class="mb-2 font-medium text-slate-700">导入方式</div>
-            <label class="mr-4"><input type="radio" name="boq_import_mode" value="append" checked /> 追加到当前清单</label>
-            <label><input type="radio" name="boq_import_mode" value="replace" /> 覆盖当前项目清单</label>
-          </div>
-          <div class="border rounded overflow-hidden">
-            <table class="w-full text-xs">
-              <thead class="bg-slate-50 text-slate-500"><tr><th class="py-2 px-2 text-left">名称</th><th class="px-2">单位</th><th class="px-2 text-right">工程量</th><th class="px-2 text-right">单价</th></tr></thead>
-              <tbody>
-                ${preview.map(row => `<tr class="border-t"><td class="py-2 px-2">${esc(row.name)}</td><td class="px-2">${esc(row.unit || '')}</td><td class="px-2 text-right tabular-nums">${row.qty || 0}</td><td class="px-2 text-right tabular-nums">${hasMissingPrice(row.unitPrice) ? '<span class="badge badge-yellow">缺单价</span>' : fmtMoney(row.unitPrice)}</td></tr>`).join('')}
-              </tbody>
-            </table>
-          </div>
-          ${missing ? '<div class="text-amber-700 text-xs">提示：综合单价为空或为 0 的清单会按 0 计入合价，导入后请优先补价。</div>' : ''}
-        </div>
-      `, `
-        <button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">取消</button>
-        <button id="boq_import_ok" class="px-3 py-1.5 text-sm brand-bg text-white rounded">确认导入</button>
-      `);
-      document.getElementById('boq_import_ok').onclick = async () => {
-        const mode = document.querySelector('input[name="boq_import_mode"]:checked')?.value || 'append';
-        if (mode === 'replace' && currentLineCount && !confirm('覆盖会删除当前项目现有清单，但不会删除报价版本。确定覆盖？')) return;
-        const result = await boqService.importLines(projectId, boqRows, { mode });
-        const engine = await dataEngineService.ingestBOQ(projectId, {
-          sourceType: 'excel',
-          sourceId: file.name,
-        });
-        closeModal();
-        toast(`导入成功 ${result.success} 条，已生成沉淀候选 ${engine.candidates.length} 条，匹配率 ${Math.round((engine.report.matchRate || 0) * 100)}%`, 'success');
-        showImportResult(result, engine);
-        boqState.selectedIds.clear();
-        boqState.activeId = '';
-        render();
-      };
-    } catch (e) {
-      console.error(e);
-      toast(`导入失败：${e.message}`, 'error');
-    }
-  };
-  input.click();
-}
-
-function showImportResult(result, engine) {
-  openModal('导入结果与数据沉淀', `
-    <div class="space-y-4 text-sm">
-      <div class="grid grid-cols-4 gap-2">
-        ${resultMetric('成功导入', result.success, '条')}
-        ${resultMetric('缺单价', result.missingPrice, '条')}
-        ${resultMetric('匹配定额', result.matchedQuota, '条')}
-        ${resultMetric('沉淀候选', engine.candidates.length, '条')}
-      </div>
-      <div class="rounded border border-slate-200 bg-slate-50 p-3">
-        <div class="flex items-center justify-between">
-          <div class="font-medium text-slate-800">质量报告：${esc(engine.report.qualityLevel)}</div>
-          <span class="badge badge-gray">匹配率 ${Math.round((engine.report.matchRate || 0) * 100)}%</span>
-        </div>
-        <div class="mt-2 space-y-1 text-xs text-slate-600">
-          ${engine.report.issues.length ? engine.report.issues.map(i => `<div>${esc(i.message)}</div>`).join('') : '<div>未发现明显风险，已生成待检查记录。</div>'}
-        </div>
-      </div>
-      <div class="text-xs text-slate-500">待检查记录不会直接参与默认参考，可在「造价参考」中查看并确认是否可用。</div>
-    </div>
-  `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm brand-bg text-white rounded">知道了</button>`);
-}
-
-function resultMetric(label, value, unit) {
-  return `<div class="rounded border border-slate-200 bg-white p-3">
-    <div class="text-xs text-slate-500">${label}</div>
-    <div class="mt-1 text-lg font-semibold tabular-nums text-slate-900">${value}<span class="ml-1 text-xs font-normal text-slate-500">${unit}</span></div>
-  </div>`;
 }
 
 function batchAdjust(selectedOnly = false) {

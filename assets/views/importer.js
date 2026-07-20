@@ -117,16 +117,18 @@ function exposeImporterActions(workspace) {
       if (state.projectId) window.__app.go('boq', { projectId: state.projectId });
       else window.__app.go('boq');
     },
-    importMaterials: () => window.__app.go('resource-import', { resourceType: 'material' }),
-    importEquipment: () => window.__app.go('resource-import', { resourceType: 'equipment' }),
+    importMaterials: () => window.__app.go('ai-import', { targetType: 'material' }),
+    importEquipment: () => window.__app.go('ai-import', { targetType: 'equipment' }),
+    importBoqLibrary: () => window.__app.go('ai-import', { targetType: 'boq_library' }),
     selectHubType: type => {
-      if (!['boq', 'quota', 'material', 'equipment'].includes(type)) return;
+      if (!['boq', 'boq_library', 'quota', 'material', 'equipment'].includes(type)) return;
       state.hubSelectedType = type;
       renderHub(workspace);
     },
     continueHubImport: () => {
       const actionByType = {
         boq: 'startBOQImport',
+        boq_library: 'importBoqLibrary',
         quota: 'importQuotaExcel',
         material: 'importMaterials',
         equipment: 'importEquipment',
@@ -319,7 +321,7 @@ function renderHub(workspace = document.getElementById('workspace')) {
             数据导入流程
           </div>
           <h1 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">导入资料</h1>
-          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-500">按步骤导入定额、项目清单、材料或设备数据。每份文件先经过字段识别与质检，确认后才会写入本地资料库。</p>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-500">按步骤导入项目清单、清单库、定额、材料或设备数据。每份文件先经过字段识别与质检，确认后才会写入本地资料库。</p>
         </div>
         <div class="flex items-center gap-2 text-xs text-slate-500" aria-label="存储状态">
           <span class="pulse-dot" aria-hidden="true"></span>
@@ -332,7 +334,7 @@ function renderHub(workspace = document.getElementById('workspace')) {
         <h2 id="import-flow-title" class="sr-only">导入步骤</h2>
         <ol class="grid grid-cols-1 divide-y divide-slate-200 md:grid-cols-4 md:divide-x md:divide-y-0">
           ${hubStep('1', '选择数据类型', '确认要导入的资料', !importComplete, importComplete)}
-          ${hubStep('2', '上传文件', '选择 Excel 或 JSON 文件', false, importComplete)}
+          ${hubStep('2', '上传文件', '选择 Excel 或 CSV 文件', false, importComplete)}
           ${hubStep('3', '数据质检', '识别字段并生成报告', false, importComplete)}
           ${hubStep('4', '确认写入', '确认后保存到本地库', false, importComplete)}
         </ol>
@@ -353,8 +355,9 @@ function renderHub(workspace = document.getElementById('workspace')) {
                 下载定额 Excel 模板
               </button>
             </div>
-            <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
               ${hubTypeCard({ type: 'boq', icon: 'list_alt', title: '工程量清单', desc: '导入项目清单、分部分项与计价信息。', meta: activeProject ? `目标项目：${activeProject.name}` : '需先选择或建立目标项目', tone: 'teal' })}
+              ${hubTypeCard({ type: 'boq_library', icon: 'format_list_bulleted', title: '清单库', desc: '导入可跨项目复用的标准清单。', meta: '支持编码优先和复合身份去重', tone: 'blue' })}
               ${hubTypeCard({ type: 'quota', icon: 'menu_book', title: '常用定额', desc: '导入定额项目及其综合单价、消耗量和特征。', meta: '支持 Excel 模板与字段映射', tone: 'blue' })}
               ${hubTypeCard({ type: 'material', icon: 'category', title: '材料库', desc: '导入材料编码、规格、品牌和价格历史。', meta: '按编码优先，预览后再写入', tone: 'slate' })}
               ${hubTypeCard({ type: 'equipment', icon: 'precision_manufacturing', title: '设备库', desc: '导入设备参数、购置价与安装价口径。', meta: '支持设备购置与综合安装价', tone: 'slate' })}
@@ -365,13 +368,10 @@ function renderHub(workspace = document.getElementById('workspace')) {
           <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(310px,.85fr)]">
             <section class="rounded-xl border border-slate-200 bg-white" aria-labelledby="recent-import-title">
               <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
-                <div><h2 id="recent-import-title" class="font-semibold text-slate-900">最近导入记录</h2><p class="mt-1 text-xs text-slate-500">可查看历史导入的质检报告与处理状态。</p></div>
-                <button type="button" onclick="window.__importer.goVersions()" class="text-sm font-medium text-teal-700 hover:underline">查看全部</button>
+                <div><h2 id="recent-import-title" class="font-semibold text-slate-900">最近导入记录</h2><p class="mt-1 text-xs text-slate-500">仅记录当前浏览器最近完成的导入摘要。</p></div>
               </div>
               <div class="divide-y divide-slate-100">
-                ${hubRecentRow('menu_book', '常用定额_2026-05.xlsx', '常用定额', '3,842 条记录', '已完成', 'badge-green')}
-                ${hubRecentRow('category', '材料库_市政污水_2026-05.xlsx', '材料库', '2,317 条记录', '部分通过', 'badge-yellow')}
-                ${hubRecentRow('precision_manufacturing', '设备清单_泵站_2026-05.xlsx', '设备库', '362 条记录', '待处理', 'badge-blue')}
+                ${hubRecentImports()}
               </div>
             </section>
             <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="quality-context-title">
@@ -403,7 +403,7 @@ function renderHub(workspace = document.getElementById('workspace')) {
 
           <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="template-context-title">
             <h2 id="template-context-title" class="font-semibold text-slate-900">模板与说明</h2>
-            <div class="mt-3 space-y-2 text-sm"><button type="button" onclick="window.__importer.downloadTemplate()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>下载定额 Excel 模板</button><button type="button" onclick="window.__importer.importMaterials()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入材料库模板</button><button type="button" onclick="window.__importer.importEquipment()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入设备库模板</button></div>
+            <div class="mt-3 space-y-2 text-sm"><button type="button" onclick="window.__importer.downloadTemplate()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>下载定额 Excel 模板</button><button type="button" onclick="window.__importer.importBoqLibrary()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入清单库</button><button type="button" onclick="window.__importer.importMaterials()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入材料库模板</button><button type="button" onclick="window.__importer.importEquipment()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入设备库模板</button></div>
           </section>
 
           <section class="rounded-xl border border-amber-200 bg-amber-50/60 p-4" aria-label="备份提醒">
@@ -451,10 +451,11 @@ function hubTypeCard({ type, icon, title, desc, meta, tone }) {
 
 function hubUploadPanel() {
   const copyByType = {
-    boq: ['工程量清单', 'Excel / JSON', '开始清单导入'],
-    quota: ['常用定额', 'Excel', '选择定额 Excel'],
-    material: ['材料库', 'Excel', '选择材料 Excel'],
-    equipment: ['设备库', 'Excel', '选择设备 Excel'],
+    boq: ['工程量清单', 'Excel / CSV', '开始清单导入'],
+    boq_library: ['清单库', 'Excel / CSV', '开始清单库导入'],
+    quota: ['常用定额', 'Excel / CSV', '开始定额导入'],
+    material: ['材料库', 'Excel / CSV', '开始材料导入'],
+    equipment: ['设备库', 'Excel / CSV', '开始设备导入'],
   };
   const [type, formats, action] = copyByType[state.hubSelectedType] || copyByType.boq;
   return `<section class="mt-4 border-t border-slate-200 pt-4" aria-labelledby="upload-file-title">
@@ -472,6 +473,21 @@ function hubRecentRow(icon, fileName, type, count, status, badgeClass) {
     <div class="min-w-0 flex-1"><div class="truncate text-sm font-medium text-slate-800">${esc(fileName)}</div><div class="mt-0.5 text-xs text-slate-500">${esc(type)} · ${esc(count)}</div></div>
     <span class="badge ${badgeClass}">${esc(status)}</span>
   </div>`;
+}
+
+function hubRecentImports() {
+  const meta = {
+    project_boq: ['list_alt', '项目清单'], boq_library: ['format_list_bulleted', '清单库'], quota: ['menu_book', '常用定额'],
+    material: ['category', '材料库'], equipment: ['precision_manufacturing', '设备库'],
+  };
+  let records = [];
+  try { records = JSON.parse(localStorage.getItem('costdb_import_history_v1') || '[]'); } catch { records = []; }
+  if (!Array.isArray(records) || !records.length) return '<div class="px-5 py-8 text-center text-sm text-slate-400">暂无真实导入记录</div>';
+  return records.slice(0, 5).map(record => {
+    const [icon, label] = meta[record.targetType] || ['upload_file', '数据'];
+    const warning = record.outcome === 'success_with_warnings' || Number(record.notWritten || 0) > 0;
+    return hubRecentRow(icon, record.sourceName || '未命名文件', label, `${Number(record.committed || 0).toLocaleString('zh-CN')} 条写入`, warning ? '有警告' : '已完成', warning ? 'badge-yellow' : 'badge-green');
+  }).join('');
 }
 
 function hubCheck(icon, text) {
@@ -1026,29 +1042,7 @@ async function handleFile(file, workspace = document.getElementById('workspace')
 }
 
 async function importQuotaExcel() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.xlsx,.xls';
-  input.onchange = async e => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const result = await quotaService.importFromExcel(file);
-      localStorage.setItem('quota_last_import', JSON.stringify({
-        fileName: file.name,
-        importedAt: new Date().toISOString(),
-        success: result.success,
-        missingPrice: result.missingPrice,
-      }));
-      toast(`定额库导入完成：成功 ${result.success} 条，缺单价 ${result.missingPrice} 条`, result.failed ? 'error' : 'success');
-      await window.__app.go('quota');
-      showQuotaImportResult(result);
-    } catch (err) {
-      console.error(err);
-      toast(`定额库导入失败：${err.message}`, 'error');
-    }
-  };
-  input.click();
+  await window.__app.go('ai-import', { targetType: 'quota' });
 }
 
 function showQuotaImportResult(result) {

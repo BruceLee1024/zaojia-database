@@ -1,5 +1,6 @@
 // 本地字段映射模板：仅保存配置，不保存 Excel 行数据。
-const TEMPLATE_STORAGE_KEY = 'costdb_import_mapping_templates_v1';
+const TEMPLATE_STORAGE_KEY = 'costdb_import_mapping_templates_v2';
+const LEGACY_TEMPLATE_STORAGE_KEY = 'costdb_import_mapping_templates_v1';
 
 export function createMappingTemplate(input = {}) {
   const now = new Date().toISOString();
@@ -10,11 +11,13 @@ export function createMappingTemplate(input = {}) {
     name: String(input.name || '').trim(),
     scope,
     projectId: scope === 'project' ? String(input.projectId) : '',
+    targetType: String(input.targetType || 'project_boq'),
     headerFingerprint: input.headerFingerprint || { version: 1, headers: [], columnCount: 0 },
     mapping: { ...(input.mapping || {}) },
+    columnPaths: { ...(input.columnPaths || {}) },
     fixedValues: { ...(input.fixedValues || {}) },
     amountRule: ['calculated', 'sourceAmount', 'deriveUnitPrice'].includes(input.amountRule) ? input.amountRule : 'calculated',
-    version: 1,
+    version: 2,
     createdAt: input.createdAt || now,
     updatedAt: now,
     lastUsedAt: input.lastUsedAt || '',
@@ -73,11 +76,22 @@ export function markMappingTemplateUsed(id, { storage = localStorage } = {}) {
 
 function readTemplates(storage) {
   try {
-    const value = JSON.parse(storage?.getItem(TEMPLATE_STORAGE_KEY) || '[]');
-    return Array.isArray(value) ? value : [];
+    const current = JSON.parse(storage?.getItem(TEMPLATE_STORAGE_KEY) || '[]');
+    if (Array.isArray(current) && current.length) return current.map(normalizeStoredTemplate);
+    const legacy = JSON.parse(storage?.getItem(LEGACY_TEMPLATE_STORAGE_KEY) || '[]');
+    return Array.isArray(legacy) ? legacy.map(template => normalizeStoredTemplate({ ...template, version: 1 })) : [];
   } catch {
     return [];
   }
+}
+
+function normalizeStoredTemplate(template = {}) {
+  return {
+    ...template,
+    targetType: String(template.targetType || 'project_boq'),
+    columnPaths: { ...(template.columnPaths || {}) },
+    version: 2,
+  };
 }
 
 function writeTemplates(templates, storage) {
