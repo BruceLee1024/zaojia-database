@@ -114,7 +114,7 @@ export async function testBackupService() {
   const entries = zip.unzipSync(new Uint8Array(await archive.arrayBuffer()));
   assert.deepEqual(Object.keys(entries).sort(), ['attachments/r1/a1-quote.pdf', 'backup.json', 'manifest.json']);
   const manifest = JSON.parse(new TextDecoder().decode(entries['manifest.json']));
-  assert.equal(manifest.schemaVersion, 2);
+  assert.equal(manifest.schemaVersion, 3);
   assert.equal(manifest.attachments[0].sha256, attachment().sha256);
 
   let asyncZipCalled = false;

@@ -1,5 +1,5 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, resourcePriceRepo } from '../data/repository.js?v=6.3';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.3';
 import { boqService, groupForLine } from '../services/boqService.js?v=6.3';
 import { boqLibraryService } from '../services/boqLibraryService.js?v=6.3';
 import { projectService } from '../services/projectService.js?v=6.3';
@@ -77,6 +77,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   const activeLine = boq.find(b => b.id === boqState.activeId) || filteredBoq[0] || null;
   if (!boqState.activeId && activeLine) boqState.activeId = activeLine.id;
   const activeRecommendations = activeLine ? await boqService.recommendQuota(activeLine, 4) : [];
+  const activeQuotaRelations = activeLine ? await projectBoqQuotaRelationRepo.byBoqLine(activeLine.id) : [];
   const librarySource = activeLine?.boqLibraryItemId ? await boqLibraryRepo.findById(activeLine.boqLibraryItemId) : null;
   const totalCost = boq.reduce((s, b) => s + (b.amount || 0), 0);
   const missingPriceCount = boq.filter(b => hasMissingPrice(b.unitPrice)).length;
@@ -138,7 +139,7 @@ export async function render(workspace = document.getElementById('workspace')) {
 
         </div>
         <aside id="boqDetail" class="boq-detail-inspector card min-h-0 overflow-hidden">
-          ${detailPanel(activeLine, activeRecommendations, librarySource)}
+          ${detailPanel(activeLine, activeRecommendations, librarySource, activeQuotaRelations)}
         </aside>
       </div>
     </div>
@@ -755,7 +756,7 @@ function boqMetric(label, value, suffix = '', cls = '') {
   </div>`;
 }
 
-function detailPanel(line, recommendations = [], librarySource = null) {
+function detailPanel(line, recommendations = [], librarySource = null, quotaRelations = []) {
   const collapsed = false;
   const activeTab = ['content', 'pricing', 'relation'].includes(boqState.detailTab) ? boqState.detailTab : 'content';
   const tabClass = key => `detail-tab inline-flex h-9 min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold ${activeTab === key ? 'bg-white text-teal-800 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'}`;
@@ -820,7 +821,7 @@ function detailPanel(line, recommendations = [], librarySource = null) {
               <input id="detailQty" type="number" step="0.01" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm text-right tabular-nums" value="${line.qty || 0}" />
             </label>
             <label class="block text-xs font-medium text-slate-500">综合单价
-              <input id="detailUnitPrice" type="number" step="0.01" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm text-right tabular-nums" value="${line.unitPrice || 0}" />
+              <input id="detailUnitPrice" type="number" step="0.01" ${line.pricingMode === 'composition' ? 'readonly' : ''} class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm text-right tabular-nums ${line.pricingMode === 'composition' ? 'bg-slate-100 text-slate-600' : ''}" value="${line.unitPrice || 0}" />
             </label>
             <label class="col-span-2 block text-xs font-medium text-slate-500">调整系数
               <input id="detailFactor" type="number" step="0.001" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm text-right tabular-nums" value="${line.factor || 1}" />
@@ -850,7 +851,8 @@ function detailPanel(line, recommendations = [], librarySource = null) {
           </div>
         </section>
         <section data-detail-pane="relation" class="detail-pane ${activeTab === 'relation' ? '' : 'hidden'} bg-white border border-slate-200 rounded-xl p-4">
-          <div class="mb-3 flex items-center justify-between"><div><div class="font-medium text-slate-800">定额与资源关联</div><div class="mt-1 text-xs text-slate-500">查看价格口径，并从推荐项替换当前清单定额。</div></div>${line.quotaItemId ? '<span class="badge badge-green">已匹配</span>' : '<span class="badge badge-yellow">未匹配</span>'}</div>
+          <div class="mb-3 flex items-center justify-between"><div><div class="font-medium text-slate-800">定额与资源关联</div><div class="mt-1 text-xs text-slate-500">项目内保存独立用量和价格快照，不随定额库自动变价。</div></div>${quotaRelations.length || line.quotaItemId ? `<span class="badge badge-green">${quotaRelations.length || 1} 条定额</span>` : '<span class="badge badge-yellow">未匹配</span>'}</div>
+          ${projectQuotaRelationsHtml(quotaRelations)}
           ${renderBoqResourceReference(buildBoqResourceViewModel(line))}
           <div class="mt-3 grid grid-cols-1 gap-2">${recommendations.length ? recommendations.map(item => `<button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50"><div class="truncate font-medium text-slate-800">${esc(item.name || '')}</div><div class="mt-1 flex justify-between text-xs text-slate-500"><span>${esc(item.unit || '-')} · 匹配 ${Number(item.score || 0).toFixed(1)}</span><span>${hasMissingPrice(item.priceTotal) ? '缺单价' : fmtMoney(item.priceTotal)}</span></div></button>`).join('') : '<div class="rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}</div>
         </section>
@@ -858,6 +860,15 @@ function detailPanel(line, recommendations = [], librarySource = null) {
     </div>
     <div class="flex items-center justify-between gap-2 border-t border-slate-200 bg-white p-3"><button id="detailDelete" type="button" class="h-9 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">删除</button><button id="detailSave" type="button" class="inline-flex h-9 items-center gap-1 rounded brand-bg px-3 text-sm text-white"><span class="material-symbols-outlined text-[17px]">save</span>保存明细</button></div>
   </div>`;
+}
+
+function projectQuotaRelationsHtml(relations = []) {
+  if (!relations.length) return '<div class="mb-3 rounded border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">该项目清单尚未保存多定额组成</div>';
+  return `<div class="mb-3 space-y-2">${[...relations].sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0)).map((relation, index) => {
+    const quota = relation.quotaSnapshot || {};
+    const adjustment = Number(quota.priceTotal || 0) < 0;
+    return `<div class="rounded border border-slate-200 bg-slate-50 p-3"><div class="flex items-start gap-2"><span class="text-xs text-slate-400">${index + 1}</span><div class="min-w-0 flex-1"><div class="font-medium text-slate-800">${esc(quota.code || '未编码')} · ${esc(quota.name || '未命名定额')} ${adjustment ? '<span class="badge badge-yellow">负价调整</span>' : ''}</div><div class="mt-1 text-xs text-slate-500">${relation.quantityBasis === 'total' ? '总套用量' : '单位含量'} ${Number(relation.quantityValue || 0).toLocaleString('zh-CN')} · ${esc(quota.unit || '-')} · 快照价 ${Number(quota.priceTotal || 0).toLocaleString('zh-CN')}</div></div></div></div>`;
+  }).join('')}</div>`;
 }
 
 function bindDetailActions(line, project) {

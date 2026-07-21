@@ -1,5 +1,5 @@
 // 项目服务
-import { projectRepo, boqRepo, versionRepo, dataCandidateRepo, dataFactRepo, dataJobRepo, dataQualityReportRepo, projectLifecycleEventRepo } from '../data/repository.js?v=6.3';
+import { projectRepo, boqRepo, projectBoqQuotaRelationRepo, versionRepo, dataCandidateRepo, dataFactRepo, dataJobRepo, dataQualityReportRepo, projectLifecycleEventRepo } from '../data/repository.js?v=6.3';
 import { uid } from '../utils/dom.js?v=6.3';
 import { recomputeProjectCost } from './boqService.js?v=6.3';
 import { dataEngineService } from './dataEngineService.js?v=6.3';
@@ -80,6 +80,7 @@ export const projectService = {
     try {
       await projectRepo.replaceAll(snapshot.projects.filter(item => item.id !== id));
       await boqRepo.replaceAll(snapshot.boq.filter(item => item.projectId !== id));
+      await projectBoqQuotaRelationRepo.replaceAll(snapshot.quotaRelations.filter(item => item.projectId !== id));
       await versionRepo.replaceAll(snapshot.versions.filter(item => item.projectId !== id));
       await dataEngineService.discardProjectArtifacts(id, { includeVersions: true });
       await recordProjectLifecycleEvent(id, 'deleted', { deletionRequestId: event.id, name: project.name || '' });
@@ -146,15 +147,15 @@ export const projectService = {
 };
 
 async function snapshotProjectStores() {
-  const [projects, boq, versions, facts, candidates, jobs, reports, events] = await Promise.all([
-    projectRepo.all(), boqRepo.all(), versionRepo.all(), dataFactRepo.all(), dataCandidateRepo.all(), dataJobRepo.all(), dataQualityReportRepo.all(), projectLifecycleEventRepo.all(),
+  const [projects, boq, quotaRelations, versions, facts, candidates, jobs, reports, events] = await Promise.all([
+    projectRepo.all(), boqRepo.all(), projectBoqQuotaRelationRepo.all(), versionRepo.all(), dataFactRepo.all(), dataCandidateRepo.all(), dataJobRepo.all(), dataQualityReportRepo.all(), projectLifecycleEventRepo.all(),
   ]);
-  return { projects, boq, versions, facts, candidates, jobs, reports, events };
+  return { projects, boq, quotaRelations, versions, facts, candidates, jobs, reports, events };
 }
 
 async function restoreProjectStores(snapshot) {
   await Promise.all([
-    projectRepo.replaceAll(snapshot.projects), boqRepo.replaceAll(snapshot.boq), versionRepo.replaceAll(snapshot.versions),
+    projectRepo.replaceAll(snapshot.projects), boqRepo.replaceAll(snapshot.boq), projectBoqQuotaRelationRepo.replaceAll(snapshot.quotaRelations), versionRepo.replaceAll(snapshot.versions),
     dataFactRepo.replaceAll(snapshot.facts), dataCandidateRepo.replaceAll(snapshot.candidates), dataJobRepo.replaceAll(snapshot.jobs),
     dataQualityReportRepo.replaceAll(snapshot.reports), projectLifecycleEventRepo.replaceAll(snapshot.events),
   ]);

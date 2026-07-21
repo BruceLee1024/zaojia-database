@@ -3,7 +3,7 @@ import { quotaService } from '../services/quotaService.js?v=6.3';
 import { boqService } from '../services/boqService.js?v=6.3';
 import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.3';
 import { exportQuotaTemplate } from '../data/excel.js?v=6.3';
-import { hasMissingPrice } from '../utils/costing.js?v=6.3';
+import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.3';
 import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.3';
 import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.3';
 
@@ -186,7 +186,7 @@ function quotaRows(rows) {
   }
   return visible.map(it => {
     const active = editorState.selectedId === it.id;
-    const missing = hasMissingPrice(it.priceTotal);
+    const missing = isQuotaMissing(it);
     return `
       <tr class="border-b border-slate-100 cursor-pointer ${active ? 'bg-teal-50/80 shadow-[inset_3px_0_0_#0f766e]' : 'hover:bg-slate-50'}" onclick="window.__quota.select('${it.id}')">
         <td class="py-2.5 px-3"><span class="badge badge-blue">${esc(it.category || '未分类')}</span></td>
@@ -204,7 +204,7 @@ function quotaMobileCards(rows) {
   const visible = rows.slice(0, 500);
   if (!visible.length) return '<div class="px-5 py-12 text-center text-sm text-slate-400">没有匹配的定额条目。请调整筛选条件，或导入定额库。</div>';
   return visible.map(it => {
-    const missing = hasMissingPrice(it.priceTotal);
+    const missing = isQuotaMissing(it);
     return `<button type="button" class="w-full px-4 py-3 text-left hover:bg-teal-50/50" data-mobile-quota="${esc(it.id)}">
       <div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="badge badge-blue">${esc(it.category || '未分类')}</span>${priceBadge(it)}</div><div class="mt-2 truncate font-semibold text-slate-900">${esc(it.name || '未命名定额')}</div><div class="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">${esc(it.feature || '未填写项目特征')}</div></div><div class="shrink-0 text-right"><div class="text-xs text-slate-500">${esc(it.unit || '-')}</div><div class="mt-2 font-semibold tabular-nums ${missing ? 'text-amber-700' : 'text-slate-900'}">${missing ? '待补价' : fmtMoney(it.priceTotal)}</div><span class="material-symbols-outlined mt-2 text-slate-400" aria-hidden="true">chevron_right</span></div></div>
     </button>`;
@@ -232,7 +232,7 @@ function pager(rows) {
 
 function kpiStrip(rows) {
   const total = rows.length;
-  const missing = rows.filter(row => hasMissingPrice(row.priceTotal)).length;
+  const missing = rows.filter(isQuotaMissing).length;
   const priced = total - missing;
   const pricedRate = total ? Math.round(priced / total * 1000) / 10 : 0;
   const missingRate = total ? Math.round(missing / total * 1000) / 10 : 0;
@@ -274,7 +274,7 @@ function inspector(it) {
     </div>`;
   }
 
-  const missing = hasMissingPrice(it.priceTotal);
+  const missing = isQuotaMissing(it);
   const rows = breakdownRows(it);
   return `
     <div class="h-full flex flex-col">
@@ -301,9 +301,11 @@ function inspector(it) {
           ${detailMetric('价格状态', missing ? '缺单价' : '已定价')}
         </div>
 
+        ${detailBlock('定额编码', it.code || '未填写定额编码。')}
         ${detailBlock('项目特征', it.feature || '未填写项目特征。')}
         ${detailBlock('工作内容', it.work || '未填写工作内容。')}
         ${detailBlock('计算规则', it.rule || '按设计图示或当前定额口径计算。')}
+        ${detailBlock('清单库引用', `被 ${Number(it.libraryUsageCount || 0)} 条清单关系套用；项目中另有 ${Number(it.projectUsageCount || 0)} 条引用。`)}
 
         <section>
           <div class="mb-3 flex items-center justify-between">
@@ -381,7 +383,7 @@ function breakdownBar(row, index) {
 }
 
 function bottomPanels(rows) {
-  const missingRows = rows.filter(row => hasMissingPrice(row.priceTotal));
+  const missingRows = rows.filter(isQuotaMissing);
   const unitMissing = rows.filter(row => !row.unit);
   const unclassified = rows.filter(row => !row.category || row.category === '未分类');
   const recent = [...rows].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))).slice(0, 3);
@@ -437,10 +439,13 @@ function emptyBottom(text) {
 }
 
 function priceBadge(it) {
-  return hasMissingPrice(it.priceTotal)
-    ? '<span class="badge badge-red">缺单价</span>'
-    : '<span class="badge badge-green">已定价</span>';
+  const status = quotaPriceStatus(it.priceTotal, it.priceStatus !== 'missing');
+  if (status === 'adjustment') return '<span class="badge badge-yellow">负价调整</span>';
+  if (status === 'zero') return '<span class="badge badge-yellow">零单价</span>';
+  return status === 'missing' ? '<span class="badge badge-red">缺单价</span>' : '<span class="badge badge-green">已定价</span>';
 }
+
+function isQuotaMissing(it) { return ['missing', 'zero'].includes(it?.priceStatus || quotaPriceStatus(it?.priceTotal, it?.priceMissing !== true)); }
 
 function selectedItem() {
   return lastRows.find(row => row.id === editorState.selectedId) || null;
@@ -548,6 +553,10 @@ function quotaForm(it) {
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="mb-3 font-semibold text-slate-900">基础信息</div>
         <div class="grid grid-cols-4 gap-3">
+          <label class="block">
+            <span class="text-xs font-medium text-slate-500">定额编码</span>
+            <input id="qf_code" class="mt-1 h-10 w-full border bg-slate-50 px-3 text-sm" value="${esc(it.code || '')}" />
+          </label>
           <label class="block">
             <span class="text-xs font-medium text-slate-500">分类</span>
             <input id="qf_cat" class="mt-1 h-10 w-full border bg-slate-50 px-3 text-sm" value="${esc(it.category)}" />
@@ -791,6 +800,7 @@ function syncModalDraft() {
   const it = editorState.modalItem || emptyQuota();
   const val = id => document.getElementById(id)?.value;
   it.category = (val('qf_cat') || '').trim();
+  it.code = (val('qf_code') || '').trim();
   it.unit = (val('qf_unit') || '').trim();
   it.priceTotal = parseFloat(val('qf_price')) || 0;
   it.tags = (val('qf_tags') || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);

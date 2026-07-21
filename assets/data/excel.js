@@ -331,6 +331,7 @@ export function rowToQuotaItem(row) {
   const priceTotal = parseFloat(rawPrice) || 0;
   const { name, feature } = splitNameFeature(row);
   return {
+    code: firstValue(row, ['定额编码', '编码', '项目编码']) || '',
     category: categoryGuess(name),
     name,
     feature,

@@ -22,6 +22,7 @@ import { testResourceWorkbench } from './resourceWorkbench.mjs';
 import { testResourceAttachments } from './resourceAttachments.mjs';
 import { testBackupService } from './backupService.mjs';
 import { testQuotaBoqIntegration } from './quotaBoqIntegration.mjs';
+import { testBoqQuotaRelations } from './boqQuotaRelations.mjs';
 import { testFinalFixes } from './finalFixes.mjs';
 import { testAiCopilot, testAiSessionPersistence } from './aiCopilot.mjs';
 
@@ -737,6 +738,7 @@ await testResourceWorkbench();
 await testResourceAttachments();
 await testBackupService();
 await testQuotaBoqIntegration();
+await testBoqQuotaRelations();
 await testResourceHealth();
 await testFinalFixes();
 testAiCopilot();

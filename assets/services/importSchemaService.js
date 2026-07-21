@@ -4,6 +4,21 @@ const COMMON_NAME = ['项目名称', '清单名称', '工程名称', '名称', '
 const COMMON_UNIT = ['计量单位', '单位', '计量'];
 
 const SCHEMAS = {
+  boq_quota_bundle: schema('boq_quota_bundle', '清单及定额组合', [
+    field('layer', '层级', ['层级', '类型', '行类型', '数据类型'], 'text', true),
+    field('sequence', '序号', ['序号', '顺序号'], 'text'),
+    field('code', '编码', ['编码', '项目编码', '清单编码', '定额编码'], 'text'),
+    field('name', '名称', COMMON_NAME, 'text', true),
+    field('feature', '项目特征 / 工作内容 / 规格', ['项目特征', '工作内容', '规格', '特征描述'], 'text'),
+    field('unit', '单位', COMMON_UNIT, 'unit', true),
+    field('qty', '工程量', ['工程量', '工程数量', '数量', '定额工程量'], 'number'),
+    field('unitPrice', '综合单价', ['综合单价', '单价'], 'money'),
+    field('amount', '合价', ['合价', '金额', '总价'], 'money'),
+    field('labor', '人工费', ['人工费'], 'money'), field('material', '材料费', ['材料费'], 'money'),
+    field('machine', '机械费', ['机械费'], 'money'), field('management', '管理费', ['管理费'], 'money'),
+    field('profit', '利润', ['利润'], 'money'), field('taxRate', '税率', ['税率', '税率(%)'], 'percent'),
+    field('note', '备注', ['备注', '说明'], 'text'),
+  ]),
   project_boq: schema('project_boq', '项目工程量清单', [
     field('code', '清单编码', ['项目编码', '清单编码', '编码'], 'text'),
     field('name', '清单名称', COMMON_NAME, 'text', true),
@@ -106,4 +121,3 @@ function resourceSchema(key, label) {
 
 function schema(key, label, fields) { return { key, label, fields }; }
 function field(key, label, aliases, kind, required = false, extra = {}) { return { key, label, aliases, kind, required, ...extra }; }
-
