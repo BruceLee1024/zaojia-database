@@ -5,8 +5,10 @@ import { storageGet, storageSet } from './storage.js?v=6.3';
 export const STORES = {
   quota_items: 'quota_items',
   boq_library_items: 'boq_library_items',
+  boq_library_quota_relations: 'boq_library_quota_relations',
   projects:    'projects',
   project_boq: 'project_boq',
+  project_boq_quota_relations: 'project_boq_quota_relations',
   boq_versions: 'boq_versions',
   indicators:  'indicators',
   data_facts: 'data_facts',
@@ -79,6 +81,11 @@ export const boqLibraryRepo = {
   replaceAll: arr => dbSetAll(STORES.boq_library_items, arr),
 };
 
+export const boqLibraryQuotaRelationRepo = createRepo(STORES.boq_library_quota_relations, {
+  byBoqLibraryItem: boqLibraryItemId => dbQuery(STORES.boq_library_quota_relations, item => item.boqLibraryItemId === boqLibraryItemId),
+  byQuota: quotaItemId => dbQuery(STORES.boq_library_quota_relations, item => item.quotaItemId === quotaItemId),
+});
+
 export const projectRepo = {
   all: () => dbGetAll(STORES.projects),
   findById: id => dbFind(STORES.projects, id),
@@ -99,6 +106,12 @@ export const boqRepo = {
   ),
   replaceAll: arr => dbSetAll(STORES.project_boq, arr),
 };
+
+export const projectBoqQuotaRelationRepo = createRepo(STORES.project_boq_quota_relations, {
+  byProject: projectId => dbQuery(STORES.project_boq_quota_relations, item => item.projectId === projectId),
+  byBoqLine: projectBoqLineId => dbQuery(STORES.project_boq_quota_relations, item => item.projectBoqLineId === projectBoqLineId),
+  byQuota: quotaItemId => dbQuery(STORES.project_boq_quota_relations, item => item.quotaItemId === quotaItemId),
+});
 
 export const versionRepo = {
   all: () => dbGetAll(STORES.boq_versions),

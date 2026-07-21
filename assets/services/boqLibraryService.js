@@ -1,9 +1,10 @@
 // 独立清单库：标准清单条目维护与套用到项目
-import { boqLibraryRepo, boqRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.3';
+import { boqLibraryQuotaRelationRepo, boqLibraryRepo, boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.3';
 import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.3';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
 import { uid } from '../utils/dom.js?v=6.3';
 import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.3';
+import { boqQuotaRelationService, calculateQuotaRelations, normalizeQuotaRelation, quotaSnapshot } from './boqQuotaRelationService.js?v=6.3';
 
 const now = () => new Date().toISOString();
 const clean = value => String(value ?? '').trim();
@@ -38,7 +39,20 @@ export const boqLibraryService = {
   async list(filters = {}) {
     const { keyword = '', major = '', code = '', unit = '', scope = '', status = '' } = filters;
     const kw = clean(keyword).toLowerCase();
-    return (await boqLibraryRepo.all()).filter(item => {
+    const [libraryItems, allRelations] = await Promise.all([boqLibraryRepo.all(), boqLibraryQuotaRelationRepo.all()]);
+    const relationMap = new Map();
+    allRelations.forEach(relation => {
+      const rows = relationMap.get(relation.boqLibraryItemId) || [];
+      rows.push(relation);
+      relationMap.set(relation.boqLibraryItemId, rows);
+    });
+    return libraryItems.map(item => {
+      const quotaRelations = relationMap.get(item.id) || [];
+      const relationIds = quotaRelations.map(relation => relation.quotaItemId).filter(Boolean);
+      const quotaItemIds = relationIds.length ? [...new Set(relationIds)] : (item.quotaItemIds || []);
+      const composition = calculateQuotaRelations(quotaRelations, item.defaultQty);
+      return { ...item, quotaItemIds, quotaRelations, quotaCount: quotaRelations.length || quotaItemIds.length, referenceUnitPrice: composition.unitPrice };
+    }).filter(item => {
       if (major && item.major !== major) return false;
       if (code && !clean(item.code).includes(code)) return false;
       if (unit && item.unit !== unit) return false;
@@ -47,7 +61,12 @@ export const boqLibraryService = {
       return !kw || [item.code, item.name, item.feature, item.major, item.scope].join(' ').toLowerCase().includes(kw);
     }).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   },
-  get: id => boqLibraryRepo.findById(id),
+  async get(id) {
+    const item = await boqLibraryRepo.findById(id);
+    if (!item) return null;
+    const quotaRelations = await boqQuotaRelationService.libraryRelations(id);
+    return { ...item, quotaRelations, quotaItemIds: [...new Set(quotaRelations.map(row => row.quotaItemId).filter(Boolean))], quotaCount: quotaRelations.length, referenceUnitPrice: calculateQuotaRelations(quotaRelations, item.defaultQty).unitPrice };
+  },
   async options(field) {
     return [...new Set((await boqLibraryRepo.all()).map(item => clean(item[field])).filter(Boolean))].sort();
   },
@@ -57,9 +76,20 @@ export const boqLibraryService = {
     if (!normalized.name || !normalized.unit) throw new Error('请填写清单名称和单位');
     const duplicate = findDuplicateLibraryItem(all, normalized, normalized.id);
     if (duplicate) throw new Error(`已存在相同清单：${duplicate.code || duplicate.name}`);
-    if (normalized.id) return boqLibraryRepo.update(normalized.id, normalized);
+    if (normalized.id) {
+      const saved = await boqLibraryRepo.update(normalized.id, normalized);
+      if (Array.isArray(data.quotaRelations)) await boqQuotaRelationService.replaceLibraryRelations(normalized.id, data.quotaRelations);
+      else if (Array.isArray(data.quotaItemIds)) {
+        const quotas = await quotaRepo.all();
+        const existingRelations = await boqQuotaRelationService.libraryRelations(normalized.id);
+        const next = data.quotaItemIds.map((quotaItemId, index) => existingRelations.find(row => row.quotaItemId === quotaItemId) || normalizeQuotaRelation({ quotaItemId, quotaSnapshot: quotaSnapshot(quotas.find(row => row.id === quotaItemId) || { id: quotaItemId }) }, { ownerId: normalized.id, order: index }));
+        await boqQuotaRelationService.replaceLibraryRelations(normalized.id, next);
+      }
+      return saved;
+    }
     normalized.id = uid();
     await boqLibraryRepo.upsert(normalized);
+    if (Array.isArray(data.quotaRelations)) await boqQuotaRelationService.replaceLibraryRelations(normalized.id, data.quotaRelations);
     return normalized;
   },
   async copy(id) {
@@ -70,7 +100,13 @@ export const boqLibraryService = {
     await boqLibraryRepo.upsert(clone);
     return clone;
   },
-  remove: id => boqLibraryRepo.remove(id),
+  async remove(id) {
+    const relations = await boqLibraryQuotaRelationRepo.all();
+    await Promise.all([
+      boqLibraryRepo.remove(id),
+      boqLibraryQuotaRelationRepo.replaceAll(relations.filter(row => row.boqLibraryItemId !== id)),
+    ]);
+  },
   async batchUpdate(ids, patch) {
     const all = await boqLibraryRepo.all();
     const target = new Set(ids);
@@ -83,7 +119,8 @@ export const boqLibraryService = {
     return this.importRows(rows.map(rowToBoqLibraryItem));
   },
   async importRows(rows = []) {
-    const [items, quotas] = await Promise.all([boqLibraryRepo.all(), quotaRepo.all()]);
+    const [items, quotas, originalRelations] = await Promise.all([boqLibraryRepo.all(), quotaRepo.all(), boqLibraryQuotaRelationRepo.all()]);
+    const relations = [...originalRelations];
     const result = { total: rows.length, success: 0, added: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
     rows.forEach((raw, index) => {
       const item = normalizeLibraryItem(raw);
@@ -95,27 +132,41 @@ export const boqLibraryService = {
       const existing = findDuplicateLibraryItem(items, item);
       if (existing) { Object.assign(existing, { ...item, id: existing.id, createdAt: existing.createdAt }); result.updated++; }
       else { item.id = uid(); items.push(item); result.added++; }
+      const owner = existing || item;
+      const nextRelations = item.quotaItemIds.map((quotaItemId, relationIndex) => normalizeQuotaRelation({
+        quotaItemId, quotaSnapshot: quotaSnapshot(quotas.find(row => row.id === quotaItemId) || { id: quotaItemId }),
+      }, { ownerId: owner.id, order: relationIndex }));
+      relations.splice(0, relations.length, ...relations.filter(row => row.boqLibraryItemId !== owner.id), ...nextRelations);
       result.success++;
     });
     await boqLibraryRepo.replaceAll(items);
+    await boqLibraryQuotaRelationRepo.replaceAll(relations);
     return result;
   },
   async applyToProject(libraryItemId, projectId) {
-    const [item, project, quotas] = await Promise.all([boqLibraryRepo.findById(libraryItemId), projectRepo.findById(projectId), quotaRepo.all()]);
+    const [item, project, originalLines, originalRelations] = await Promise.all([boqLibraryRepo.findById(libraryItemId), projectRepo.findById(projectId), boqRepo.all(), projectBoqQuotaRelationRepo.all()]);
     if (!item) throw new Error('清单库条目不存在');
     if (!project) throw new Error('项目不存在');
-    const quota = (item.quotaItemIds || []).length === 1 ? quotas.find(q => q.id === item.quotaItemIds[0]) : null;
-    const unitPrice = quota ? (quota.useBreakdown ? Object.values(quota.breakdown || {}).reduce((sum, value) => sum + (Number(value) || 0), 0) : Number(quota.priceTotal || 0)) : 0;
+    const libraryRelations = await boqQuotaRelationService.libraryRelations(libraryItemId);
+    const composition = calculateQuotaRelations(libraryRelations, Number(item.defaultQty) || 0);
+    const unitPrice = composition.unitPrice;
     const line = {
-      id: uid(), projectId, boqLibraryItemId: item.id, quotaItemId: quota?.id || '', code: item.code,
+      id: uid(), projectId, boqLibraryItemId: item.id, quotaItemId: libraryRelations.length === 1 ? libraryRelations[0].quotaItemId || '' : '', code: item.code,
       name: item.name, feature: item.feature, unit: item.unit, qty: Number(item.defaultQty) || 0,
-      factor: 1, unitPrice, amount: calculateAmount(item.defaultQty, unitPrice, 1),
+      factor: 1, pricingMode: libraryRelations.length ? 'composition' : 'manual', compositionUnitPrice: unitPrice,
+      unitPrice, amount: calculateAmount(item.defaultQty, unitPrice, 1),
       priceMissing: hasMissingPrice(unitPrice), structureGroup: item.structureGroup || groupForLine(item),
     };
-    await boqRepo.upsert(line);
-    const referencePatch = { referenceCount: (Number(item.referenceCount) || 0) + 1, lastReferencedAt: now(), lastReferencedProjectName: project.name || '', updatedAt: now() };
-    await boqLibraryRepo.update(item.id, referencePatch);
-    await recomputeProjectCost(projectId);
-    return line;
+    try {
+      await boqRepo.replaceAll([...originalLines, line]);
+      await boqQuotaRelationService.copyLibraryToProject(item.id, projectId, line.id);
+      const referencePatch = { referenceCount: (Number(item.referenceCount) || 0) + 1, lastReferencedAt: now(), lastReferencedProjectName: project.name || '', updatedAt: now() };
+      await boqLibraryRepo.update(item.id, referencePatch);
+      await recomputeProjectCost(projectId);
+      return line;
+    } catch (error) {
+      await Promise.allSettled([boqRepo.replaceAll(originalLines), projectBoqQuotaRelationRepo.replaceAll(originalRelations)]);
+      throw error;
+    }
   },
 };

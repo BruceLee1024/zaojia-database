@@ -12,7 +12,8 @@ export const ALLOWED_ATTACHMENT_MIMES = new Set([
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 const BACKUP_APP = 'wastewater-cost-db';
-const BACKUP_SCHEMA_VERSION = 2;
+const BACKUP_SCHEMA_VERSION = 3;
+const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set([2, 3]);
 
 export function createRepositoryBackupAdapter({ getStore, setStore, getAttachment, setAttachment, removeAttachment }) {
   return { getStore, setStore, getAttachment, setAttachment, removeAttachment };
@@ -240,7 +241,7 @@ function normalizeStores(data) {
 
 function validateBackupJson(data) {
   if (!isRecord(data)) throw backupError('BACKUP_SCHEMA_INVALID', '备份根对象无效。');
-  if ((data.app != null && data.app !== BACKUP_APP) || (data.schemaVersion != null && data.schemaVersion !== BACKUP_SCHEMA_VERSION)) {
+  if ((data.app != null && data.app !== BACKUP_APP) || (data.schemaVersion != null && !SUPPORTED_BACKUP_SCHEMA_VERSIONS.has(Number(data.schemaVersion)))) {
     throw backupError('BACKUP_SCHEMA_INVALID', '备份的应用标识或 schemaVersion 无效。');
   }
   for (const store of BACKUP_STORES) {
@@ -281,6 +282,8 @@ function validateBusinessSemantics(stores) {
   }
   const resourceIds = new Set(stores.resource_items.map(record => record.id));
   const quotaIds = new Set(stores.quota_items.map(record => record.id));
+  const libraryIds = new Set(stores.boq_library_items.map(record => record.id));
+  const projectBoqIds = new Set(stores.project_boq.map(record => record.id));
   const prices = new Map(stores.resource_prices.map(record => [record.id, record]));
   for (const resource of stores.resource_items) {
     if (!resource.preferredPriceId) continue;
@@ -303,6 +306,16 @@ function validateBusinessSemantics(stores) {
       }
     }
   }
+  for (const relation of stores.boq_library_quota_relations) {
+    if (!libraryIds.has(relation.boqLibraryItemId)) throw backupError('BACKUP_SEMANTIC_INVALID', `清单定额关系 ${relation.id} 引用了不存在的清单。`);
+    if (relation.quotaItemId && !quotaIds.has(relation.quotaItemId) && relation.referenceStatus !== 'missing') throw backupError('BACKUP_SEMANTIC_INVALID', `清单定额关系 ${relation.id} 引用了不存在的定额。`);
+    if ((!relation.quotaItemId || relation.referenceStatus === 'missing') && !isRecord(relation.quotaSnapshot)) throw backupError('BACKUP_SEMANTIC_INVALID', `清单定额关系 ${relation.id} 缺少价格快照。`);
+  }
+  for (const relation of stores.project_boq_quota_relations) {
+    if (!projectBoqIds.has(relation.projectBoqLineId)) throw backupError('BACKUP_SEMANTIC_INVALID', `项目定额关系 ${relation.id} 引用了不存在的项目清单。`);
+    if (relation.quotaItemId && !quotaIds.has(relation.quotaItemId) && relation.referenceStatus !== 'missing') throw backupError('BACKUP_SEMANTIC_INVALID', `项目定额关系 ${relation.id} 引用了不存在的定额。`);
+    if ((!relation.quotaItemId || relation.referenceStatus === 'missing') && !isRecord(relation.quotaSnapshot)) throw backupError('BACKUP_SEMANTIC_INVALID', `项目定额关系 ${relation.id} 缺少价格快照。`);
+  }
   const attachmentPaths = new Set();
   for (const meta of stores.resource_attachments) {
     validateAttachmentMetadata(meta);
@@ -319,6 +332,7 @@ function validateBusinessSemantics(stores) {
 
 const REFERENCE_FIELDS = new Set([
   'projectId', 'quotaItemId', 'resourceId', 'resourceItemId', 'resourcePriceId', 'selectedPriceId', 'priceId',
+  'boqLibraryItemId', 'projectBoqLineId', 'sourceLibraryRelationId',
   'linkedResourceItemId', 'linkedEquipmentLineId', 'installationResourceItemId', 'manualInstallationResourceId',
   'versionId', 'indicatorId', 'sessionId', 'cardId', 'jobId', 'reportId', 'preferredPriceId',
 ]);

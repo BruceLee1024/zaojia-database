@@ -1,5 +1,5 @@
 // 工程量清单服务
-import { boqRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.3';
+import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.3';
 import { uid } from '../utils/dom.js?v=6.3';
 import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.3';
 import { calculateAmount } from '../utils/costing.js?v=6.3';
@@ -9,6 +9,7 @@ import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v
 import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.3';
 import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.3';
 import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.3';
+import { calculateQuotaRelations } from './boqQuotaRelationService.js?v=6.3';
 
 const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 
@@ -147,6 +148,14 @@ export const boqService = {
     if (!b) return null;
     await assertProjectEditableById(b.projectId);
     const updated = { ...b, ...patch };
+    if (updated.pricingMode === 'composition' && ('qty' in patch || 'pricingMode' in patch)) {
+      const relations = await projectBoqQuotaRelationRepo.byBoqLine(id);
+      if (relations.length) {
+        const composition = calculateQuotaRelations(relations, updated.qty);
+        updated.compositionUnitPrice = composition.unitPrice;
+        updated.unitPrice = composition.unitPrice;
+      }
+    }
     if ('qty' in patch || 'unitPrice' in patch || 'factor' in patch) {
       updated.amount = calculateAmount(updated.qty, updated.unitPrice, updated.factor);
       updated.priceMissing = !(updated.unitPrice > 0);
@@ -162,7 +171,8 @@ export const boqService = {
     const b = all.find(x => x.id === id);
     if (!b) return;
     await assertProjectEditableById(b.projectId);
-    await boqRepo.remove(id);
+    const relations = await projectBoqQuotaRelationRepo.all();
+    await Promise.all([boqRepo.remove(id), projectBoqQuotaRelationRepo.replaceAll(relations.filter(row => row.projectBoqLineId !== id))]);
     await recomputeProjectCost(b.projectId);
   },
 
@@ -299,18 +309,21 @@ export const boqService = {
   },
 
   async audit(projectId) {
-    const [project, lines, versions, quotas, resources, resourcePrices] = await Promise.all([
+    const [project, lines, versions, quotas, resources, resourcePrices, quotaRelations] = await Promise.all([
       projectRepo.findById(projectId),
       boqRepo.byProject(projectId),
       versionRepo.byProject(projectId),
       quotaRepo.all(),
       resourceRepo.all(),
       resourcePriceRepo.all(),
+      projectBoqQuotaRelationRepo.byProject(projectId),
     ]);
     const quotaIds = new Set(quotas.map(item => item.id));
     const resourceIds = new Set(resources.map(item => item.id));
     const resourcePriceMap = new Map(resourcePrices.map(item => [item.id, item]));
     const today = localDateKey();
+    const relationsByLine = new Map();
+    quotaRelations.forEach(relation => { const rows = relationsByLine.get(relation.projectBoqLineId) || []; rows.push(relation); relationsByLine.set(relation.projectBoqLineId, rows); });
     const duplicateMap = new Map();
     lines.forEach(line => {
       const key = [line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|');
@@ -320,8 +333,8 @@ export const boqService = {
       missingPrice: lines.filter(line => hasMissingPrice(line.unitPrice)),
       zeroQty: lines.filter(line => !(Number(line.qty) > 0)),
       factorRisk: lines.filter(line => Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8),
-      unmatchedQuota: lines.filter(line => !line.quotaItemId),
-      invalidQuotaReference: lines.filter(line => line.quotaReferenceStatus === 'missing' || (line.quotaItemId && !quotaIds.has(line.quotaItemId))),
+      unmatchedQuota: lines.filter(line => !line.quotaItemId && !(relationsByLine.get(line.id) || []).some(row => row.quotaItemId)),
+      invalidQuotaReference: lines.filter(line => line.quotaReferenceStatus === 'missing' || (line.quotaItemId && !quotaIds.has(line.quotaItemId)) || (relationsByLine.get(line.id) || []).some(row => row.referenceStatus === 'missing' || (row.quotaItemId && !quotaIds.has(row.quotaItemId)))),
       duplicate: lines.filter(line => duplicateMap.get([line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|')) > 1),
       invalidResourceReference: lines.filter(line => hasInvalidResourceReference(line, resourceIds)),
       expiredResourcePrice: lines.filter(line => isExpiredResourcePrice(line, resourcePriceMap, today)),

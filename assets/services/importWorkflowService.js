@@ -5,6 +5,7 @@ import { boqLibraryService } from './boqLibraryService.js?v=6.3';
 import { quotaService } from './quotaService.js?v=6.3';
 import { resourceImportService } from './resourceImportService.js?v=6.3';
 import { dataEngineService } from './dataEngineService.js?v=6.3';
+import { importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.3';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
 import { categoryGuess } from '../utils/stats.js?v=6.3';
 
@@ -87,12 +88,14 @@ export function analyzeImport(regions = [], {
 
 export async function commitImport(preview, options = {}) {
   if (!preview?.targetType || !Array.isArray(preview.rows)) throw new Error('导入预览无效');
-  const validRows = preview.rows.filter(row => row.importable).map(row => row.data);
+  const validRows = preview.rows.filter(row => row.importable).map(row => ({ ...row.data, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber }));
   if (!validRows.length) throw new Error('没有可导入的有效数据');
   const sourceName = String(options.sourceName || '表格导入');
   let domainResult;
   const warnings = [];
-  if (preview.targetType === 'project_boq') {
+  if (preview.targetType === 'boq_quota_bundle') {
+    domainResult = await importBoqQuotaBundle(validRows, { sourceName, updateQuotaPrices: options.updateExisting === true });
+  } else if (preview.targetType === 'project_boq') {
     if (!options.projectId) throw new Error('请选择导入项目');
     domainResult = await boqService.importLines(options.projectId, validRows.map(row => ({ ...row, projectId: options.projectId })), { mode: options.mode === 'replace' ? 'replace' : 'append', amountRule: preview.amountRule });
     try {
@@ -160,6 +163,13 @@ export function mergeCommitRows(previewRows = [], domainResult = {}, targetType 
 }
 
 function normalizeTargetRow(values, targetType, amountRule) {
+  if (targetType === 'boq_quota_bundle') {
+    return {
+      ...values, layer: values.layer || '', rowKind: normalizeBundleLayer(values.layer), qty: Number(values.qty || 0),
+      unitPrice: Number(values.unitPrice || 0), amount: Number(values.amount || 0),
+      unitPriceProvided: values.unitPrice !== '' && values.unitPrice !== null && values.unitPrice !== undefined,
+    };
+  }
   if (targetType === 'project_boq') {
     const split = splitNameFeature(values.name, values.feature);
     const qty = Number(values.qty || 0);
@@ -191,6 +201,7 @@ function validateTargetRow(row, schema, sourceRow) {
   });
   if (schema.key === 'project_boq' && !(row.qty > 0)) issues.push({ code: 'invalid_qty', severity: 'error', message: '工程量必须大于 0' });
   if (schema.key === 'project_boq' && row.priceMissing) issues.push({ code: 'missing_price', severity: 'warning', message: '综合单价为空或 0' });
+  if (schema.key === 'boq_quota_bundle' && row.rowKind === 'structure') issues.push({ code: 'unknown_layer', severity: 'error', message: '层级必须是“清单”或“定额”' });
   if (sourceRow.kind !== 'detail') issues.push({ code: 'not_detail', severity: 'error', message: '该行不是有效明细' });
   return issues;
 }

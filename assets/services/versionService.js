@@ -1,5 +1,5 @@
 // 报价版本服务：当前清单的不可变快照、恢复与对比
-import { boqRepo, projectRepo, versionRepo } from '../data/repository.js?v=6.3';
+import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, versionRepo } from '../data/repository.js?v=6.3';
 import { uid } from '../utils/dom.js?v=6.3';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
 import { dataEngineService } from './dataEngineService.js?v=6.3';
@@ -11,17 +11,19 @@ const LINE_FIELDS = [
   'resourceItemId', 'resourcePriceId', 'resourceSnapshot', 'resourcePriceSnapshot', 'resourceReferenceStatus', 'resourceReferenceNote',
   'linkedResourceItemId', 'linkedResourceSnapshot', 'linkedEquipmentLineId', 'linkedResourceReferenceStatus', 'linkedResourceReferenceNote',
   'installationResourceItemId', 'manualInstallationResourceId',
+  'pricingMode', 'compositionUnitPrice', 'quotaRelations',
 ];
 
 export const versionService = {
   async createFromCurrent(projectId, { name, note = '' } = {}) {
-    const [project, lines] = await Promise.all([
+    const [project, lines, quotaRelations] = await Promise.all([
       projectRepo.findById(projectId),
       boqRepo.byProject(projectId),
+      projectBoqQuotaRelationRepo.byProject(projectId),
     ]);
     if (!project) throw new Error('项目不存在');
 
-    const snapshotLines = lines.map(snapshotLine);
+    const snapshotLines = lines.map(line => snapshotLine(line, quotaRelations.filter(relation => relation.projectBoqLineId === line.id)));
     const totalCost = snapshotLines.reduce((sum, line) => sum + (line.amount || 0), 0);
     const version = {
       id: uid(),
@@ -52,7 +54,7 @@ export const versionService = {
     const version = await versionRepo.findById(versionId);
     if (!version) throw new Error('版本不存在');
     await assertProjectEditableById(version.projectId);
-    const allLines = await boqRepo.all();
+    const [allLines, allQuotaRelations] = await Promise.all([boqRepo.all(), projectBoqQuotaRelationRepo.all()]);
     const currentLines = allLines.filter(line => line.projectId === version.projectId);
     let backup = null;
     if (currentLines.length) {
@@ -66,21 +68,29 @@ export const versionService = {
         lineCount: currentLines.length,
         missingPriceCount: currentLines.filter(line => hasMissingPrice(line.unitPrice)).length,
         backupOfRestoreId: version.id,
-        lines: currentLines.map(snapshotLine),
+        lines: currentLines.map(line => snapshotLine(line, allQuotaRelations.filter(relation => relation.projectBoqLineId === line.id))),
       };
       await versionRepo.upsert(backup);
       await dataEngineService.ingestVersion(backup.id);
     }
-    const restored = (version.lines || []).map(line => ({
-      ...snapshotLine(line),
-      id: uid(),
-      projectId: version.projectId,
-      amount: calculateAmount(line.qty, line.unitPrice, line.factor),
-      priceMissing: hasMissingPrice(line.unitPrice),
-    }));
+    const restoredQuotaRelations = [];
+    const restored = (version.lines || []).map(source => {
+      const id = uid();
+      (source.quotaRelations || []).forEach((relation, index) => restoredQuotaRelations.push({
+        ...cloneValue(relation), id: uid(), projectId: version.projectId, projectBoqLineId: id,
+        sortOrder: Number.isFinite(Number(relation.sortOrder)) ? Number(relation.sortOrder) : index,
+      }));
+      const line = { ...snapshotLine(source), id, projectId: version.projectId, amount: calculateAmount(source.qty, source.unitPrice, source.factor), priceMissing: hasMissingPrice(source.unitPrice) };
+      delete line.quotaRelations;
+      return line;
+    });
     await boqRepo.replaceAll([
       ...allLines.filter(line => line.projectId !== version.projectId),
       ...restored,
+    ]);
+    await projectBoqQuotaRelationRepo.replaceAll([
+      ...allQuotaRelations.filter(relation => relation.projectId !== version.projectId),
+      ...restoredQuotaRelations,
     ]);
     const total = restored.reduce((sum, line) => sum + (line.amount || 0), 0);
     await projectRepo.update(version.projectId, { totalCost: total });
@@ -159,7 +169,7 @@ export function lineKey(line) {
   return line.quotaItemId || (line.resourceItemId ? `resource:${line.resourceItemId}` : '') || [line.code, line.name, line.feature, line.unit].map(v => v || '').join('|');
 }
 
-function snapshotLine(line) {
+function snapshotLine(line, quotaRelations = line.quotaRelations || []) {
   const copy = {};
   LINE_FIELDS.forEach(field => {
     const value = line[field] ?? (field === 'factor' ? 1 : '');
@@ -171,6 +181,7 @@ function snapshotLine(line) {
   copy.amount = calculateAmount(copy.qty, copy.unitPrice, copy.factor);
   copy.priceMissing = hasMissingPrice(copy.unitPrice);
   copy.structureGroup = copy.structureGroup || groupForLine(copy);
+  copy.quotaRelations = cloneValue(quotaRelations);
   copy.id = line.id || uid();
   return copy;
 }
