@@ -153,14 +153,14 @@ export async function testResourceHealth() {
 
 function assertCacheGraph() {
   const expectations = [
-    ['../app.js', "./assets/views/dashboard.js?v=6.8", "./assets/views/quota.js?v=6.8", "./assets/views/resources.js?v=6.8", "./assets/views/navigation.js?v=6.8"],
-    ['../assets/views/dashboard.js', "../services/resourceHealthService.js?v=6.8"],
-    ['../assets/views/resources.js', "../services/resourcePriceService.js?v=6.8", "./resourceAttachments.js?v=6.8"],
-    ['../assets/views/quota.js', "./quotaResourceComposition.js?v=6.8", "./quotaResourceCompositionPanel.js?v=6.8"],
-    ['../assets/views/quotaResourceCompositionPanel.js', "../services/quotaResourceService.js?v=6.8", "../services/resourcePriceService.js?v=6.8", "./quotaResourceComposition.js?v=6.8"],
-    ['../assets/views/resourceAttachments.js', "../services/resourcePriceService.js?v=6.8"],
-    ['../assets/services/resourceHealthService.js', "./quotaResourceService.js?v=6.8", "./resourcePriceService.js?v=6.8"],
-    ['../assets/services/quotaResourceService.js', "./resourcePriceService.js?v=6.8"],
+    ['../app.js', "./assets/views/dashboard.js?v=6.9", "./assets/views/quota.js?v=6.9", "./assets/views/resources.js?v=6.9", "./assets/views/navigation.js?v=6.9"],
+    ['../assets/views/dashboard.js', "../services/resourceHealthService.js?v=6.9"],
+    ['../assets/views/resources.js', "../services/resourcePriceService.js?v=6.9", "./resourceAttachments.js?v=6.9"],
+    ['../assets/views/quota.js', "./quotaResourceComposition.js?v=6.9", "./quotaResourceCompositionPanel.js?v=6.9"],
+    ['../assets/views/quotaResourceCompositionPanel.js', "../services/quotaResourceService.js?v=6.9", "../services/resourcePriceService.js?v=6.9", "./quotaResourceComposition.js?v=6.9"],
+    ['../assets/views/resourceAttachments.js', "../services/resourcePriceService.js?v=6.9"],
+    ['../assets/services/resourceHealthService.js', "./quotaResourceService.js?v=6.9", "./resourcePriceService.js?v=6.9"],
+    ['../assets/services/quotaResourceService.js', "./resourcePriceService.js?v=6.9"],
   ];
   expectations.forEach(([file, ...imports]) => {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');

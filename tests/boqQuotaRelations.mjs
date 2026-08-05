@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   boqLibraryQuotaRelationRepo, boqLibraryRepo, boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo,
-} from '../assets/data/repository.js?v=6.8';
-import { calculateQuotaRelations, parseQuotaUnit } from '../assets/services/boqQuotaRelationService.js?v=6.8';
-import { groupBundleRows, importBoqQuotaBundle } from '../assets/services/boqQuotaBundleImportService.js?v=6.8';
-import { boqLibraryService } from '../assets/services/boqLibraryService.js?v=6.8';
+} from '../assets/data/repository.js?v=6.9';
+import { calculateQuotaRelations, parseQuotaUnit } from '../assets/services/boqQuotaRelationService.js?v=6.9';
+import { groupBundleRows, importBoqQuotaBundle } from '../assets/services/boqQuotaBundleImportService.js?v=6.9';
+import { boqLibraryService } from '../assets/services/boqLibraryService.js?v=6.9';
 
 export async function testBoqQuotaRelations() {
   const originalStorage = globalThis.localStorage;
