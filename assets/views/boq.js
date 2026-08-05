@@ -1,18 +1,18 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.3';
-import { boqService, groupForLine } from '../services/boqService.js?v=6.3';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.3';
-import { projectService } from '../services/projectService.js?v=6.3';
-import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.3';
-import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.3';
-import { openReview } from './experience.js?v=6.3';
-import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.3';
-import { exportBOQExcel } from '../data/excel.js?v=6.3';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { categoryGuess } from '../utils/stats.js?v=6.3';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.3';
-import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.3';
-import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.3';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.4';
+import { boqService, groupForLine } from '../services/boqService.js?v=6.4';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.4';
+import { projectService } from '../services/projectService.js?v=6.4';
+import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.4';
+import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.4';
+import { openReview } from './experience.js?v=6.4';
+import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.4';
+import { exportBOQExcel } from '../data/excel.js?v=6.4';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.4';
+import { categoryGuess } from '../utils/stats.js?v=6.4';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.4';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.4';
+import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.4';
 
 const BOQ_PAGE_SIZE = 500;
 const boqState = {
@@ -27,10 +27,13 @@ const boqState = {
   treeGroup: '',
   detailCollapsed: localStorage.getItem('boq_detail_collapsed') === 'true',
   expandedProjectIds: new Set(),
+  currency: 'CNY',
 };
 let searchTimer = null;
 // 明细区在桌面端是主要编辑面板，不应只留给表单一小段可视空间。
 // 使用新 key，避免旧版偏小的本地偏好延续到新版布局。
+
+function money(value) { return fmtMoney(value, boqState.currency); }
 
 export async function render(workspace = document.getElementById('workspace')) {
   const document = scopedDom(workspace);
@@ -41,6 +44,7 @@ export async function render(workspace = document.getElementById('workspace')) {
     workspace.innerHTML = `<div class="page-frame"><div class="card p-10 text-center text-gray-400">还没有项目，先去 <a class="text-teal-700 underline" onclick="window.__app.go('projects')">新建项目</a></div></div>`;
     return;
   }
+  boqState.currency = proj.currency || 'CNY';
   window.__app.state.currentProjectId = proj.id;
   const routeParams = window.__app.state.routeParams || {};
   if ((!routeParams.projectId || routeParams.projectId === proj.id) && routeParams.priceStatus) {
@@ -105,7 +109,7 @@ export async function render(workspace = document.getElementById('workspace')) {
               </div>
               <div class="flex items-center gap-2 text-xs text-slate-500">
                 ${filteredBoq.length > BOQ_PAGE_SIZE ? `<button id="btnPagePrev" class="h-7 px-2 rounded border border-slate-300 bg-white ${boqState.page <= 1 ? 'opacity-40' : ''}">上一页</button><button id="btnPageNext" class="h-7 px-2 rounded border border-slate-300 bg-white ${boqState.page >= pageCount ? 'opacity-40' : ''}">下一页</button>` : ''}
-                ${categories.slice(0, 3).map(c => `<span class="badge badge-gray">${esc(c.name)} ${fmtMoney(c.amount)}</span>`).join('')}
+                ${categories.slice(0, 3).map(c => `<span class="badge badge-gray">${esc(c.name)} ${money(c.amount)}</span>`).join('')}
               </div>
             </div>
             <div id="boqMobileList" class="boq-mobile-list mobile-card-list"></div>
@@ -129,7 +133,7 @@ export async function render(workspace = document.getElementById('workspace')) {
                 <tfoot>
                   <tr class="bg-white border-t border-slate-200 font-semibold">
                     <td colspan="10" class="px-3 py-4 text-right text-slate-500 uppercase tracking-wider text-xs">项目合计</td>
-                    <td class="px-3 py-4 text-right tabular-nums text-slate-900 text-lg" id="boqTotal">${fmtMoney(totalCost)}</td>
+                    <td class="px-3 py-4 text-right tabular-nums text-slate-900 text-lg" id="boqTotal">${money(totalCost)}</td>
                     <td></td>
                   </tr>
                 </tfoot>
@@ -290,7 +294,7 @@ export async function render(workspace = document.getElementById('workspace')) {
         <input type="number" step="0.01" class="w-24 text-right bg-transparent border-0 px-0 py-1 ${hasMissingPrice(b.unitPrice) ? 'text-amber-700 font-semibold' : ''}" value="${b.unitPrice || 0}" title="${hasMissingPrice(b.unitPrice) ? '综合单价为空或为 0，合价会按 0 计' : ''}" />
       </td>
       <td class="px-2 text-right"><input type="number" step="0.001" class="w-14 text-right bg-transparent border-0 px-0 py-1" value="${b.factor || 1}" /></td>
-      <td class="px-2 text-right tabular-nums font-semibold ${hasMissingPrice(b.unitPrice) ? 'text-amber-700' : 'text-slate-900'}" data-amount>${fmtMoney(b.amount || 0)}</td>
+      <td class="px-2 text-right tabular-nums font-semibold ${hasMissingPrice(b.unitPrice) ? 'text-amber-700' : 'text-slate-900'}" data-amount>${money(b.amount || 0)}</td>
       <td class="px-2 text-right"><button class="text-red-600 hover:underline text-xs" data-del="${b.id}">删除</button></td>
     </tr>
   `).join('') || (boq.length ? `<tr><td colspan="12" class="py-16">
@@ -352,7 +356,7 @@ function boqMobileCard(line, index) {
   const missing = hasMissingPrice(line.unitPrice);
   return `<article class="boq-mobile-card ${line.id === boqState.activeId ? 'bg-teal-50/50' : 'bg-white'}">
     <div class="flex items-start gap-3"><input type="checkbox" class="mt-1 h-5 w-5 shrink-0" aria-label="选择${esc(line.name || '清单项')}" data-mobile-boq-select="${esc(line.id)}" ${boqState.selectedIds.has(line.id) ? 'checked' : ''} />
-      <button type="button" class="min-w-0 flex-1 text-left" data-mobile-boq-open="${esc(line.id)}"><div class="flex items-center gap-2"><span class="text-xs text-slate-400">${index}</span>${riskBadges(line)}</div><div class="mt-1 truncate font-semibold text-slate-900">${esc(line.name || '未命名清单')}</div><div class="mt-1 truncate text-xs text-slate-500">${esc(line.code || '未编码')} · ${esc(line.feature || '未填写项目特征')}</div><div class="mt-3 grid grid-cols-3 gap-2 text-xs"><span><b class="block text-slate-400 font-normal">工程量</b><span class="mt-0.5 block tabular-nums text-slate-800">${line.qty || 0} ${esc(line.unit || '')}</span></span><span><b class="block text-slate-400 font-normal">综合单价</b><span class="mt-0.5 block tabular-nums ${missing ? 'text-amber-700' : 'text-slate-800'}">${missing ? '待补价' : fmtMoney(line.unitPrice)}</span></span><span class="text-right"><b class="block text-slate-400 font-normal">合价</b><span class="mt-0.5 block tabular-nums font-semibold text-slate-900">${fmtMoney(line.amount || 0)}</span></span></div></button><span class="material-symbols-outlined mt-8 text-slate-400" aria-hidden="true">chevron_right</span>
+      <button type="button" class="min-w-0 flex-1 text-left" data-mobile-boq-open="${esc(line.id)}"><div class="flex items-center gap-2"><span class="text-xs text-slate-400">${index}</span>${riskBadges(line)}</div><div class="mt-1 truncate font-semibold text-slate-900">${esc(line.name || '未命名清单')}</div><div class="mt-1 truncate text-xs text-slate-500">${esc(line.code || '未编码')} · ${esc(line.feature || '未填写项目特征')}</div><div class="mt-3 grid grid-cols-3 gap-2 text-xs"><span><b class="block text-slate-400 font-normal">工程量</b><span class="mt-0.5 block tabular-nums text-slate-800">${line.qty || 0} ${esc(line.unit || '')}</span></span><span><b class="block text-slate-400 font-normal">综合单价</b><span class="mt-0.5 block tabular-nums ${missing ? 'text-amber-700' : 'text-slate-800'}">${missing ? '待补价' : money(line.unitPrice)}</span></span><span class="text-right"><b class="block text-slate-400 font-normal">合价</b><span class="mt-0.5 block tabular-nums font-semibold text-slate-900">${money(line.amount || 0)}</span></span></div></button><span class="material-symbols-outlined mt-8 text-slate-400" aria-hidden="true">chevron_right</span>
     </div>
   </article>`;
 }
@@ -485,11 +489,11 @@ function boqWorkbenchHeader(project, projects, status) {
       </label>
     </div>
     <div class="mt-4 grid grid-cols-5 gap-3">
-      ${boqMetric('项目总造价', fmtMoney(status.totalCost), '')}
+      ${boqMetric('项目总造价', money(status.totalCost), '')}
       ${boqMetric('价格完整度', `${status.completion}%`, '', status.missing ? 'text-amber-700' : 'text-teal-700')}
       ${boqMetric('报价版本', status.versionCount, '个', status.versionCount ? '' : 'text-amber-700')}
       ${boqMetric('风险状态', status.missing + status.zeroQty + status.factorRisk + status.unmatched, '处', status.missing ? 'text-amber-700' : '')}
-      ${boqMetric('选中合价', fmtMoney(status.selectedTotal), '')}
+      ${boqMetric('选中合价', money(status.selectedTotal), '')}
     </div>
   </section>`;
 }
@@ -770,7 +774,7 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
           </div>
           <div class="mt-1 text-xs text-slate-500 truncate" title="${esc(line?.name || '')}">${line ? `${esc(line.name || '')} · ${esc(groupLabel(classifyLineGroup(line)))}` : '选择一行后查看和编辑明细'}</div>
         </div>
-        <div class="shrink-0 text-right"><div class="text-[11px] text-slate-500">当前合价</div><div class="font-semibold tabular-nums text-slate-900">${line ? fmtMoney(line.amount || 0) : '-'}</div></div>
+        <div class="shrink-0 text-right"><div class="text-[11px] text-slate-500">当前合价</div><div class="font-semibold tabular-nums text-slate-900">${line ? money(line.amount || 0) : '-'}</div></div>
       </div>
       ${line ? `<div class="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1" role="tablist" aria-label="清单明细分类"><button data-detail-tab="content" class="${tabClass('content')}" role="tab" aria-selected="${activeTab === 'content'}" tabindex="${activeTab === 'content' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">description</span><span class="truncate">清单内容</span></button><button data-detail-tab="pricing" class="${tabClass('pricing')}" role="tab" aria-selected="${activeTab === 'pricing'}" tabindex="${activeTab === 'pricing' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">payments</span><span class="truncate">计价归属</span></button><button data-detail-tab="relation" class="${tabClass('relation')}" role="tab" aria-selected="${activeTab === 'relation'}" tabindex="${activeTab === 'relation' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">link</span><span class="truncate">定额关联</span></button></div>` : ''}
     </div>`;
@@ -837,7 +841,7 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
             </div>
             <div class="rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-right">
               <div class="text-[11px] text-slate-500">当前合价</div>
-              <div class="mt-0.5 font-semibold tabular-nums text-slate-900">${fmtMoney(line.amount || 0)}</div>
+              <div class="mt-0.5 font-semibold tabular-nums text-slate-900">${money(line.amount || 0)}</div>
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
@@ -854,7 +858,7 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
           <div class="mb-3 flex items-center justify-between"><div><div class="font-medium text-slate-800">定额与资源关联</div><div class="mt-1 text-xs text-slate-500">项目内保存独立用量和价格快照，不随定额库自动变价。</div></div>${quotaRelations.length || line.quotaItemId ? `<span class="badge badge-green">${quotaRelations.length || 1} 条定额</span>` : '<span class="badge badge-yellow">未匹配</span>'}</div>
           ${projectQuotaRelationsHtml(quotaRelations)}
           ${renderBoqResourceReference(buildBoqResourceViewModel(line))}
-          <div class="mt-3 grid grid-cols-1 gap-2">${recommendations.length ? recommendations.map(item => `<button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50"><div class="truncate font-medium text-slate-800">${esc(item.name || '')}</div><div class="mt-1 flex justify-between text-xs text-slate-500"><span>${esc(item.unit || '-')} · 匹配 ${Number(item.score || 0).toFixed(1)}</span><span>${hasMissingPrice(item.priceTotal) ? '缺单价' : fmtMoney(item.priceTotal)}</span></div></button>`).join('') : '<div class="rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}</div>
+          <div class="mt-3 grid grid-cols-1 gap-2">${recommendations.length ? recommendations.map(item => `<button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50"><div class="truncate font-medium text-slate-800">${esc(item.name || '')}</div><div class="mt-1 flex justify-between text-xs text-slate-500"><span>${esc(item.unit || '-')} · 匹配 ${Number(item.score || 0).toFixed(1)}</span><span>${hasMissingPrice(item.priceTotal) ? '缺单价' : money(item.priceTotal)}</span></div></button>`).join('') : '<div class="rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}</div>
         </section>
       </div>
     </div>
@@ -925,12 +929,12 @@ function bindRowEvents(tr, projectId) {
     });
     const fresh = await boqRepo.all();
     const b = fresh.find(x => x.id === id);
-    if (b) amtCell.textContent = fmtMoney(b.amount || 0);
+    if (b) amtCell.textContent = money(b.amount || 0);
     // 刷新合计
     const lines = await boqService.listByProject(projectId);
     const total = lines.reduce((s, b) => s + (b.amount || 0), 0);
     const totalCell = document.getElementById('boqTotal');
-    if (totalCell) totalCell.textContent = fmtMoney(total);
+    if (totalCell) totalCell.textContent = money(total);
   };
   codeInp.onchange = refresh;
   qtyInp.onchange = refresh;
@@ -1028,8 +1032,8 @@ async function showAiMissingPrices(projectId) {
     <div class="space-y-4 text-sm">
       <div class="grid grid-cols-3 gap-2">
         ${versionSummary('缺价清单', rows.length)}
-        ${versionSummary('当前总造价', fmtMoney(before))}
-        ${versionSummary('应用后增量', fmtMoney(delta))}
+        ${versionSummary('当前总造价', money(before))}
+        ${versionSummary('应用后增量', money(delta))}
       </div>
       <div class="rounded border border-slate-200 bg-white max-h-[52vh] overflow-auto scroll-thin">
         <table class="w-full text-sm">
@@ -1039,7 +1043,7 @@ async function showAiMissingPrices(projectId) {
               <td class="py-2 px-3"><input type="checkbox" data-ai-price="${index}" ${row.apply ? 'checked' : ''} /></td>
               <td class="px-3 font-medium">${esc(row.lineName)}</td>
               <td class="px-3">${esc(row.unit || '-')}</td>
-              <td class="px-3 text-right tabular-nums">${fmtMoney(row.suggestedPrice)}</td>
+              <td class="px-3 text-right tabular-nums">${money(row.suggestedPrice)}</td>
               <td class="px-3">${esc(row.sourceLabel)} <span class="ml-2 badge ${confidenceBadgeClass(row.confidence)}">${confidenceLabel(row.confidence)}</span></td>
               <td class="px-3 text-xs text-slate-500">${esc(row.reason)}</td>
             </tr>`).join('')}
@@ -1095,7 +1099,7 @@ async function pickQuota() {
         <td class="px-2 text-right tabular-nums">
           ${hasMissingPrice(it.priceTotal)
             ? '<span class="badge badge-yellow" title="选择后该清单合价会按 0 计">缺单价</span>'
-            : fmtMoney(it.priceTotal)}
+            : money(it.priceTotal)}
         </td>
         <td class="px-2 text-right"><button class="text-teal-700 hover:underline text-xs" data-pick="${it.id}">选</button></td>
       </tr>
@@ -1221,13 +1225,13 @@ function saveVersion(projectId) {
       note: document.getElementById('ver_note').value,
     });
     closeModal();
-    toast(`已保存版本：${version.name}，${version.lineCount} 条，${fmtMoney(version.totalCost)}`, 'success');
+    toast(`已保存版本：${version.name}，${version.lineCount} 条，${money(version.totalCost)}`, 'success');
     await render();
     openModal('报价版本已保存', `
       <div class="space-y-3 text-sm text-slate-700">
         <div class="rounded border border-slate-200 bg-white p-3">
           <div class="font-semibold text-slate-900">${esc(version.name)}</div>
-          <div class="mt-1 text-xs text-slate-500">${version.lineCount} 条清单 · ${fmtMoney(version.totalCost)} · 缺单价 ${version.missingPriceCount || 0}</div>
+          <div class="mt-1 text-xs text-slate-500">${version.lineCount} 条清单 · ${money(version.totalCost)} · 缺单价 ${version.missingPriceCount || 0}</div>
         </div>
         <div class="rounded border border-teal-200 bg-teal-50 p-3 text-xs leading-5 text-teal-800">
           可以趁判断还新鲜，把本次报价异常、关键判断和适用边界沉淀成经验卡。
@@ -1248,11 +1252,11 @@ async function manageVersions(projectId) {
       <div class="flex items-center gap-2">
         <select id="ver_left" class="border rounded px-2 py-1.5 flex-1">
           <option value="">选择对比版本 A</option>
-          ${versions.map(v => `<option value="${v.id}">${esc(v.name)} · ${fmtMoney(v.totalCost)}</option>`).join('')}
+          ${versions.map(v => `<option value="${v.id}">${esc(v.name)} · ${money(v.totalCost)}</option>`).join('')}
         </select>
         <select id="ver_right" class="border rounded px-2 py-1.5 flex-1">
           <option value="">选择对比版本 B</option>
-          ${versions.map(v => `<option value="${v.id}">${esc(v.name)} · ${fmtMoney(v.totalCost)}</option>`).join('')}
+          ${versions.map(v => `<option value="${v.id}">${esc(v.name)} · ${money(v.totalCost)}</option>`).join('')}
         </select>
         <button id="ver_compare" class="px-3 py-1.5 text-sm rounded border border-teal-600 text-teal-700">对比</button>
       </div>
@@ -1272,7 +1276,7 @@ async function manageVersions(projectId) {
               <tr class="border-b hover:bg-gray-50">
                 <td class="py-2 px-2 font-medium">${esc(v.name)}</td>
                 <td class="px-2 text-gray-500 tabular-nums">${formatTime(v.createdAt)}</td>
-                <td class="px-2 text-right tabular-nums">${fmtMoney(v.totalCost || 0)}</td>
+                <td class="px-2 text-right tabular-nums">${money(v.totalCost || 0)}</td>
                 <td class="px-2 text-right tabular-nums">${v.lineCount || 0}</td>
                 <td class="px-2 text-right tabular-nums">${v.missingPriceCount ? `<span class="badge badge-yellow">${v.missingPriceCount}</span>` : '0'}</td>
                 <td class="px-2 text-gray-500 truncate" title="${esc(v.note || '')}">${esc(v.note || '-')}</td>
@@ -1310,7 +1314,7 @@ async function manageVersions(projectId) {
     if (!confirm(`恢复「${version.name}」会覆盖当前项目清单，但不会删除任何历史版本。确定恢复？`)) return;
     const result = await versionService.restore(version.id);
     closeModal();
-    toast(`已恢复 ${result.restoredCount} 条清单，当前总价 ${fmtMoney(result.totalCost)}${result.backup ? '；已自动备份恢复前工作稿' : ''}`, 'success');
+    toast(`已恢复 ${result.restoredCount} 条清单，当前总价 ${money(result.totalCost)}${result.backup ? '；已自动备份恢复前工作稿' : ''}`, 'success');
     render();
   });
   document.querySelectorAll('[data-del-ver]').forEach(btn => btn.onclick = async () => {
@@ -1325,7 +1329,7 @@ function viewVersion(version, projectId) {
   openModal(`查看版本：${version.name}`, `
     <div class="space-y-3 text-sm">
       <div class="grid grid-cols-4 gap-2">
-        ${versionSummary('总价', fmtMoney(version.totalCost || 0))}
+        ${versionSummary('总价', money(version.totalCost || 0))}
         ${versionSummary('清单条数', version.lineCount || 0)}
         ${versionSummary('缺单价', version.missingPriceCount || 0)}
         ${versionSummary('创建时间', formatTime(version.createdAt))}
@@ -1344,9 +1348,9 @@ function showVersionDiff(diff, projectId) {
   openModal(`版本对比：${diff.left.name} → ${diff.right.name}`, `
     <div class="space-y-4 text-sm">
       <div class="grid grid-cols-4 gap-2">
-        ${versionSummary('版本 A', fmtMoney(diff.left.totalCost || 0))}
-        ${versionSummary('版本 B', fmtMoney(diff.right.totalCost || 0))}
-        ${versionSummary('价差', `${diff.totalDelta >= 0 ? '+' : ''}${fmtMoney(diff.totalDelta)}`)}
+        ${versionSummary('版本 A', money(diff.left.totalCost || 0))}
+        ${versionSummary('版本 B', money(diff.right.totalCost || 0))}
+        ${versionSummary('价差', `${diff.totalDelta >= 0 ? '+' : ''}${money(diff.totalDelta)}`)}
         ${versionSummary('变化项', diff.added.length + diff.removed.length + diff.modified.length)}
       </div>
       <div>
@@ -1354,8 +1358,8 @@ function showVersionDiff(diff, projectId) {
         <div class="grid grid-cols-2 gap-2">
           ${diff.categorySummary.map(row => `<div class="rounded border border-slate-200 bg-white p-3">
             <div class="font-medium text-slate-800">${esc(row.label)}</div>
-            <div class="mt-1 text-xs text-slate-500">${fmtMoney(row.leftAmount)} → ${fmtMoney(row.rightAmount)}</div>
-            <div class="mt-1 tabular-nums font-semibold ${row.delta >= 0 ? 'text-red-600' : 'text-teal-700'}">${row.delta >= 0 ? '+' : ''}${fmtMoney(row.delta)}</div>
+            <div class="mt-1 text-xs text-slate-500">${money(row.leftAmount)} → ${money(row.rightAmount)}</div>
+            <div class="mt-1 tabular-nums font-semibold ${row.delta >= 0 ? 'text-red-600' : 'text-teal-700'}">${row.delta >= 0 ? '+' : ''}${money(row.delta)}</div>
           </div>`).join('') || '<div class="text-slate-400">无分类差异</div>'}
         </div>
       </div>
@@ -1453,9 +1457,9 @@ function renderLinesTable(lines) {
             <td class="px-2 text-gray-500 truncate" title="${esc(line.feature || '')}">${esc(line.feature || '')}</td>
             <td class="px-2">${esc(line.unit || '')}</td>
             <td class="px-2 text-right tabular-nums">${fmtNumber(line.qty)}</td>
-            <td class="px-2 text-right tabular-nums">${hasMissingPrice(line.unitPrice) ? '<span class="badge badge-yellow">缺单价</span>' : fmtMoney(line.unitPrice)}</td>
+            <td class="px-2 text-right tabular-nums">${hasMissingPrice(line.unitPrice) ? '<span class="badge badge-yellow">缺单价</span>' : money(line.unitPrice)}</td>
             <td class="px-2 text-right tabular-nums">${fmtNumber(line.factor)}</td>
-            <td class="px-2 text-right tabular-nums">${fmtMoney(line.amount || 0)}</td>
+            <td class="px-2 text-right tabular-nums">${money(line.amount || 0)}</td>
           </tr>
         `).join('') || `<tr><td colspan="9" class="py-8 text-center text-gray-400">该版本没有清单项</td></tr>`}
       </tbody>
@@ -1480,7 +1484,7 @@ function versionSummary(label, value) {
 }
 
 function lineRowText(line) {
-  return `${line.name || '未命名'}｜${fmtNumber(line.qty)} ${line.unit || ''} × ${fmtMoney(line.unitPrice || 0)} × ${fmtNumber(line.factor)} = ${fmtMoney(line.amount || 0)}`;
+  return `${line.name || '未命名'}｜${fmtNumber(line.qty)} ${line.unit || ''} × ${money(line.unitPrice || 0)} × ${fmtNumber(line.factor)} = ${money(line.amount || 0)}`;
 }
 
 function formatTime(iso) {

@@ -1,13 +1,13 @@
-import { buildImportColumnMapping } from './importMappingService.js?v=6.3';
-import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.3';
-import { boqService } from './boqService.js?v=6.3';
-import { boqLibraryService } from './boqLibraryService.js?v=6.3';
-import { quotaService } from './quotaService.js?v=6.3';
-import { resourceImportService } from './resourceImportService.js?v=6.3';
-import { dataEngineService } from './dataEngineService.js?v=6.3';
-import { importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.3';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { categoryGuess } from '../utils/stats.js?v=6.3';
+import { buildImportColumnMapping } from './importMappingService.js?v=6.4';
+import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.4';
+import { boqService } from './boqService.js?v=6.4';
+import { boqLibraryService } from './boqLibraryService.js?v=6.4';
+import { quotaService } from './quotaService.js?v=6.4';
+import { resourceImportService } from './resourceImportService.js?v=6.4';
+import { dataEngineService } from './dataEngineService.js?v=6.4';
+import { importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.4';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.4';
+import { categoryGuess } from '../utils/stats.js?v=6.4';
 
 export function analyzeImport(regions = [], {
   targetType = 'project_boq', mappings = {}, fixedValues = {}, amountRule = 'calculated', selectedRegionIds = null,

@@ -1,5 +1,5 @@
 // 项目工作流规则：项目页、清单页和服务层共用
-import { hasMissingPrice } from '../utils/costing.js?v=6.3';
+import { hasMissingPrice } from '../utils/costing.js?v=6.4';
 
 export const ARCHIVE_BLOCKERS = {
   no_lines: {

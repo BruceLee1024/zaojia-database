@@ -1,10 +1,11 @@
 // 独立清单库：标准清单条目维护与套用到项目
-import { boqLibraryQuotaRelationRepo, boqLibraryRepo, boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.3';
-import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.3';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { uid } from '../utils/dom.js?v=6.3';
-import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.3';
-import { boqQuotaRelationService, calculateQuotaRelations, normalizeQuotaRelation, quotaSnapshot } from './boqQuotaRelationService.js?v=6.3';
+import { boqLibraryQuotaRelationRepo, boqLibraryRepo, boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.4';
+import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.4';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.4';
+import { uid } from '../utils/dom.js?v=6.4';
+import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.4';
+import { boqQuotaRelationService, calculateQuotaRelations, normalizeQuotaRelation, quotaSnapshot } from './boqQuotaRelationService.js?v=6.4';
+import { normalizeCurrency } from '../utils/currency.js?v=6.4';
 
 const now = () => new Date().toISOString();
 const clean = value => String(value ?? '').trim();
@@ -148,6 +149,9 @@ export const boqLibraryService = {
     if (!item) throw new Error('清单库条目不存在');
     if (!project) throw new Error('项目不存在');
     const libraryRelations = await boqQuotaRelationService.libraryRelations(libraryItemId);
+    const projectCurrency = normalizeCurrency(project.currency);
+    const mismatched = libraryRelations.find(relation => normalizeCurrency(relation.quotaSnapshot?.currency) !== projectCurrency);
+    if (mismatched) throw new Error(`清单库中的定额币种与项目本位币 ${projectCurrency} 不一致，不能直接套用。`);
     const composition = calculateQuotaRelations(libraryRelations, Number(item.defaultQty) || 0);
     const unitPrice = composition.unitPrice;
     const line = {

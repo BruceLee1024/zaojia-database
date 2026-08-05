@@ -1,9 +1,10 @@
 // 通用工具函数
+import { formatCurrency } from './currency.js?v=6.4';
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 export const fmt = n => (n == null || isNaN(n)) ? '-' : Number(n).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
-export const fmtMoney = n => '¥' + fmt(n);
+export const fmtMoney = (n, currency = 'CNY') => formatCurrency(n, currency);
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
 export function scopedDom(root) {

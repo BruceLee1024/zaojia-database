@@ -1,5 +1,5 @@
-import { STORES } from '../data/repository.js?v=6.3';
-import { restoreBackupSafeAIConfig, toBackupSafeAIConfig } from './aiService.js?v=6.3';
+import { STORES } from '../data/repository.js?v=6.4';
+import { restoreBackupSafeAIConfig, toBackupSafeAIConfig } from './aiService.js?v=6.4';
 
 export const BACKUP_STORES = Object.freeze(Object.values(STORES));
 export const MAX_BACKUP_SIZE = 500 * 1024 * 1024;

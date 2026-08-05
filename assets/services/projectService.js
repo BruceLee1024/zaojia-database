@@ -1,11 +1,12 @@
 // 项目服务
-import { projectRepo, boqRepo, projectBoqQuotaRelationRepo, versionRepo, dataCandidateRepo, dataFactRepo, dataJobRepo, dataQualityReportRepo, projectLifecycleEventRepo } from '../data/repository.js?v=6.3';
-import { uid } from '../utils/dom.js?v=6.3';
-import { recomputeProjectCost } from './boqService.js?v=6.3';
-import { dataEngineService } from './dataEngineService.js?v=6.3';
-import { archiveEligibility } from './projectWorkflow.js?v=6.3';
-import { versionService } from './versionService.js?v=6.3';
-import { recordProjectLifecycleEvent } from './projectLockService.js?v=6.3';
+import { projectRepo, boqRepo, projectBoqQuotaRelationRepo, versionRepo, dataCandidateRepo, dataFactRepo, dataJobRepo, dataQualityReportRepo, projectLifecycleEventRepo } from '../data/repository.js?v=6.4';
+import { uid } from '../utils/dom.js?v=6.4';
+import { normalizeCurrency } from '../utils/currency.js?v=6.4';
+import { recomputeProjectCost } from './boqService.js?v=6.4';
+import { dataEngineService } from './dataEngineService.js?v=6.4';
+import { archiveEligibility } from './projectWorkflow.js?v=6.4';
+import { versionService } from './versionService.js?v=6.4';
+import { recordProjectLifecycleEvent } from './projectLockService.js?v=6.4';
 
 export function normalizeProjectMetadata(data = {}) {
   const priceYear = String(data.priceYear || '').trim();
@@ -18,6 +19,7 @@ export function normalizeProjectMetadata(data = {}) {
     pricingDate: isLocalDate(data.pricingDate) ? data.pricingDate : '',
     stage: String(data.stage || '').trim(),
     priceYear: /^\d{4}$/.test(priceYear) ? priceYear : '',
+    currency: normalizeCurrency(data.currency),
   };
 }
 
@@ -36,6 +38,15 @@ export const projectService = {
   async save(data) {
     const obj = normalizeProjectMetadata(data);
     const current = obj.id ? await projectRepo.findById(obj.id) : null;
+    const currentCurrency = normalizeCurrency(current?.currency);
+    if (current && currentCurrency !== obj.currency) {
+      const [lines, versions] = await Promise.all([boqRepo.byProject(obj.id), versionRepo.byProject(obj.id)]);
+      if (lines.length || versions.length || Number(current.totalCost || 0) !== 0) {
+        const error = new Error('项目已有计价数据，不能直接修改本位币。请新建项目后按目标币种重新导入或编制。');
+        error.code = 'PROJECT_CURRENCY_LOCKED';
+        throw error;
+      }
+    }
     if (current?.status === 'archived') {
       const error = new Error('已收录案例不能直接编辑。请先解锁修订。');
       error.code = 'PROJECT_ARCHIVED_READONLY';

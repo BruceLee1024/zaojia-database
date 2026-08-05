@@ -1,10 +1,11 @@
 // 报价版本服务：当前清单的不可变快照、恢复与对比
-import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, versionRepo } from '../data/repository.js?v=6.3';
-import { uid } from '../utils/dom.js?v=6.3';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { dataEngineService } from './dataEngineService.js?v=6.3';
-import { groupForLine } from './boqService.js?v=6.3';
-import { assertProjectEditableById } from './projectLockService.js?v=6.3';
+import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, versionRepo } from '../data/repository.js?v=6.4';
+import { uid } from '../utils/dom.js?v=6.4';
+import { normalizeCurrency } from '../utils/currency.js?v=6.4';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.4';
+import { dataEngineService } from './dataEngineService.js?v=6.4';
+import { groupForLine } from './boqService.js?v=6.4';
+import { assertProjectEditableById } from './projectLockService.js?v=6.4';
 
 const LINE_FIELDS = [
   'quotaItemId', 'code', 'name', 'feature', 'unit', 'qty', 'factor', 'unitPrice', 'amount', 'priceMissing', 'structureGroup',
@@ -32,6 +33,7 @@ export const versionService = {
       note: (note || '').trim(),
       createdAt: new Date().toISOString(),
       totalCost,
+      currency: normalizeCurrency(project.currency),
       lineCount: snapshotLines.length,
       missingPriceCount: snapshotLines.filter(line => hasMissingPrice(line.unitPrice)).length,
       lines: snapshotLines,
@@ -65,6 +67,7 @@ export const versionService = {
         note: `恢复「${version.name}」前自动生成，避免误覆盖工作稿。`,
         createdAt: new Date().toISOString(),
         totalCost: currentLines.reduce((sum, line) => sum + calculateAmount(line.qty, line.unitPrice, line.factor), 0),
+        currency: normalizeCurrency(version.currency),
         lineCount: currentLines.length,
         missingPriceCount: currentLines.filter(line => hasMissingPrice(line.unitPrice)).length,
         backupOfRestoreId: version.id,
