@@ -1,16 +1,16 @@
 // 工程量清单服务
-import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.6';
-import { uid } from '../utils/dom.js?v=6.6';
-import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.6';
-import { calculateAmount } from '../utils/costing.js?v=6.6';
-import { hasMissingPrice } from '../utils/costing.js?v=6.6';
-import { localDateKey } from '../utils/localDate.js?v=6.6';
-import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.6';
-import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.6';
-import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.6';
-import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.6';
-import { calculateQuotaRelations } from './boqQuotaRelationService.js?v=6.6';
-import { normalizeCurrency } from '../utils/currency.js?v=6.6';
+import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.7';
+import { uid } from '../utils/dom.js?v=6.7';
+import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.7';
+import { calculateAmount } from '../utils/costing.js?v=6.7';
+import { hasMissingPrice } from '../utils/costing.js?v=6.7';
+import { localDateKey } from '../utils/localDate.js?v=6.7';
+import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.7';
+import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.7';
+import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.7';
+import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.7';
+import { calculateQuotaRelations } from './boqQuotaRelationService.js?v=6.7';
+import { normalizeCurrency } from '../utils/currency.js?v=6.7';
 
 const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 

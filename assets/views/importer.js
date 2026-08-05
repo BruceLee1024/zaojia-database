@@ -1,17 +1,17 @@
 // 视图：Excel 导入工作台
-import { projectService } from '../services/projectService.js?v=6.6';
-import { boqService } from '../services/boqService.js?v=6.6';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.6';
-import { quotaService } from '../services/quotaService.js?v=6.6';
-import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=6.6';
-import { quotaRepo } from '../data/repository.js?v=6.6';
-import { parseExcel, exportQuotaTemplate } from '../data/excel.js?v=6.6';
-import { getStorageStatus } from '../data/storage.js?v=6.6';
-import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=6.6';
-import { createMappingTemplate, deleteMappingTemplate, duplicateMappingTemplate, getMappingTemplate, listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.6';
-import { esc, fmtMoney, openModal, closeModal, toast } from '../utils/dom.js?v=6.6';
-import { hasMissingPrice } from '../utils/costing.js?v=6.6';
-import { categoryGuess } from '../utils/stats.js?v=6.6';
+import { projectService } from '../services/projectService.js?v=6.7';
+import { boqService } from '../services/boqService.js?v=6.7';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.7';
+import { quotaService } from '../services/quotaService.js?v=6.7';
+import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=6.7';
+import { quotaRepo } from '../data/repository.js?v=6.7';
+import { parseExcel, exportQuotaTemplate } from '../data/excel.js?v=6.7';
+import { getStorageStatus } from '../data/storage.js?v=6.7';
+import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=6.7';
+import { createMappingTemplate, deleteMappingTemplate, duplicateMappingTemplate, getMappingTemplate, listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.7';
+import { esc, fmtMoney, openModal, closeModal, toast } from '../utils/dom.js?v=6.7';
+import { hasMissingPrice } from '../utils/costing.js?v=6.7';
+import { categoryGuess } from '../utils/stats.js?v=6.7';
 
 const PREVIEW_PAGE_SIZES = [20, 50, 100];
 

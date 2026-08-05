@@ -1,18 +1,18 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.6';
-import { boqService, groupForLine } from '../services/boqService.js?v=6.6';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.6';
-import { projectService } from '../services/projectService.js?v=6.6';
-import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.6';
-import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.6';
-import { openReview } from './experience.js?v=6.6';
-import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.6';
-import { exportBOQExcel } from '../data/excel.js?v=6.6';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.6';
-import { categoryGuess } from '../utils/stats.js?v=6.6';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.6';
-import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.6';
-import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.6';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.7';
+import { boqService, groupForLine } from '../services/boqService.js?v=6.7';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.7';
+import { projectService } from '../services/projectService.js?v=6.7';
+import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.7';
+import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.7';
+import { openReview } from './experience.js?v=6.7';
+import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.7';
+import { exportBOQExcel } from '../data/excel.js?v=6.7';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.7';
+import { categoryGuess } from '../utils/stats.js?v=6.7';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.7';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.7';
+import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.7';
 
 const BOQ_PAGE_SIZE = 500;
 const boqState = {
@@ -579,6 +579,19 @@ function bindBoqWorkspacePanelActions(project, status) {
     boqState.riskStatus = action.params?.riskStatus || '';
     render();
   });
+  document.getElementById('btnNextArchive')?.addEventListener('click', async () => {
+    if (!confirm('收录后会把当前项目作为案例，用于后续造价参考。确定收录？')) return;
+    try {
+      const updated = await projectService.archive(project.id);
+      toast('案例已收录，造价参考已同步', 'success');
+      if (updated?.status === 'archived') openReview({ projectId: updated.id, sourceType: 'project_archive' });
+      render();
+    } catch (err) {
+      if (err?.code === 'ARCHIVE_BLOCKED') toast(`暂不能收录：${archiveBlockerText(err.eligibility)}`, 'error');
+      else throw err;
+    }
+  });
+  document.getElementById('btnNextIndicators')?.addEventListener('click', () => window.__app.go('indicators'));
 }
 
 function boqNextBanner(status) {

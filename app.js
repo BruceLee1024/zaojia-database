@@ -1,21 +1,21 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=6.6';
-import * as importer  from './assets/views/importer.js?v=6.6';
-import * as quota     from './assets/views/quota.js?v=6.6';
-import * as projects  from './assets/views/projects.js?v=6.6';
-import * as boq       from './assets/views/boq.js?v=6.6';
-import * as indicators from './assets/views/indicators.js?v=6.6';
-import * as experience from './assets/views/experience.js?v=6.6';
-import * as settings  from './assets/views/settings.js?v=6.6';
-import * as ai        from './assets/views/ai.js?v=6.6';
-import * as resources from './assets/views/resources.js?v=6.6';
-import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=6.6';
-import { smartSearch } from './assets/services/aiAssistService.js?v=6.6';
-import { getStorageStatus } from './assets/data/storage.js?v=6.6';
-import { openModal, closeModal, esc } from './assets/utils/dom.js?v=6.6';
-import { ICONS } from './assets/utils/icons.js?v=6.6';
-import { navigationItemHtml } from './assets/views/navigation.js?v=6.6';
-import { createLatestCoordinator, createLatestWorkspaceCoordinator, createWorkspaceRoot } from './assets/utils/requestCoordinator.js?v=6.6';
+import * as dashboard from './assets/views/dashboard.js?v=6.7';
+import * as importer  from './assets/views/importer.js?v=6.7';
+import * as quota     from './assets/views/quota.js?v=6.7';
+import * as projects  from './assets/views/projects.js?v=6.7';
+import * as boq       from './assets/views/boq.js?v=6.7';
+import * as indicators from './assets/views/indicators.js?v=6.7';
+import * as experience from './assets/views/experience.js?v=6.7';
+import * as settings  from './assets/views/settings.js?v=6.7';
+import * as ai        from './assets/views/ai.js?v=6.7';
+import * as resources from './assets/views/resources.js?v=6.7';
+import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=6.7';
+import { smartSearch } from './assets/services/aiAssistService.js?v=6.7';
+import { getStorageStatus } from './assets/data/storage.js?v=6.7';
+import { openModal, closeModal, esc } from './assets/utils/dom.js?v=6.7';
+import { ICONS } from './assets/utils/icons.js?v=6.7';
+import { navigationItemHtml } from './assets/views/navigation.js?v=6.7';
+import { createLatestCoordinator, createLatestWorkspaceCoordinator, createWorkspaceRoot } from './assets/utils/requestCoordinator.js?v=6.7';
 
 const VIEWS = [
   { id: 'dashboard',  label: '我的概览',   icon: ICONS.navigation.overview, group: '我的工作台', desc: '继续最近工作' },
@@ -45,19 +45,19 @@ const renderers = {
   equipment: resources,
   'resource-import': {
     render: async workspace => {
-      const module = await import('./assets/views/resourceImport.js?v=6.6');
+      const module = await import('./assets/views/resourceImport.js?v=6.7');
       return module.render(workspace);
     },
   },
   'boq-library': {
     render: async workspace => {
-      const module = await import('./assets/views/boqLibrary.js?v=6.6');
+      const module = await import('./assets/views/boqLibrary.js?v=6.7');
       return module.render(workspace);
     },
   },
   'ai-import': {
     render: async workspace => {
-      const module = await import('./assets/views/aiImportWizard.js?v=6.6');
+      const module = await import('./assets/views/aiImportWizard.js?v=6.7');
       return module.render(workspace);
     },
   },
@@ -216,7 +216,7 @@ function escapeHtml(value) {
 }
 
 function exportAll() {
-  import('./assets/views/settings.js?v=6.6').then(m => m.triggerExportBackup());
+  import('./assets/views/settings.js?v=6.7').then(m => m.triggerExportBackup());
   go('settings');
 }
 
