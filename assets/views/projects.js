@@ -1,13 +1,13 @@
 // 视图：我的项目
-import { projectService } from '../services/projectService.js?v=6.4';
-import { indicatorService } from '../services/indicatorService.js?v=6.4';
-import { boqRepo, versionRepo } from '../data/repository.js?v=6.4';
-import { fmt, fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.4';
-import { hasMissingPrice } from '../utils/costing.js?v=6.4';
-import { openReview } from './experience.js?v=6.4';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.4';
-import { suggestProjectInfo } from '../services/aiAssistService.js?v=6.4';
-import { CURRENCY_OPTIONS, currencyLabel, normalizeCurrency } from '../utils/currency.js?v=6.4';
+import { projectService } from '../services/projectService.js?v=6.5';
+import { indicatorService } from '../services/indicatorService.js?v=6.5';
+import { boqRepo, versionRepo } from '../data/repository.js?v=6.5';
+import { fmt, fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.5';
+import { hasMissingPrice } from '../utils/costing.js?v=6.5';
+import { openReview } from './experience.js?v=6.5';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.5';
+import { suggestProjectInfo } from '../services/aiAssistService.js?v=6.5';
+import { CURRENCY_OPTIONS, currencyLabel, normalizeCurrency } from '../utils/currency.js?v=6.5';
 
 const TYPES = [
   '水厂', '污水处理厂', '再生水厂', '工业废水', '泵站', '管网', '调蓄池', '水池', '污泥处理',

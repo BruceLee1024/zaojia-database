@@ -1,6 +1,6 @@
 // Repository 层：所有业务数据访问的唯一入口
 // 业务层不准直接碰 IndexedDB 或本地文件夹，必须走这里
-import { storageGet, storageSet } from './storage.js?v=6.4';
+import { storageGet, storageSet } from './storage.js?v=6.5';
 
 export const STORES = {
   quota_items: 'quota_items',

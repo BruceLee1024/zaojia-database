@@ -1,9 +1,9 @@
-import { quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.4';
-import { uid } from '../utils/dom.js?v=6.4';
-import { resourcePriceService } from './resourcePriceService.js?v=6.4';
-import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.4';
-import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.4';
-import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=6.4';
+import { quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.5';
+import { uid } from '../utils/dom.js?v=6.5';
+import { resourcePriceService } from './resourcePriceService.js?v=6.5';
+import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.5';
+import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.5';
+import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=6.5';
 
 export const quotaResourceService = {
   async list(quotaItemId) {

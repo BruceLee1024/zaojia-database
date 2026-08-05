@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildAiSharePreview, createAiResponse, parseRemoteResponse, sanitizeRemoteContext } from '../assets/services/aiTaskService.js?v=ai-copilot-test';
-import { aiSessionRepo } from '../assets/data/repository.js?v=6.4';
+import { aiSessionRepo } from '../assets/data/repository.js?v=6.5';
 import { createAiSession, listAiSessions, saveAiSessionMessage } from '../assets/services/aiSessionService.js?v=ai-copilot-test';
 
 export function testAiCopilot() {

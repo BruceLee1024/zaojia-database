@@ -1,4 +1,4 @@
-import { localDateKey } from '../utils/localDate.js?v=6.4';
+import { localDateKey } from '../utils/localDate.js?v=6.5';
 
 const SOURCE_LABELS = { official: '官方信息价', supplier_quote: '供应商报价', transaction: '历史成交价' };
 const BASIS_LABELS = { ex_factory: '出厂价', delivered: '到场价', installed_composite: '安装综合价' };
