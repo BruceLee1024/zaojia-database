@@ -3,9 +3,9 @@ import {
   boqLibraryRepo,
   projectBoqQuotaRelationRepo,
   quotaRepo,
-} from '../data/repository.js?v=6.5';
-import { uid } from '../utils/dom.js?v=6.5';
-import { quotaPriceStatus, roundMoney } from '../utils/costing.js?v=6.5';
+} from '../data/repository.js?v=6.6';
+import { uid } from '../utils/dom.js?v=6.6';
+import { quotaPriceStatus, roundMoney } from '../utils/costing.js?v=6.6';
 
 const now = () => new Date().toISOString();
 

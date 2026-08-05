@@ -1,11 +1,11 @@
 // 演示数据加载 + 智能兜底单价
-import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo, resourceRepo, resourcePriceRepo, quotaResourceUsageRepo, resourceAttachmentRepo } from './repository.js?v=6.5';
-import { parseExcel, detectRowKind, rowToQuotaItem, rowToBOQ } from './excel.js?v=6.5';
-import { categoryGuess } from '../utils/stats.js?v=6.5';
-import { uid } from '../utils/dom.js?v=6.5';
-import { calculateAmount } from '../utils/costing.js?v=6.5';
-import { versionService } from '../services/versionService.js?v=6.5';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.5';
+import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, dataFactRepo, dataCandidateRepo, dataJobRepo, dataQualityReportRepo, experienceSessionRepo, experienceCardRepo, resourceRepo, resourcePriceRepo, quotaResourceUsageRepo, resourceAttachmentRepo } from './repository.js?v=6.6';
+import { parseExcel, detectRowKind, rowToQuotaItem, rowToBOQ } from './excel.js?v=6.6';
+import { categoryGuess } from '../utils/stats.js?v=6.6';
+import { uid } from '../utils/dom.js?v=6.6';
+import { calculateAmount } from '../utils/costing.js?v=6.6';
+import { versionService } from '../services/versionService.js?v=6.6';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.6';
 
 const FILES = [
   '定额数据库.xlsx',

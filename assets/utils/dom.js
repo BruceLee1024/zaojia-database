@@ -1,5 +1,5 @@
 // 通用工具函数
-import { formatCurrency } from './currency.js?v=6.5';
+import { formatCurrency } from './currency.js?v=6.6';
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 

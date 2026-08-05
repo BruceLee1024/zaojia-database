@@ -1,12 +1,12 @@
 // 项目服务
-import { projectRepo, boqRepo, projectBoqQuotaRelationRepo, versionRepo, dataCandidateRepo, dataFactRepo, dataJobRepo, dataQualityReportRepo, projectLifecycleEventRepo } from '../data/repository.js?v=6.5';
-import { uid } from '../utils/dom.js?v=6.5';
-import { normalizeCurrency } from '../utils/currency.js?v=6.5';
-import { recomputeProjectCost } from './boqService.js?v=6.5';
-import { dataEngineService } from './dataEngineService.js?v=6.5';
-import { archiveEligibility } from './projectWorkflow.js?v=6.5';
-import { versionService } from './versionService.js?v=6.5';
-import { recordProjectLifecycleEvent } from './projectLockService.js?v=6.5';
+import { projectRepo, boqRepo, projectBoqQuotaRelationRepo, versionRepo, dataCandidateRepo, dataFactRepo, dataJobRepo, dataQualityReportRepo, projectLifecycleEventRepo } from '../data/repository.js?v=6.6';
+import { uid } from '../utils/dom.js?v=6.6';
+import { normalizeCurrency } from '../utils/currency.js?v=6.6';
+import { recomputeProjectCost } from './boqService.js?v=6.6';
+import { dataEngineService } from './dataEngineService.js?v=6.6';
+import { archiveEligibility } from './projectWorkflow.js?v=6.6';
+import { versionService } from './versionService.js?v=6.6';
+import { recordProjectLifecycleEvent } from './projectLockService.js?v=6.6';
 
 export function normalizeProjectMetadata(data = {}) {
   const priceYear = String(data.priceYear || '').trim();

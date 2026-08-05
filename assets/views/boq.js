@@ -1,18 +1,18 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.5';
-import { boqService, groupForLine } from '../services/boqService.js?v=6.5';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.5';
-import { projectService } from '../services/projectService.js?v=6.5';
-import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.5';
-import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.5';
-import { openReview } from './experience.js?v=6.5';
-import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.5';
-import { exportBOQExcel } from '../data/excel.js?v=6.5';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.5';
-import { categoryGuess } from '../utils/stats.js?v=6.5';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.5';
-import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.5';
-import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.5';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.6';
+import { boqService, groupForLine } from '../services/boqService.js?v=6.6';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.6';
+import { projectService } from '../services/projectService.js?v=6.6';
+import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.6';
+import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.6';
+import { openReview } from './experience.js?v=6.6';
+import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.6';
+import { exportBOQExcel } from '../data/excel.js?v=6.6';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.6';
+import { categoryGuess } from '../utils/stats.js?v=6.6';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.6';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.6';
+import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.6';
 
 const BOQ_PAGE_SIZE = 500;
 const boqState = {
@@ -28,6 +28,7 @@ const boqState = {
   detailCollapsed: localStorage.getItem('boq_detail_collapsed') === 'true',
   expandedProjectIds: new Set(),
   currency: 'CNY',
+  workspaceTab: 'boq',
 };
 let searchTimer = null;
 // 明细区在桌面端是主要编辑面板，不应只留给表单一小段可视空间。
@@ -93,10 +94,8 @@ export async function render(workspace = document.getElementById('workspace')) {
   workspace.innerHTML = `
     <div class="page-frame h-full min-h-0 flex flex-col gap-3">
       ${boqWorkbenchHeader(proj, projects, workbench)}
-      ${boqWorkflowStrip(workbench)}
-      ${boqNextBanner(workbench)}
-      ${boqToolbar(selectedCount)}
-
+      ${boqWorkspaceTabs(workbench)}
+      ${boqState.workspaceTab === 'boq' ? `${boqToolbar(selectedCount)}
       <div class="boq-main-grid grid grid-cols-[260px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
         <div class="boq-desktop-tree">${projectTree(proj, boq)}</div>
         <div class="min-w-0 min-h-0 flex flex-col gap-3">
@@ -144,7 +143,7 @@ export async function render(workspace = document.getElementById('workspace')) {
             ${detailPanel(activeLine, activeRecommendations, librarySource, activeQuotaRelations)}
           </aside>
         </div>
-      </div>
+      </div>` : boqWorkspacePanel(workbench, versions)}
     </div>
   `;
 
@@ -155,6 +154,14 @@ export async function render(workspace = document.getElementById('workspace')) {
     boqState.selectedIds.clear();
     render();
   };
+  document.querySelectorAll('[data-boq-workspace-tab]').forEach(button => button.addEventListener('click', () => {
+    boqState.workspaceTab = button.dataset.boqWorkspaceTab;
+    render();
+  }));
+  if (boqState.workspaceTab !== 'boq') {
+    bindBoqWorkspacePanelActions(proj, workbench);
+    return;
+  }
   document.getElementById('treeKw')?.addEventListener('input', e => {
     boqState.treeKeyword = e.target.value;
     clearTimeout(searchTimer);
@@ -475,10 +482,10 @@ function boqWorkflowStrip(status) {
 
 function boqWorkbenchHeader(project, projects, status) {
   return `<section class="rounded-lg border border-slate-200 bg-white p-4 shrink-0">
-    <div class="flex items-start gap-4">
+    <div class="flex items-center gap-4">
       <div>
         <h1 class="text-xl font-semibold text-slate-950">报价编制工作台</h1>
-        <div class="mt-1 text-xs text-slate-500">集中处理清单、价格风险和报价版本，完成后可收录为参考案例。</div>
+        <div class="mt-1 text-xs text-slate-500">按工作主题切换，专注处理当前任务。</div>
       </div>
       <label class="ml-auto h-10 min-w-[300px] rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 flex items-center gap-2">
         <span class="material-symbols-outlined text-[18px] text-teal-700">domain</span>
@@ -487,14 +494,91 @@ function boqWorkbenchHeader(project, projects, status) {
         </select>
       </label>
     </div>
-    <div class="mt-4 grid grid-cols-5 gap-3">
+  </section>`;
+}
+
+function boqWorkspaceTabs(status) {
+  const tabs = [
+    ['boq', 'format_list_bulleted', '清单编制', `${status.lineCount} 项`],
+    ['risk', 'priority_high', '价格风险', status.missing + status.zeroQty + status.factorRisk + status.unmatched ? `${status.missing + status.zeroQty + status.factorRisk + status.unmatched} 处` : '已通过'],
+    ['versions', 'history', '报价版本', `${status.versionCount} 个`],
+    ['overview', 'dashboard', '项目概览', `${status.completion}% 完整`],
+  ];
+  return `<nav class="boq-workspace-tabs rounded-lg border border-slate-200 bg-white px-2 pt-2 shrink-0" aria-label="报价工作区">
+    <div class="flex gap-1 overflow-x-auto">
+      ${tabs.map(([id, icon, label, note]) => {
+        const active = boqState.workspaceTab === id;
+        return `<button type="button" data-boq-workspace-tab="${id}" class="${active ? 'border-teal-600 bg-teal-50 text-teal-800' : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'} inline-flex min-w-[136px] flex-1 items-center justify-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold whitespace-nowrap" aria-current="${active ? 'page' : 'false'}"><span class="material-symbols-outlined text-[18px]">${icon}</span><span>${label}</span><span class="text-[11px] font-medium ${active ? 'text-teal-700' : 'text-slate-400'}">${note}</span></button>`;
+      }).join('')}
+    </div>
+  </nav>`;
+}
+
+function boqWorkspacePanel(status, versions) {
+  if (boqState.workspaceTab === 'risk') {
+    return `<section class="flex-1 min-h-0 rounded-xl border border-slate-200 bg-white p-5 overflow-auto scroll-thin">
+      <div class="flex items-start justify-between gap-4"><div><h2 class="text-lg font-semibold text-slate-900">价格风险</h2><p class="mt-1 text-sm text-slate-500">集中处理缺单价、工程量和定额匹配异常，处理后再进入版本保存。</p></div><button id="btnRiskAudit" class="inline-flex h-9 items-center gap-1 rounded border border-amber-300 bg-amber-50 px-3 text-sm text-amber-800"><span class="material-symbols-outlined text-[17px]">fact_check</span>报价审查</button></div>
+      <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        ${riskCard('缺单价', status.missing, 'payments', 'btnRiskMissing', '补齐单价', 'amber')}
+        ${riskCard('工程量为 0', status.zeroQty, 'warning', 'btnRiskZero', '查看清单', 'amber')}
+        ${riskCard('系数异常', status.factorRisk, 'tune', 'btnRiskFactor', '复核系数', 'amber')}
+        ${riskCard('未匹配定额', status.unmatched, 'link_off', 'btnRiskUnmatched', '匹配定额', 'slate')}
+      </div>
+      ${boqNextBanner(status)}
+    </section>`;
+  }
+  if (boqState.workspaceTab === 'versions') {
+    return `<section class="flex-1 min-h-0 rounded-xl border border-slate-200 bg-white p-5 overflow-auto scroll-thin">
+      <div class="flex items-start justify-between gap-4"><div><h2 class="text-lg font-semibold text-slate-900">报价版本</h2><p class="mt-1 text-sm text-slate-500">保存可回退快照，并在版本管理中比较、恢复或沉淀复盘。</p></div><div class="flex gap-2"><button id="btnVersionManage" class="h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700">版本管理</button><button id="btnVersionSave" class="h-9 rounded brand-bg px-3 text-sm text-white">保存版本</button></div></div>
+      <div class="mt-5 overflow-hidden rounded-lg border border-slate-200"><table class="w-full text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="px-4 py-3">版本</th><th class="px-4 py-3">创建时间</th><th class="px-4 py-3 text-right">总价</th><th class="px-4 py-3 text-right">条数</th><th class="px-4 py-3 text-right">缺单价</th><th class="px-4 py-3">备注</th></tr></thead><tbody>${versions.map(version => `<tr class="border-t border-slate-100"><td class="px-4 py-3 font-medium text-slate-800">${esc(version.name || '未命名版本')}</td><td class="px-4 py-3 text-slate-500">${formatTime(version.createdAt)}</td><td class="px-4 py-3 text-right tabular-nums">${money(version.totalCost || 0)}</td><td class="px-4 py-3 text-right tabular-nums">${version.lineCount || 0}</td><td class="px-4 py-3 text-right">${version.missingPriceCount ? `<span class="badge badge-yellow">${version.missingPriceCount}</span>` : '0'}</td><td class="px-4 py-3 text-slate-500">${esc(version.note || '-')}</td></tr>`).join('') || '<tr><td colspan="6" class="px-4 py-14 text-center text-slate-400">还没有报价版本。保存当前清单后即可形成第一个快照。</td></tr>'}</tbody></table></div>
+    </section>`;
+  }
+  return `<section class="flex-1 min-h-0 rounded-xl border border-slate-200 bg-white p-5 overflow-auto scroll-thin">
+    <div><h2 class="text-lg font-semibold text-slate-900">项目概览</h2><p class="mt-1 text-sm text-slate-500">查看报价进度、项目总价和后续工作建议。</p></div>
+    <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
       ${boqMetric('项目总造价', money(status.totalCost), '')}
       ${boqMetric('价格完整度', `${status.completion}%`, '', status.missing ? 'text-amber-700' : 'text-teal-700')}
       ${boqMetric('报价版本', status.versionCount, '个', status.versionCount ? '' : 'text-amber-700')}
       ${boqMetric('风险状态', status.missing + status.zeroQty + status.factorRisk + status.unmatched, '处', status.missing ? 'text-amber-700' : '')}
       ${boqMetric('选中合价', money(status.selectedTotal), '')}
     </div>
+    <div class="mt-5">${boqWorkflowStrip(status)}</div>
+    <div class="mt-3">${boqNextBanner(status)}</div>
   </section>`;
+}
+
+function riskCard(label, count, icon, id, action, tone) {
+  const cls = count ? (tone === 'amber' ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50') : 'border-slate-200 bg-white';
+  return `<article class="rounded-xl border ${cls} p-4"><div class="flex items-center justify-between"><span class="text-sm text-slate-600">${label}</span><span class="material-symbols-outlined text-[20px] ${count ? 'text-amber-700' : 'text-teal-700'}">${icon}</span></div><div class="mt-3 text-2xl font-semibold tabular-nums text-slate-900">${count}<span class="ml-1 text-xs font-normal text-slate-500">处</span></div><button id="${id}" class="mt-4 text-sm ${count ? 'text-teal-700 hover:underline' : 'text-slate-400'}" ${count ? '' : 'disabled'}>${action}</button></article>`;
+}
+
+function bindBoqWorkspacePanelActions(project, status) {
+  document.getElementById('btnRiskAudit')?.addEventListener('click', () => showQuoteAudit(project.id));
+  const openRisk = risk => {
+    boqState.workspaceTab = 'boq';
+    boqState.priceStatus = risk === 'missingPrice' ? 'missing' : '';
+    boqState.riskStatus = risk === 'missingPrice' ? '' : risk;
+    boqState.page = 1;
+    render();
+  };
+  document.getElementById('btnRiskMissing')?.addEventListener('click', () => openRisk('missingPrice'));
+  document.getElementById('btnRiskZero')?.addEventListener('click', () => openRisk('zeroQty'));
+  document.getElementById('btnRiskFactor')?.addEventListener('click', () => openRisk('factorRisk'));
+  document.getElementById('btnRiskUnmatched')?.addEventListener('click', () => openRisk('unmatchedQuota'));
+  document.getElementById('btnVersionSave')?.addEventListener('click', () => saveVersion(project.id));
+  document.getElementById('btnVersionManage')?.addEventListener('click', () => manageVersions(project.id));
+  document.getElementById('btnNextMissing')?.addEventListener('click', () => openRisk('missingPrice'));
+  document.getElementById('btnNextZeroQty')?.addEventListener('click', () => openRisk('zeroQty'));
+  document.getElementById('btnNextSaveVer')?.addEventListener('click', () => saveVersion(project.id));
+  document.getElementById('btnNextAdd')?.addEventListener('click', () => { boqState.workspaceTab = 'boq'; render(); });
+  document.getElementById('btnNextBlocked')?.addEventListener('click', () => {
+    const action = status.eligibility?.primaryAction;
+    if (!action) return;
+    boqState.workspaceTab = action.params?.priceStatus || action.params?.riskStatus ? 'boq' : 'overview';
+    boqState.priceStatus = action.params?.priceStatus || '';
+    boqState.riskStatus = action.params?.riskStatus || '';
+    render();
+  });
 }
 
 function boqNextBanner(status) {

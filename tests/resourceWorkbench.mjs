@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.5';
-import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.5';
-import { resourceService } from '../assets/services/resourceService.js?v=6.5';
-import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.5';
-import { getResourceTemplateData } from '../assets/data/excel.js?v=6.5';
-import { createLatestResourceSelection, nextResourceViewState } from '../assets/views/resources.js?v=6.5';
-import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.5';
+import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.6';
+import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.6';
+import { resourceService } from '../assets/services/resourceService.js?v=6.6';
+import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.6';
+import { getResourceTemplateData } from '../assets/data/excel.js?v=6.6';
+import { createLatestResourceSelection, nextResourceViewState } from '../assets/views/resources.js?v=6.6';
+import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.6';
 
 export async function testResourceWorkbench() {
   const originalStorage = globalThis.localStorage;

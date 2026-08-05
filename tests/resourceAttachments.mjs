@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.5';
-import { storageGet, storageGetAttachment, storageRemoveAttachment, storageSetAttachment, storageSetStrict, writeStoresToDirectory } from '../assets/data/storage.js?v=6.5';
-import { restoreLegacyJsonBackup } from '../assets/services/backupService.js?v=6.5';
-import { resourceAttachmentService } from '../assets/services/resourceAttachmentService.js?v=6.5';
-import { attachmentListHtml, attachmentPanelShell, loadAttachmentPanel, shouldDownloadAttachment } from '../assets/views/resourceAttachments.js?v=6.5';
+import { resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.6';
+import { storageGet, storageGetAttachment, storageRemoveAttachment, storageSetAttachment, storageSetStrict, writeStoresToDirectory } from '../assets/data/storage.js?v=6.6';
+import { restoreLegacyJsonBackup } from '../assets/services/backupService.js?v=6.6';
+import { resourceAttachmentService } from '../assets/services/resourceAttachmentService.js?v=6.6';
+import { attachmentListHtml, attachmentPanelShell, loadAttachmentPanel, shouldDownloadAttachment } from '../assets/views/resourceAttachments.js?v=6.6';
 
 const MB = 1024 * 1024;
 

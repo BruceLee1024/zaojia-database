@@ -1,8 +1,8 @@
 // AI 自由格式清单识别：只传递当前工作表的有限样本。
 // 标准表头由本地规则优先自动匹配，AI 只负责补充模糊列的建议。
-import { getAIConfig } from './aiService.js?v=6.5';
-import { normalizeImportHeader } from './importMappingService.js?v=6.5';
-import { getImportSchema } from './importSchemaService.js?v=6.5';
+import { getAIConfig } from './aiService.js?v=6.6';
+import { normalizeImportHeader } from './importMappingService.js?v=6.6';
+import { getImportSchema } from './importSchemaService.js?v=6.6';
 
 const PROJECT_FIELDS = [
   { key: 'code', label: '清单编码', aliases: ['项目编码', '清单编码', '编码'], kind: 'text' },
