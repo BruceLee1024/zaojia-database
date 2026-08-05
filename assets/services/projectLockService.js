@@ -1,5 +1,5 @@
-import { projectLifecycleEventRepo, projectRepo } from '../data/repository.js?v=6.7';
-import { uid } from '../utils/dom.js?v=6.7';
+import { projectLifecycleEventRepo, projectRepo } from '../data/repository.js?v=6.8';
+import { uid } from '../utils/dom.js?v=6.8';
 
 export function assertProjectEditable(project) {
   if (!project) throw new Error('项目不存在');

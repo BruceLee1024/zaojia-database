@@ -92,7 +92,7 @@ export function categorize(baseName, features = []) {
   return categoryGuessFromName(baseName, features);
 }
 
-import { categoryGuess as _cg } from './stats.js?v=6.7';
+import { categoryGuess as _cg } from './stats.js?v=6.8';
 
 function categoryGuessFromName(name, features) {
   const blob = [name, ...features].join(' ');

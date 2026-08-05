@@ -1,18 +1,18 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.7';
-import { boqService, groupForLine } from '../services/boqService.js?v=6.7';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.7';
-import { projectService } from '../services/projectService.js?v=6.7';
-import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.7';
-import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.7';
-import { openReview } from './experience.js?v=6.7';
-import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.7';
-import { exportBOQExcel } from '../data/excel.js?v=6.7';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.7';
-import { categoryGuess } from '../utils/stats.js?v=6.7';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.7';
-import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.7';
-import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.7';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.8';
+import { boqService, groupForLine } from '../services/boqService.js?v=6.8';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.8';
+import { projectService } from '../services/projectService.js?v=6.8';
+import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.8';
+import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.8';
+import { openReview } from './experience.js?v=6.8';
+import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.8';
+import { exportBOQExcel } from '../data/excel.js?v=6.8';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.8';
+import { categoryGuess } from '../utils/stats.js?v=6.8';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.8';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.8';
+import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.8';
 
 const BOQ_PAGE_SIZE = 500;
 const boqState = {
@@ -96,7 +96,7 @@ export async function render(workspace = document.getElementById('workspace')) {
       ${boqWorkbenchHeader(proj, projects, workbench)}
       ${boqWorkspaceTabs(workbench)}
       ${boqState.workspaceTab === 'boq' ? `${boqToolbar(selectedCount)}
-      <div class="boq-main-grid grid grid-cols-[260px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
+      <div class="boq-main-grid grid grid-cols-[260px_minmax(0,1fr)_380px] gap-3 flex-1 min-h-0">
         <div class="boq-desktop-tree">${projectTree(proj, boq)}</div>
         <div class="min-w-0 min-h-0 flex flex-col gap-3">
           <section class="bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden flex-1 min-h-[220px]">
@@ -139,10 +139,10 @@ export async function render(workspace = document.getElementById('workspace')) {
               </table>
             </div>
           </section>
-          <aside id="boqDetail" class="boq-detail-inspector card shrink-0 overflow-hidden">
-            ${detailPanel(activeLine, activeRecommendations, librarySource, activeQuotaRelations)}
-          </aside>
         </div>
+        <aside id="boqDetail" class="boq-detail-inspector card min-h-0 overflow-hidden">
+          ${detailPanel(activeLine, activeRecommendations, librarySource, activeQuotaRelations)}
+        </aside>
       </div>` : boqWorkspacePanel(workbench, versions)}
     </div>
   `;

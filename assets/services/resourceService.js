@@ -1,5 +1,5 @@
-import { boqRepo, quotaResourceUsageRepo, resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.7';
-import { uid } from '../utils/dom.js?v=6.7';
+import { boqRepo, quotaResourceUsageRepo, resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.8';
+import { uid } from '../utils/dom.js?v=6.8';
 
 const RESOURCE_TYPES = new Set(['material', 'equipment']);
 const RESOURCE_STATUSES = new Set(['active', 'inactive']);

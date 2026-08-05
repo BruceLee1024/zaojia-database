@@ -1,6 +1,6 @@
 // 指标服务
-import { projectRepo, boqRepo, indicatorRepo, dataFactRepo } from '../data/repository.js?v=6.7';
-import { stats, categoryGuess } from '../utils/stats.js?v=6.7';
+import { projectRepo, boqRepo, indicatorRepo, dataFactRepo } from '../data/repository.js?v=6.8';
+import { stats, categoryGuess } from '../utils/stats.js?v=6.8';
 
 const UNSET = '未填写';
 const PROJECT_METRICS = [

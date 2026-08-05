@@ -226,11 +226,11 @@
   .mobile-nav-sheet { display: none; }
   .mobile-card-list { display: none; }
   .mobile-scroll-hint { display: none; }
-  /* 表格优先占满工作区横向空间，明细编辑放到表格下方，避免右侧检查器压缩列宽。 */
-  .boq-detail-inspector { display: flex; min-width: 0; flex: 0 0 340px; height: 340px; }
+  /* 清单工作区保持“结构树 / 表格 / 明细编辑”三栏，编辑时无需离开当前清单。 */
+  .boq-detail-inspector { display: flex; min-width: 0; }
   .boq-detail-inspector > div { width: 100%; }
   @media (max-width: 1180px) {
-    .boq-main-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .boq-main-grid { grid-template-columns: minmax(0, 1fr) 360px !important; }
     .boq-desktop-tree { display: none !important; }
   }
   @media (max-width: 1100px) {
@@ -364,7 +364,7 @@
     <div class="px-5 py-4 text-[11px] text-slate-500 border-t border-slate-800 space-y-2">
       <div class="flex items-center justify-between">
         <span>运行版本</span>
-        <span class="font-data text-slate-400">v6.7</span>
+        <span class="font-data text-slate-400">v6.8</span>
       </div>
       <div class="flex items-center gap-2 text-slate-400">
         <span class="pulse-dot"></span>
@@ -475,6 +475,6 @@
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="../app.js?v=6.7"></script>
+<script type="module" src="../app.js?v=6.8"></script>
 </body>
 </html>

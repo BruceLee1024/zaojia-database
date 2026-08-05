@@ -1,11 +1,11 @@
 // 独立清单库：标准清单条目维护与套用到项目
-import { boqLibraryQuotaRelationRepo, boqLibraryRepo, boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.7';
-import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.7';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.7';
-import { uid } from '../utils/dom.js?v=6.7';
-import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.7';
-import { boqQuotaRelationService, calculateQuotaRelations, normalizeQuotaRelation, quotaSnapshot } from './boqQuotaRelationService.js?v=6.7';
-import { normalizeCurrency } from '../utils/currency.js?v=6.7';
+import { boqLibraryQuotaRelationRepo, boqLibraryRepo, boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.8';
+import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.8';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.8';
+import { uid } from '../utils/dom.js?v=6.8';
+import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.8';
+import { boqQuotaRelationService, calculateQuotaRelations, normalizeQuotaRelation, quotaSnapshot } from './boqQuotaRelationService.js?v=6.8';
+import { normalizeCurrency } from '../utils/currency.js?v=6.8';
 
 const now = () => new Date().toISOString();
 const clean = value => String(value ?? '').trim();

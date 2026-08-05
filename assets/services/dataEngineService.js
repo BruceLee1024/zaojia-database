@@ -7,11 +7,11 @@ import {
   dataCandidateRepo,
   dataJobRepo,
   dataQualityReportRepo,
-} from '../data/repository.js?v=6.7';
-import { uid } from '../utils/dom.js?v=6.7';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.7';
-import { categoryGuess } from '../utils/stats.js?v=6.7';
-import { indicatorService } from './indicatorService.js?v=6.7';
+} from '../data/repository.js?v=6.8';
+import { uid } from '../utils/dom.js?v=6.8';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.8';
+import { categoryGuess } from '../utils/stats.js?v=6.8';
+import { indicatorService } from './indicatorService.js?v=6.8';
 
 const FORMAL_SOURCES = new Set(['archived_project', 'version']);
 const PIPELINE_STAGES = ['采集', '标准化', '质量检查', '沉淀入库', '指标重建'];

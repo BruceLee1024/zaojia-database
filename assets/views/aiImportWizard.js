@@ -1,13 +1,13 @@
 // 统一表格导入向导：五类目标共用文件、数据区、层级映射、预览和写入流程。
-import { parseImportFile } from '../data/excel.js?v=6.7';
-import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.7';
-import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.7';
-import { getImportSchema } from '../services/importSchemaService.js?v=6.7';
-import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.7';
-import { analyzeImport, commitImport } from '../services/importWorkflowService.js?v=6.7';
-import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.7';
-import { projectRepo } from '../data/repository.js?v=6.7';
-import { esc, toast } from '../utils/dom.js?v=6.7';
+import { parseImportFile } from '../data/excel.js?v=6.8';
+import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.8';
+import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.8';
+import { getImportSchema } from '../services/importSchemaService.js?v=6.8';
+import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.8';
+import { analyzeImport, commitImport } from '../services/importWorkflowService.js?v=6.8';
+import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.8';
+import { projectRepo } from '../data/repository.js?v=6.8';
+import { esc, toast } from '../utils/dom.js?v=6.8';
 
 const TARGETS = {
   'boq_quota_bundle': { label: '清单及定额组合', back: 'boq-library' },
