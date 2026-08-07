@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createLatestCoordinator, createLatestWorkspaceCoordinator, createSerializedKeyCoordinator, createWorkspaceRoot } from '../assets/utils/requestCoordinator.js?v=6.11';
-import { buildEquipmentPackageDialog, createAtomicResourceRefresh, createLatestResourceSelection, resourceRowHtml } from '../assets/views/resources.js?v=6.11';
-import { quotaResourceChoiceHtml } from '../assets/views/quotaResourceCompositionPanel.js?v=6.11';
+import { createLatestCoordinator, createLatestWorkspaceCoordinator, createSerializedKeyCoordinator, createWorkspaceRoot } from '../assets/utils/requestCoordinator.js?v=6.12';
+import { buildEquipmentPackageDialog, createAtomicResourceRefresh, createLatestResourceSelection, resourceRowHtml } from '../assets/views/resources.js?v=6.12';
+import { quotaResourceChoiceHtml } from '../assets/views/quotaResourceCompositionPanel.js?v=6.12';
 
 export async function testFinalFixes() {
   await testLatestCoordinator();
@@ -300,7 +300,7 @@ async function testCoherentModuleVersionGraph() {
     const source = await readFile(file, 'utf8');
     for (const match of source.matchAll(edge)) {
       const specifier = match[2] || match[3];
-      if (/^(?:\.|\/)/.test(specifier) && !specifier.endsWith('?v=6.11')) violations.push(`${file}: ${specifier}`);
+      if (/^(?:\.|\/)/.test(specifier) && !specifier.endsWith('?v=6.12')) violations.push(`${file}: ${specifier}`);
     }
   }
   assert.deepEqual(violations, []);

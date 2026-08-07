@@ -1,5 +1,5 @@
 // Excel 导入字段映射：表头语义与样本值双重校验，默认只确认高置信字段。
-import { getImportSchema } from './importSchemaService.js?v=6.11';
+import { getImportSchema } from './importSchemaService.js?v=6.12';
 
 export const IMPORT_FIELD_DEFS = [
   { key: 'name', label: '清单名称', required: true, aliases: ['项目名称', '清单名称', '工程名称', '名称', '项目名称项目特征'], kind: 'text' },

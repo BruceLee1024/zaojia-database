@@ -1,9 +1,9 @@
 // 复盘笔记与个人经验库
-import { projectRepo, boqRepo, versionRepo, experienceSessionRepo } from '../data/repository.js?v=6.11';
-import { hasMissingPrice } from '../utils/costing.js?v=6.11';
-import { experienceService } from '../services/experienceService.js?v=6.11';
-import { indicatorService } from '../services/indicatorService.js?v=6.11';
-import { esc, fmt, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.11';
+import { projectRepo, boqRepo, versionRepo, experienceSessionRepo } from '../data/repository.js?v=6.12';
+import { hasMissingPrice } from '../utils/costing.js?v=6.12';
+import { experienceService } from '../services/experienceService.js?v=6.12';
+import { indicatorService } from '../services/indicatorService.js?v=6.12';
+import { esc, fmt, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.12';
 
 const experienceState = {
   keyword: '',

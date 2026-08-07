@@ -1,9 +1,9 @@
-import { boqLibraryQuotaRelationRepo, boqLibraryRepo, quotaRepo } from '../data/repository.js?v=6.11';
-import { uid } from '../utils/dom.js?v=6.11';
-import { categoryGuess } from '../utils/stats.js?v=6.11';
-import { quotaPriceStatus } from '../utils/costing.js?v=6.11';
-import { findDuplicateLibraryItem, normalizeLibraryItem } from './boqLibraryService.js?v=6.11';
-import { normalizeQuotaRelation, parseQuotaUnit, quotaSnapshot } from './boqQuotaRelationService.js?v=6.11';
+import { boqLibraryQuotaRelationRepo, boqLibraryRepo, quotaRepo } from '../data/repository.js?v=6.12';
+import { uid } from '../utils/dom.js?v=6.12';
+import { categoryGuess } from '../utils/stats.js?v=6.12';
+import { quotaPriceStatus } from '../utils/costing.js?v=6.12';
+import { findDuplicateLibraryItem, normalizeLibraryItem } from './boqLibraryService.js?v=6.12';
+import { normalizeQuotaRelation, parseQuotaUnit, quotaSnapshot } from './boqQuotaRelationService.js?v=6.12';
 
 export function normalizeBundleLayer(value = '') {
   const text = String(value || '').replace(/[\s　]/g, '').toLowerCase();

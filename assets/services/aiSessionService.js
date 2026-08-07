@@ -1,4 +1,4 @@
-import { aiSessionRepo } from '../data/repository.js?v=6.11';
+import { aiSessionRepo } from '../data/repository.js?v=6.12';
 
 const MAX_SESSIONS = 30;
 const MAX_MESSAGES = 80;

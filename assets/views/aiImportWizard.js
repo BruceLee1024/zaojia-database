@@ -1,13 +1,13 @@
 // 统一表格导入向导：五类目标共用文件、数据区、层级映射、预览和写入流程。
-import { parseImportFile } from '../data/excel.js?v=6.11';
-import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.11';
-import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.11';
-import { getImportSchema } from '../services/importSchemaService.js?v=6.11';
-import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.11';
-import { analyzeImport, commitImport } from '../services/importWorkflowService.js?v=6.11';
-import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.11';
-import { projectRepo } from '../data/repository.js?v=6.11';
-import { esc, toast } from '../utils/dom.js?v=6.11';
+import { parseImportFile } from '../data/excel.js?v=6.12';
+import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.12';
+import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.12';
+import { getImportSchema } from '../services/importSchemaService.js?v=6.12';
+import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.12';
+import { analyzeImport, commitImport } from '../services/importWorkflowService.js?v=6.12';
+import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.12';
+import { projectRepo } from '../data/repository.js?v=6.12';
+import { esc, toast } from '../utils/dom.js?v=6.12';
 
 const TARGETS = {
   'boq_quota_bundle': { label: '清单及定额组合', back: 'boq-library' },
@@ -181,7 +181,7 @@ function previewRowsHtml(rows) {
 
 function resultPanel() {
   const report = state.report;
-  return `<section class="rounded-lg border ${report?.warnings?.length ? 'border-amber-200 bg-amber-50' : 'border-teal-200 bg-teal-50'} p-6"><span class="material-symbols-outlined text-4xl ${report?.warnings?.length ? 'text-amber-700' : 'text-teal-700'}">${report?.warnings?.length ? 'warning' : 'check_circle'}</span><h2 class="mt-2 text-lg font-semibold text-slate-950">${report?.warnings?.length ? '导入完成，但有后处理警告' : '导入已完成'}</h2><p class="mt-2 text-sm text-slate-700">${esc(report?.sourceName || state.fileName)} · 尝试写入 ${report?.counts?.attempted || 0} 行，实际写入 ${report?.counts?.committed || 0} 行，未写入 ${report?.counts?.notWritten || 0} 行。</p><div class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">${metric('新增', report?.counts?.added)}${metric('更新', report?.counts?.updated)}${metric('重复/跳过', report?.counts?.duplicate)}${metric('冲突/失败', report?.counts?.conflict, report?.counts?.conflict ? 'red' : 'slate')}</div>${report?.warnings?.length ? warningBox(report.warnings) : ''}<button onclick="window.__aiImport.cancel()" class="mt-5 h-9 px-4 bg-teal-700 text-white text-sm">返回${esc(TARGETS[state.targetType].label)}</button></section>`;
+  return `<section class="rounded-lg border ${report?.warnings?.length ? 'border-amber-200 bg-amber-50' : 'border-teal-200 bg-teal-50'} p-6"><span class="material-symbols-outlined text-4xl ${report?.warnings?.length ? 'text-amber-700' : 'text-teal-700'}">${report?.warnings?.length ? 'warning' : 'check_circle'}</span><h2 class="mt-2 text-lg font-semibold text-slate-950">${report?.warnings?.length ? '导入完成，但有待确认项' : '导入已完成'}</h2><p class="mt-2 text-sm text-slate-700">${esc(report?.sourceName || state.fileName)} · 尝试写入 ${report?.counts?.attempted || 0} 行，实际写入 ${report?.counts?.committed || 0} 行，未写入 ${report?.counts?.notWritten || 0} 行。</p><div class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">${metric('新增', report?.counts?.added)}${metric('更新', report?.counts?.updated)}${metric('重复/跳过', report?.counts?.duplicate)}${metric('待确认价格', report?.counts?.pending, report?.counts?.pending ? 'amber' : 'slate')}${metric('冲突/失败', report?.counts?.conflict, report?.counts?.conflict ? 'red' : 'slate')}</div>${report?.warnings?.length ? warningBox(report.warnings) : ''}<button onclick="window.__aiImport.cancel()" class="mt-5 h-9 px-4 bg-teal-700 text-white text-sm">返回${esc(TARGETS[state.targetType].label)}</button></section>`;
 }
 
 function bindUpload(workspace) {

@@ -1,7 +1,7 @@
 // 全局搜索：聚合定额、项目、指标、经验和常用入口
-import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo, resourceRepo } from '../data/repository.js?v=6.11';
-import { fmtMoney } from '../utils/dom.js?v=6.11';
-import { hasMissingPrice } from '../utils/costing.js?v=6.11';
+import { quotaRepo, boqLibraryRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo, resourceRepo } from '../data/repository.js?v=6.12';
+import { fmtMoney } from '../utils/dom.js?v=6.12';
+import { hasMissingPrice } from '../utils/costing.js?v=6.12';
 
 const TYPE_META = {
   quota: { label: '定额', icon: 'menu_book' },
