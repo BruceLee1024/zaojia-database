@@ -1,8 +1,8 @@
 // AI 自由格式清单识别：只传递当前工作表的有限样本。
 // 标准表头由本地规则优先自动匹配，AI 只负责补充模糊列的建议。
-import { getAIConfig } from './aiService.js?v=6.10';
-import { normalizeImportHeader } from './importMappingService.js?v=6.10';
-import { getImportSchema } from './importSchemaService.js?v=6.10';
+import { getAIConfig } from './aiService.js?v=6.11';
+import { normalizeImportHeader } from './importMappingService.js?v=6.11';
+import { getImportSchema } from './importSchemaService.js?v=6.11';
 
 const PROJECT_FIELDS = [
   { key: 'code', label: '清单编码', aliases: ['项目编码', '清单编码', '编码'], kind: 'text' },
@@ -53,6 +53,10 @@ export function createHierarchicalRecognitionRequest({ targetType, signature = '
       samples: rows.slice(0, 50).map(row => row?.values?.[column.id]).filter(value => value !== '' && value != null).slice(0, 8),
     })),
     availableFields,
+    semanticReview: {
+      enabled: true,
+      instruction: '识别样本中的业务表达、单位/口径/状态或异常值；只提出待确认建议，不得改写数据。',
+    },
   };
 }
 
@@ -117,10 +121,29 @@ export function validateColumnRecognitionPayload(payload, request, localResult =
       fieldKey: String(item.fieldKey), columnId: String(item.columnId),
       confidence: CONFIDENCE.has(item.confidence) ? item.confidence : 'low', reason: String(item.reason || 'AI 识别建议'),
     })),
+    semanticSuggestions: validateSemanticSuggestions(payload?.semanticSuggestions, fieldKeys),
     summary: String(payload?.summary || 'AI 已补充层级表头映射'),
     degraded: false,
     degradationReason: '',
   };
+}
+
+function validateSemanticSuggestions(items, fieldKeys) {
+  if (!Array.isArray(items)) return [];
+  return items.slice(0, 20).flatMap(item => {
+    const fieldKey = String(item?.fieldKey || '');
+    if (!fieldKeys.has(fieldKey)) return [];
+    const meaning = String(item?.suggestedMeaning || '').trim().slice(0, 160);
+    const reason = String(item?.reason || '').trim().slice(0, 240);
+    if (!meaning || !reason) return [];
+    return [{
+      fieldKey,
+      sampleValue: String(item?.sampleValue || '').trim().slice(0, 120),
+      suggestedMeaning: meaning,
+      confidence: CONFIDENCE.has(item?.confidence) ? item.confidence : 'low',
+      reason,
+    }];
+  });
 }
 
 export function createRecognitionRequest({ targetType, sheetName = '', headers = [], sampleRows = [], availableFields } = {}) {
@@ -308,7 +331,7 @@ function recognitionSystemPrompt() {
 }
 
 function hierarchicalRecognitionPrompt() {
-  return `你是工程造价表格的层级表头映射器。只返回 JSON 对象，格式为 {"summary":"","suggestions":[{"fieldKey":"","columnId":"","confidence":"high|medium|low","reason":""}]}。fieldKey 必须来自 availableFields，columnId 必须精确来自 columns.id。必须结合完整 path、leaf、unitHint 和 samples，不得因为多个叶子都叫“单价”而忽略父级语义。不要返回不存在的列或字段。`;
+  return `你是工程造价表格的层级表头映射器。只返回 JSON 对象，格式为 {"summary":"","suggestions":[{"fieldKey":"","columnId":"","confidence":"high|medium|low","reason":""}],"semanticSuggestions":[{"fieldKey":"","sampleValue":"","suggestedMeaning":"","confidence":"high|medium|low","reason":""}]}。fieldKey 必须来自 availableFields，columnId 必须精确来自 columns.id。必须结合完整 path、leaf、unitHint 和 samples，不得因为多个叶子都叫“单价”而忽略父级语义。semanticSuggestions 只用于提示用户确认，例如“实际采购”可理解为历史成交/采购价，或负数价格可能为冲销；不得要求系统静默改写数据。不要返回不存在的列或字段。`;
 }
 
 function pickRow(row, headers) {

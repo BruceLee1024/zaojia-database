@@ -1,6 +1,6 @@
-import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.10';
-import { uid } from '../utils/dom.js?v=6.10';
-import { localDateKey } from '../utils/localDate.js?v=6.10';
+import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.11';
+import { uid } from '../utils/dom.js?v=6.11';
+import { localDateKey } from '../utils/localDate.js?v=6.11';
 
 const SOURCE_TYPES = new Set(['official', 'supplier_quote', 'transaction']);
 const PRICE_BASES = new Set(['ex_factory', 'delivered', 'installed_composite']);

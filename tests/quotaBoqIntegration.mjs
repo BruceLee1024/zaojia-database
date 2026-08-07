@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import { STORES, quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.10';
-import { quotaResourceService } from '../assets/services/quotaResourceService.js?v=6.10';
-import { boqService } from '../assets/services/boqService.js?v=6.10';
-import { versionService } from '../assets/services/versionService.js?v=6.10';
-import { BREAKDOWN_KEYS, buildCompositionPreview, buildUsageComparisonViewModel, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from '../assets/views/quotaResourceComposition.js?v=6.10';
-import { applyCompositionFromPanel, isCurrentQuotaResourcePanel } from '../assets/views/quotaResourceCompositionPanel.js?v=6.10';
-import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from '../assets/views/boqResourceReference.js?v=6.10';
-import { buildQuoteAuditViewModel, loadQuoteAuditViewModel, renderQuoteAuditViewModel } from '../assets/views/boqAuditViewModel.js?v=6.10';
-import { createBusyActionRunner, createLatestRequestGuard } from '../assets/utils/asyncInteraction.js?v=6.10';
-import { localDateKey } from '../assets/utils/localDate.js?v=6.10';
+import { STORES, quotaRepo, quotaResourceUsageRepo, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.11';
+import { quotaResourceService } from '../assets/services/quotaResourceService.js?v=6.11';
+import { boqService } from '../assets/services/boqService.js?v=6.11';
+import { versionService } from '../assets/services/versionService.js?v=6.11';
+import { BREAKDOWN_KEYS, buildCompositionPreview, buildUsageComparisonViewModel, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from '../assets/views/quotaResourceComposition.js?v=6.11';
+import { applyCompositionFromPanel, isCurrentQuotaResourcePanel } from '../assets/views/quotaResourceCompositionPanel.js?v=6.11';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from '../assets/views/boqResourceReference.js?v=6.11';
+import { buildQuoteAuditViewModel, loadQuoteAuditViewModel, renderQuoteAuditViewModel } from '../assets/views/boqAuditViewModel.js?v=6.11';
+import { createBusyActionRunner, createLatestRequestGuard } from '../assets/utils/asyncInteraction.js?v=6.11';
+import { localDateKey } from '../assets/utils/localDate.js?v=6.11';
 
 export async function testQuotaBoqIntegration() {
   const originalStorage = globalThis.localStorage;

@@ -1,10 +1,10 @@
 // 定额库服务
-import { boqLibraryQuotaRelationRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo } from '../data/repository.js?v=6.10';
-import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=6.10';
-import { uid } from '../utils/dom.js?v=6.10';
-import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.10';
-import { parseQuotaUnit } from './boqQuotaRelationService.js?v=6.10';
-import { normalizeQuotaBreakdown } from '../utils/quotaBreakdown.js?v=6.10';
+import { boqLibraryQuotaRelationRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo } from '../data/repository.js?v=6.11';
+import { parseExcel, detectRowKind, rowToQuotaItem } from '../data/excel.js?v=6.11';
+import { uid } from '../utils/dom.js?v=6.11';
+import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.11';
+import { parseQuotaUnit } from './boqQuotaRelationService.js?v=6.11';
+import { normalizeQuotaBreakdown } from '../utils/quotaBreakdown.js?v=6.11';
 
 export const quotaService = {
   /** 列出所有定额，支持分类/关键字过滤 */

@@ -1,13 +1,13 @@
 // AI 辅助建议服务：本地规则优先，远端模型作为增强
-import { getAIConfig } from './aiService.js?v=6.10';
-import { testConnection as remoteTestConnection } from '../ai/remoteLLM.js?v=6.10';
-import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo } from '../data/repository.js?v=6.10';
-import { boqService } from './boqService.js?v=6.10';
-import { versionService } from './versionService.js?v=6.10';
-import { searchAll } from './globalSearchService.js?v=6.10';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.10';
-import { categoryGuess } from '../utils/stats.js?v=6.10';
-import { buildImportMapping } from './importMappingService.js?v=6.10';
+import { getAIConfig } from './aiService.js?v=6.11';
+import { testConnection as remoteTestConnection } from '../ai/remoteLLM.js?v=6.11';
+import { quotaRepo, projectRepo, boqRepo, versionRepo, indicatorRepo, experienceCardRepo } from '../data/repository.js?v=6.11';
+import { boqService } from './boqService.js?v=6.11';
+import { versionService } from './versionService.js?v=6.11';
+import { searchAll } from './globalSearchService.js?v=6.11';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.11';
+import { categoryGuess } from '../utils/stats.js?v=6.11';
+import { buildImportMapping } from './importMappingService.js?v=6.11';
 
 export async function suggestBoqLine(line = {}, context = {}) {
   const quotas = context.quotas || await quotaRepo.all();

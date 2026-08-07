@@ -1,8 +1,8 @@
 // 视图：AI 造价工作副驾。本地规则优先；远端调用按会话授权。
-import { tryLocalCommand } from '../ai/localCommands.js?v=6.10';
-import { callLLM } from '../ai/remoteLLM.js?v=6.10';
-import { buildAiSharePreview, createAiResponse, parseRemoteResponse } from '../services/aiTaskService.js?v=6.10';
-import { createAiSession, listAiSessions, saveAiSessionMessage } from '../services/aiSessionService.js?v=6.10';
+import { tryLocalCommand } from '../ai/localCommands.js?v=6.11';
+import { callLLM } from '../ai/remoteLLM.js?v=6.11';
+import { buildAiSharePreview, createAiResponse, parseRemoteResponse } from '../services/aiTaskService.js?v=6.11';
+import { createAiSession, listAiSessions, saveAiSessionMessage } from '../services/aiSessionService.js?v=6.11';
 
 let aiReturnFocus = null;
 let remoteConsentGranted = null;

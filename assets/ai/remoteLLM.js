@@ -1,9 +1,9 @@
 // 远端 LLM 调用
-import { getAIConfig } from '../services/aiService.js?v=6.10';
-import { quotaRepo, projectRepo, indicatorRepo, boqRepo, versionRepo, experienceCardRepo } from '../data/repository.js?v=6.10';
-import { categoryGuess } from '../utils/stats.js?v=6.10';
-import { hasMissingPrice } from '../utils/costing.js?v=6.10';
-import { sanitizeRemoteContext } from '../services/aiTaskService.js?v=6.10';
+import { getAIConfig } from '../services/aiService.js?v=6.11';
+import { quotaRepo, projectRepo, indicatorRepo, boqRepo, versionRepo, experienceCardRepo } from '../data/repository.js?v=6.11';
+import { categoryGuess } from '../utils/stats.js?v=6.11';
+import { hasMissingPrice } from '../utils/costing.js?v=6.11';
+import { sanitizeRemoteContext } from '../services/aiTaskService.js?v=6.11';
 
 export async function callLLM(text, history = [], options = {}) {
   const cfg = getAIConfig();

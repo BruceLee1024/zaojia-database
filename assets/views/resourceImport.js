@@ -1,6 +1,6 @@
-import { exportResourceTemplate } from '../data/excel.js?v=6.10';
-import { resourceImportService } from '../services/resourceImportService.js?v=6.10';
-import { esc, toast } from '../utils/dom.js?v=6.10';
+import { exportResourceTemplate } from '../data/excel.js?v=6.11';
+import { resourceImportService } from '../services/resourceImportService.js?v=6.11';
+import { esc, toast } from '../utils/dom.js?v=6.11';
 
 const state = { resourceType: 'material', fileName: '', preview: null, report: null, busy: false };
 

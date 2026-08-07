@@ -1,5 +1,5 @@
-import { esc, fmtMoney } from '../utils/dom.js?v=6.10';
-import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=6.10';
+import { esc, fmtMoney } from '../utils/dom.js?v=6.11';
+import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=6.11';
 
 export const BREAKDOWN_KEYS = QUOTA_BREAKDOWN_KEYS;
 
