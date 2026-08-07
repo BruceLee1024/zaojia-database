@@ -1,11 +1,11 @@
-import { boqService } from '../services/boqService.js?v=6.9';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.9';
-import { isPriceEffective } from '../services/resourcePriceService.js?v=6.9';
-import { resourceService } from '../services/resourceService.js?v=6.9';
-import { projectRepo, quotaRepo } from '../data/repository.js?v=6.9';
-import { exportResourceTemplate } from '../data/excel.js?v=6.9';
-import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.9';
-import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.9';
+import { boqService } from '../services/boqService.js?v=6.10';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.10';
+import { isPriceEffective } from '../services/resourcePriceService.js?v=6.10';
+import { resourceService } from '../services/resourceService.js?v=6.10';
+import { projectRepo, quotaRepo } from '../data/repository.js?v=6.10';
+import { exportResourceTemplate } from '../data/excel.js?v=6.10';
+import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.10';
+import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.10';
 
 const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], healthLabel: '', rows: [], prices: new Map(), usage: null };
 let attachmentRenderGeneration = 0;

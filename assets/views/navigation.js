@@ -1,4 +1,4 @@
-import { esc } from '../utils/dom.js?v=6.9';
+import { esc } from '../utils/dom.js?v=6.10';
 
 export function navigationItemHtml(view = {}, active = false) {
   const label = String(view.label || '');

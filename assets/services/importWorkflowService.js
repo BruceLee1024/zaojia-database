@@ -1,13 +1,13 @@
-import { buildImportColumnMapping } from './importMappingService.js?v=6.9';
-import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.9';
-import { boqService } from './boqService.js?v=6.9';
-import { boqLibraryService } from './boqLibraryService.js?v=6.9';
-import { quotaService } from './quotaService.js?v=6.9';
-import { resourceImportService } from './resourceImportService.js?v=6.9';
-import { dataEngineService } from './dataEngineService.js?v=6.9';
-import { importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.9';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.9';
-import { categoryGuess } from '../utils/stats.js?v=6.9';
+import { buildImportColumnMapping } from './importMappingService.js?v=6.10';
+import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.10';
+import { boqService } from './boqService.js?v=6.10';
+import { boqLibraryService } from './boqLibraryService.js?v=6.10';
+import { quotaService } from './quotaService.js?v=6.10';
+import { resourceImportService } from './resourceImportService.js?v=6.10';
+import { dataEngineService } from './dataEngineService.js?v=6.10';
+import { importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.10';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.10';
+import { categoryGuess } from '../utils/stats.js?v=6.10';
 
 export function analyzeImport(regions = [], {
   targetType = 'project_boq', mappings = {}, fixedValues = {}, amountRule = 'calculated', selectedRegionIds = null,
@@ -217,6 +217,6 @@ function resourceRowForDomain(row) {
   return {
     编码: row.code, 分类: row.category, 名称: row.name, 规格型号: row.specModel, 单位: row.unit, 品牌: row.brand, 生产厂家: row.manufacturer,
     单价: row.unitPrice || '', 价格来源: row.sourceType, 价格口径: row.priceBasis, 含税: row.taxIncluded ? '是' : '否', 税率: Number(row.taxRate || 0) * 100,
-    省: row.province, 市: row.city, 区县: row.district, 价格日期: row.priceDate, 供应商: row.supplier, 备注: row.note,
+    省: row.province, 地区: row.province, 市: row.city, 区县: row.district, 价格日期: row.priceDate, 供应商: row.supplier, 备注: row.note,
   };
 }

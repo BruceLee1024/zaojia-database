@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.9';
-import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.9';
-import { resourceService } from '../assets/services/resourceService.js?v=6.9';
-import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.9';
-import { getResourceTemplateData } from '../assets/data/excel.js?v=6.9';
-import { createLatestResourceSelection, nextResourceViewState } from '../assets/views/resources.js?v=6.9';
-import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.9';
+import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.10';
+import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.10';
+import { resourceService } from '../assets/services/resourceService.js?v=6.10';
+import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.10';
+import { getResourceTemplateData } from '../assets/data/excel.js?v=6.10';
+import { createLatestResourceSelection, nextResourceViewState } from '../assets/views/resources.js?v=6.10';
+import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.10';
+import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from '../assets/services/importSemanticService.js?v=6.10';
 
 export async function testResourceWorkbench() {
   const originalStorage = globalThis.localStorage;
@@ -24,6 +25,7 @@ export async function testResourceWorkbench() {
     await testCommitRollsBackBothStores(storage);
     await reset();
     await testImportPriceInvariants();
+    testFlexiblePriceSemantics();
     await reset();
     await testCopyStatusAndResourceSearchRouting();
     await reset();
@@ -87,14 +89,16 @@ async function testImportPriceInvariants() {
     { 名称: '超大税率', 单位: 't', 单价: 10, 价格日期: '2026-07-01', 省: '四川', 税率: 999 },
     { 名称: '无效价格条件', 单位: 't', 单价: 10, 价格日期: '2026-07-01', 省: '四川', 价格来源: '不明来源', 价格口径: '不明口径', 生效日期: '2026-08-01', 失效日期: '2026-07-01' },
   ], 'material');
-  assert.equal(preview.rows[0].action, 'invalid');
-  assert.equal(preview.rows[0].errors.includes('税率必须在 0 到 100 之间'), true);
-  assert.equal(preview.rows[1].errors.includes('税率必须在 0 到 100 之间'), true);
-  assert.equal(preview.rows[2].errors.includes('价格来源类型无效'), true);
-  assert.equal(preview.rows[2].errors.includes('价格口径无效'), true);
-  assert.equal(preview.rows[2].errors.includes('失效日期不能早于生效日期'), true);
+  assert.equal(preview.rows[0].action, 'create');
+  assert.equal(preview.rows[0].priceReview.some(message => message.includes('税率')), true);
+  assert.equal(preview.rows[1].priceReview.some(message => message.includes('税率')), true);
+  assert.equal(preview.rows[2].priceReview.some(message => message.includes('价格来源')), true);
+  assert.equal(preview.rows[2].priceReview.some(message => message.includes('价格口径')), true);
+  assert.equal(preview.rows[2].priceReview.some(message => message.includes('失效日期')), true);
   const report = await resourceImportService.commit(preview, {});
-  assert.equal(report.counts.errors, 3);
+  assert.equal(report.counts.errors, 0);
+  assert.equal(report.counts.resourcesCreated, 3);
+  assert.equal(report.counts.pricesPending, 3);
   assert.equal((await resourcePriceRepo.all()).length, 0);
 
   const tampered = await resourceImportService.preview([
@@ -102,8 +106,19 @@ async function testImportPriceInvariants() {
   ], 'material');
   tampered.rows[0].price.taxRate = 999;
   const guarded = await resourceImportService.commit(tampered, {});
-  assert.equal(guarded.counts.errors, 1);
+  assert.equal(guarded.counts.errors, 0);
+  assert.equal(guarded.counts.pricesPending, 1);
   assert.equal((await resourcePriceRepo.all()).length, 0);
+}
+
+function testFlexiblePriceSemantics() {
+  const semantic = normalizeResourcePriceSemantics({ sourceType: '实际采购', region: '云南' });
+  assert.equal(semantic.sourceType, 'transaction');
+  assert.equal(semantic.priceBasis, 'delivered');
+  assert.equal(semantic.region.province, '云南');
+  assert.equal(semantic.raw.sourceType, '实际采购');
+  assert.equal(semantic.suggestions.length, 3);
+  assert.equal(classifyResourcePriceReview({ unitPrice: -1, sourceType: 'transaction', priceBasis: 'delivered', taxRate: 13, priceDate: '2026-07-01', region: { province: '云南' } })[0].includes('负数单价'), true);
 }
 
 function testResourceRouteStateIsolation() {
@@ -186,7 +201,7 @@ async function testPreviewUsesCodeFirstIdentityAndExactFallback() {
   assert.equal(preview.rows[2].existingId, 'coded');
   assert.equal(preview.rows[3].action, 'duplicate');
   assert.equal(preview.rows[4].action, 'invalid');
-  assert.deepEqual(preview.counts, { total: 5, valid: 4, invalid: 1, create: 0, update: 3, duplicate: 1, conflict: 0, withPrice: 0 });
+  assert.deepEqual(preview.counts, { total: 5, valid: 4, invalid: 1, create: 0, update: 3, duplicate: 1, conflict: 0, withPrice: 0, priceReview: 0 });
   await resourceImportService.commit(preview, { updateExisting: true });
   assert.equal((await resourceRepo.findById('coded')).code, 'M-01');
 }
@@ -199,7 +214,7 @@ async function testCommitDeduplicatesResourcesAndPrices() {
   const preview = await resourceImportService.preview(rows, 'equipment');
   assert.equal(preview.rows[1].action, 'duplicate');
   const report = await resourceImportService.commit(preview, { updateExisting: true });
-  assert.deepEqual(report.counts, { resourcesCreated: 1, resourcesUpdated: 0, resourcesSkipped: 1, pricesCreated: 1, pricesSkipped: 1, errors: 0 });
+  assert.deepEqual(report.counts, { resourcesCreated: 1, resourcesUpdated: 0, resourcesSkipped: 1, pricesCreated: 1, pricesSkipped: 1, pricesPending: 0, errors: 0 });
   assert.equal((await resourceRepo.all()).length, 1);
   assert.equal((await resourcePriceRepo.all()).length, 1);
 

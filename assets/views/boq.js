@@ -1,18 +1,18 @@
 // 视图：工程量清单
-import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.9';
-import { boqService, groupForLine } from '../services/boqService.js?v=6.9';
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.9';
-import { projectService } from '../services/projectService.js?v=6.9';
-import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.9';
-import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.9';
-import { openReview } from './experience.js?v=6.9';
-import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.9';
-import { exportBOQExcel } from '../data/excel.js?v=6.9';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.9';
-import { categoryGuess } from '../utils/stats.js?v=6.9';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.9';
-import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.9';
-import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.9';
+import { projectRepo, quotaRepo, boqRepo, boqLibraryRepo, projectBoqQuotaRelationRepo, resourcePriceRepo } from '../data/repository.js?v=6.10';
+import { boqService, groupForLine } from '../services/boqService.js?v=6.10';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.10';
+import { projectService } from '../services/projectService.js?v=6.10';
+import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.10';
+import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.10';
+import { openReview } from './experience.js?v=6.10';
+import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.10';
+import { exportBOQExcel } from '../data/excel.js?v=6.10';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.10';
+import { categoryGuess } from '../utils/stats.js?v=6.10';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.10';
+import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.10';
+import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.10';
 
 const BOQ_PAGE_SIZE = 500;
 const boqState = {

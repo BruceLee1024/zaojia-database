@@ -1,5 +1,5 @@
 // AI 系统提示词草案：仅发送用户在本页填写的配置意图，不携带业务资料。
-import { getAIConfig } from './aiService.js?v=6.9';
+import { getAIConfig } from './aiService.js?v=6.10';
 
 const STYLE_LABELS = {
   concise: '简洁、结论优先，使用短列表',

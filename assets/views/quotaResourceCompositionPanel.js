@@ -1,10 +1,10 @@
-import { quotaResourceService } from '../services/quotaResourceService.js?v=6.9';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.9';
-import { isPriceEffective } from '../services/resourcePriceService.js?v=6.9';
-import { resourceService } from '../services/resourceService.js?v=6.9';
-import { esc, fmtMoney, toast } from '../utils/dom.js?v=6.9';
-import { buildCompositionPreview, buildUsageComparisonViewModel, renderCompositionPreview } from './quotaResourceComposition.js?v=6.9';
-import { createBusyActionRunner, createLatestRequestGuard } from '../utils/asyncInteraction.js?v=6.9';
+import { quotaResourceService } from '../services/quotaResourceService.js?v=6.10';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.10';
+import { isPriceEffective } from '../services/resourcePriceService.js?v=6.10';
+import { resourceService } from '../services/resourceService.js?v=6.10';
+import { esc, fmtMoney, toast } from '../utils/dom.js?v=6.10';
+import { buildCompositionPreview, buildUsageComparisonViewModel, renderCompositionPreview } from './quotaResourceComposition.js?v=6.10';
+import { createBusyActionRunner, createLatestRequestGuard } from '../utils/asyncInteraction.js?v=6.10';
 
 export async function applyCompositionFromPanel({ quota, getBaseBreakdown, service = quotaResourceService }) {
   const baseBreakdown = getBaseBreakdown?.();

@@ -6,11 +6,11 @@ import {
   dataQualityReportRepo,
   experienceSessionRepo,
   experienceCardRepo,
-} from '../data/repository.js?v=6.9';
-import { getAIConfig } from './aiService.js?v=6.9';
-import { uid } from '../utils/dom.js?v=6.9';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.9';
-import { categoryGuess } from '../utils/stats.js?v=6.9';
+} from '../data/repository.js?v=6.10';
+import { getAIConfig } from './aiService.js?v=6.10';
+import { uid } from '../utils/dom.js?v=6.10';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.10';
+import { categoryGuess } from '../utils/stats.js?v=6.10';
 
 const DEFAULT_QUESTIONS = [
   { id: 'abnormal', label: '报价异常', prompt: '这次报价里最需要复核或解释的异常是什么？' },

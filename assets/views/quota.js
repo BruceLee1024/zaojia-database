@@ -1,11 +1,11 @@
 // 视图：定额库
-import { quotaService } from '../services/quotaService.js?v=6.9';
-import { boqService } from '../services/boqService.js?v=6.9';
-import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.9';
-import { exportQuotaTemplate } from '../data/excel.js?v=6.9';
-import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.9';
-import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.9';
-import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.9';
+import { quotaService } from '../services/quotaService.js?v=6.10';
+import { boqService } from '../services/boqService.js?v=6.10';
+import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.10';
+import { exportQuotaTemplate } from '../data/excel.js?v=6.10';
+import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.10';
+import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.10';
+import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.10';
 
 const BREAKDOWN_COLORS = ['bg-blue-600', 'bg-emerald-500', 'bg-cyan-600', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-rose-400'];
 const filterState = { keyword: '', category: '', unit: '', priceStatus: '' };

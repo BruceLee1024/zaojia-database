@@ -1,11 +1,11 @@
 // 报价版本服务：当前清单的不可变快照、恢复与对比
-import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, versionRepo } from '../data/repository.js?v=6.9';
-import { uid } from '../utils/dom.js?v=6.9';
-import { normalizeCurrency } from '../utils/currency.js?v=6.9';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.9';
-import { dataEngineService } from './dataEngineService.js?v=6.9';
-import { groupForLine } from './boqService.js?v=6.9';
-import { assertProjectEditableById } from './projectLockService.js?v=6.9';
+import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, versionRepo } from '../data/repository.js?v=6.10';
+import { uid } from '../utils/dom.js?v=6.10';
+import { normalizeCurrency } from '../utils/currency.js?v=6.10';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.10';
+import { dataEngineService } from './dataEngineService.js?v=6.10';
+import { groupForLine } from './boqService.js?v=6.10';
+import { assertProjectEditableById } from './projectLockService.js?v=6.10';
 
 const LINE_FIELDS = [
   'quotaItemId', 'code', 'name', 'feature', 'unit', 'qty', 'factor', 'unitPrice', 'amount', 'priceMissing', 'structureGroup',
