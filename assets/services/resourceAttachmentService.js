@@ -1,5 +1,5 @@
-import { resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.13';
-import { storageGetAttachment, storageRemoveAttachment, storageSetAttachment } from '../data/storage.js?v=6.13';
+import { resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.14';
+import { storageGetAttachment, storageRemoveAttachment, storageSetAttachment } from '../data/storage.js?v=6.14';
 
 const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 const FILE_TYPES = {

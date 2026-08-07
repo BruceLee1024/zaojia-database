@@ -1,11 +1,11 @@
-import { boqService } from '../services/boqService.js?v=6.13';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.13';
-import { isPriceEffective } from '../services/resourcePriceService.js?v=6.13';
-import { resourceService } from '../services/resourceService.js?v=6.13';
-import { projectRepo, quotaRepo } from '../data/repository.js?v=6.13';
-import { exportResourceTemplate } from '../data/excel.js?v=6.13';
-import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.13';
-import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.13';
+import { boqService } from '../services/boqService.js?v=6.14';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.14';
+import { isPriceEffective } from '../services/resourcePriceService.js?v=6.14';
+import { resourceService } from '../services/resourceService.js?v=6.14';
+import { projectRepo, quotaRepo } from '../data/repository.js?v=6.14';
+import { exportResourceTemplate } from '../data/excel.js?v=6.14';
+import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.14';
+import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.14';
 
 const PAGE_SIZE = 50;
 const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], healthLabel: '', rows: [], prices: new Map(), usage: null, page: 1 };
@@ -69,7 +69,7 @@ export function createLatestResourceSelection({ setSelectedId, getSelectedId, lo
   return select;
 }
 
-export function createAtomicResourceRefresh({ list, currentPrice, usage, isCurrent = () => true, commit }) {
+export function createAtomicResourceRefresh({ list, currentPrices, currentPrice, usage, isCurrent = () => true, commit }) {
   let requestGeneration = 0;
   const refresh = async snapshot => {
     const request = ++requestGeneration;
@@ -80,7 +80,9 @@ export function createAtomicResourceRefresh({ list, currentPrice, usage, isCurre
     let selectedId = snapshot.selectedId;
     if (selectedId && !rows.some(item => item.id === selectedId)) selectedId = '';
     if (!selectedId && rows.length) selectedId = rows[0].id;
-    const prices = new Map(await Promise.all(rows.map(async item => [item.id, await currentPrice(item)])));
+    const prices = currentPrices
+      ? await currentPrices(rows)
+      : new Map(await Promise.all(rows.map(async item => [item.id, await currentPrice(item)])));
     if (!valid()) return false;
     const selectedUsage = selectedId ? await usage(selectedId) : null;
     if (!valid()) return false;
@@ -113,7 +115,7 @@ const selectResource = createLatestResourceSelection({
 
 const runAtomicResourceRefresh = createAtomicResourceRefresh({
   list: filters => resourceService.list(filters),
-  currentPrice: item => resourcePriceService.getCurrentPrice(item.id),
+  currentPrices: rows => resourcePriceService.getCurrentPriceMap(rows),
   usage: id => resourceService.usage(id),
   isCurrent: snapshot => isResourceContextCurrent(snapshot.context),
   commit: async (result, snapshot) => {

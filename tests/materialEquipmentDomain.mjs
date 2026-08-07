@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { STORES, resourceRepo, resourcePriceRepo, quotaResourceUsageRepo, resourceAttachmentRepo } from '../assets/data/repository.js?v=6.13';
-import { resourceService, resourceIdentity } from '../assets/services/resourceService.js?v=6.13';
-import { resourcePriceService } from '../assets/services/resourcePriceService.js?v=6.13';
-import { quotaResourceService } from '../assets/services/quotaResourceService.js?v=6.13';
-import { boqService } from '../assets/services/boqService.js?v=6.13';
+import { STORES, resourceRepo, resourcePriceRepo, quotaResourceUsageRepo, resourceAttachmentRepo } from '../assets/data/repository.js?v=6.14';
+import { resourceService, resourceIdentity } from '../assets/services/resourceService.js?v=6.14';
+import { resourcePriceService } from '../assets/services/resourcePriceService.js?v=6.14';
+import { quotaResourceService } from '../assets/services/quotaResourceService.js?v=6.14';
+import { boqService } from '../assets/services/boqService.js?v=6.14';
 
 export async function testMaterialEquipmentDomain() {
   const originalStorage = globalThis.localStorage;

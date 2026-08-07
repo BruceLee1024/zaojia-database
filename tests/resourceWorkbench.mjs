@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.13';
-import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.13';
-import { resourceService } from '../assets/services/resourceService.js?v=6.13';
-import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.13';
-import { getResourceTemplateData } from '../assets/data/excel.js?v=6.13';
-import { createLatestResourceSelection, nextResourceViewState, paginateResources } from '../assets/views/resources.js?v=6.13';
-import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.13';
-import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from '../assets/services/importSemanticService.js?v=6.13';
+import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.14';
+import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.14';
+import { resourceService } from '../assets/services/resourceService.js?v=6.14';
+import { buildCurrentPriceMap } from '../assets/services/resourcePriceService.js?v=6.14';
+import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.14';
+import { getResourceTemplateData } from '../assets/data/excel.js?v=6.14';
+import { createLatestResourceSelection, nextResourceViewState, paginateResources } from '../assets/views/resources.js?v=6.14';
+import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.14';
+import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from '../assets/services/importSemanticService.js?v=6.14';
 
 export async function testResourceWorkbench() {
   const originalStorage = globalThis.localStorage;
@@ -26,6 +27,7 @@ export async function testResourceWorkbench() {
     await reset();
     await testImportPriceInvariants();
     testFlexiblePriceSemantics();
+    testCurrentPriceBatchIndex();
     await reset();
     await testCopyStatusAndResourceSearchRouting();
     await reset();
@@ -120,6 +122,18 @@ function testFlexiblePriceSemantics() {
   assert.equal(semantic.raw.sourceType, '实际采购');
   assert.equal(semantic.suggestions.length, 3);
   assert.equal(classifyResourcePriceReview({ unitPrice: -1, sourceType: 'transaction', priceBasis: 'delivered', taxRate: 13, priceDate: '2026-07-01', region: { province: '云南' } })[0].includes('负数单价'), true);
+}
+
+function testCurrentPriceBatchIndex() {
+  const resources = [{ id: 'r1', preferredPriceId: 'p1' }, { id: 'r2' }];
+  const prices = [
+    { id: 'p1', resourceId: 'r1', unitPrice: 10, status: 'active', priceDate: '2026-01-01' },
+    { id: 'p2', resourceId: 'r1', unitPrice: 12, status: 'active', priceDate: '2026-02-01' },
+    { id: 'p3', resourceId: 'r2', unitPrice: 20, status: 'active', priceDate: '2026-02-01' },
+  ];
+  const pricesByResource = buildCurrentPriceMap(resources, prices, { asOf: '2026-07-01' });
+  assert.equal(pricesByResource.get('r1').id, 'p1');
+  assert.equal(pricesByResource.get('r2').id, 'p3');
 }
 
 function testResourceRouteStateIsolation() {

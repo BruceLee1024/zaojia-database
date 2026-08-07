@@ -1,6 +1,6 @@
-import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.13';
-import { uid } from '../utils/dom.js?v=6.13';
-import { localDateKey } from '../utils/localDate.js?v=6.13';
+import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.14';
+import { uid } from '../utils/dom.js?v=6.14';
+import { localDateKey } from '../utils/localDate.js?v=6.14';
 
 const SOURCE_TYPES = new Set(['official', 'supplier_quote', 'transaction']);
 const PRICE_BASES = new Set(['ex_factory', 'delivered', 'installed_composite']);
@@ -60,7 +60,26 @@ export const resourcePriceService = {
     const [resource, prices] = await Promise.all([resourceRepo.findById(resourceId), resourcePriceRepo.byResource(resourceId)]);
     return selectUsableResourcePrice(resource, prices, context);
   },
+
+  async getCurrentPriceMap(resources = [], context = {}) {
+    return buildCurrentPriceMap(resources, await resourcePriceRepo.all(), context);
+  },
 };
+
+// 列表页批量读取：一次取回价格快照后按资源分组，避免 N 条资源触发 N 次全量存储读取。
+export function buildCurrentPriceMap(resources = [], prices = [], context = {}) {
+  const pricesByResource = new Map();
+  prices.forEach(price => {
+    if (!price?.resourceId) return;
+    const group = pricesByResource.get(price.resourceId) || [];
+    group.push(price);
+    pricesByResource.set(price.resourceId, group);
+  });
+  return new Map((resources || []).map(resource => [
+    resource.id,
+    selectUsableResourcePrice(resource, pricesByResource.get(resource.id) || [], context),
+  ]));
+}
 
 export function isPriceEffective(price, today = localDateKey()) {
   return Boolean(price
