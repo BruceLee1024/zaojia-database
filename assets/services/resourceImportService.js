@@ -1,6 +1,6 @@
-import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.12';
-import { resourceCodeIdentity, resourceCompositeIdentity, validateResourceCollection } from './resourceService.js?v=6.12';
-import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from './importSemanticService.js?v=6.12';
+import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.13';
+import { resourceCodeIdentity, resourceCompositeIdentity, validateResourceCollection } from './resourceService.js?v=6.13';
+import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from './importSemanticService.js?v=6.13';
 
 const SOURCE_TYPE_MAP = new Map([
   ['official', 'official'], ['官方信息价', 'official'], ['信息价', 'official'],

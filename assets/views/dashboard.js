@@ -1,12 +1,12 @@
 // 视图：仪表盘
-import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=6.12';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.12';
-import { experienceService } from '../services/experienceService.js?v=6.12';
-import { resourceHealthService } from '../services/resourceHealthService.js?v=6.12';
-import { fmt, fmtMoney, esc } from '../utils/dom.js?v=6.12';
-import { hasMissingPrice } from '../utils/costing.js?v=6.12';
-import { categoryGuess } from '../utils/stats.js?v=6.12';
-import { formatCurrencySummary, normalizeCurrency } from '../utils/currency.js?v=6.12';
+import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=6.13';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.13';
+import { experienceService } from '../services/experienceService.js?v=6.13';
+import { resourceHealthService } from '../services/resourceHealthService.js?v=6.13';
+import { fmt, fmtMoney, esc } from '../utils/dom.js?v=6.13';
+import { hasMissingPrice } from '../utils/costing.js?v=6.13';
+import { categoryGuess } from '../utils/stats.js?v=6.13';
+import { formatCurrencySummary, normalizeCurrency } from '../utils/currency.js?v=6.13';
 
 const chartState = {
   trend: null,

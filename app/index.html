@@ -137,7 +137,7 @@
   .library-split { display: grid; min-height: 0; flex: 1 1 auto; gap: 16px; grid-template-columns: minmax(0, 1fr) 400px; }
   .library-list-pane, .library-detail-pane { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
   .library-list-pane { min-width: 0; }
-  .library-detail-pane { min-width: 0; }
+  .library-detail-pane { min-width: 0; min-height: 0; }
   /* 清单明细编辑：在较窄的桌面窗口中先纵向排列，避免基础字段与正文表单相互挤压。 */
   @media (max-width: 1180px) {
     .boq-detail-form-grid { grid-template-columns: 1fr !important; }
@@ -364,7 +364,7 @@
     <div class="px-5 py-4 text-[11px] text-slate-500 border-t border-slate-800 space-y-2">
       <div class="flex items-center justify-between">
         <span>运行版本</span>
-        <span class="font-data text-slate-400">v6.12</span>
+        <span class="font-data text-slate-400">v6.13</span>
       </div>
       <div class="flex items-center gap-2 text-slate-400">
         <span class="pulse-dot"></span>
@@ -475,6 +475,6 @@
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="../app.js?v=6.12"></script>
+<script type="module" src="../app.js?v=6.13"></script>
 </body>
 </html>

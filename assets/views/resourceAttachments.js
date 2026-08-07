@@ -1,6 +1,6 @@
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.12';
-import { resourceAttachmentService } from '../services/resourceAttachmentService.js?v=6.12';
-import { esc, toast } from '../utils/dom.js?v=6.12';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.13';
+import { resourceAttachmentService } from '../services/resourceAttachmentService.js?v=6.13';
+import { esc, toast } from '../utils/dom.js?v=6.13';
 
 export function attachmentPanelShell(resourceId, generation) {
   return `<section data-resource-attachment-root data-resource-id="${esc(resourceId)}" data-render-generation="${esc(generation)}" class="p-4 border-b border-slate-200" aria-labelledby="resourceAttachmentTitle">

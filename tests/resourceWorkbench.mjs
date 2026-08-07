@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.12';
-import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.12';
-import { resourceService } from '../assets/services/resourceService.js?v=6.12';
-import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.12';
-import { getResourceTemplateData } from '../assets/data/excel.js?v=6.12';
-import { createLatestResourceSelection, nextResourceViewState } from '../assets/views/resources.js?v=6.12';
-import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.12';
-import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from '../assets/services/importSemanticService.js?v=6.12';
+import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.13';
+import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.13';
+import { resourceService } from '../assets/services/resourceService.js?v=6.13';
+import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.13';
+import { getResourceTemplateData } from '../assets/data/excel.js?v=6.13';
+import { createLatestResourceSelection, nextResourceViewState, paginateResources } from '../assets/views/resources.js?v=6.13';
+import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.13';
+import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from '../assets/services/importSemanticService.js?v=6.13';
 
 export async function testResourceWorkbench() {
   const originalStorage = globalThis.localStorage;
@@ -32,6 +32,7 @@ export async function testResourceWorkbench() {
     await testResourceSearchCapsTypesIndependently();
     await testLatestResourceSelectionWins();
     testResourceRouteStateIsolation();
+    testResourcePagination();
     testImportReportRows();
     testFailureReportMetricTone();
     testResourceTemplates();
@@ -123,11 +124,19 @@ function testFlexiblePriceSemantics() {
 
 function testResourceRouteStateIsolation() {
   const material = nextResourceViewState({ resourceType: 'material', keyword: '钢管', category: '管材', status: 'inactive', selectedId: 'm1' }, 'materials', {});
-  assert.deepEqual(material, { resourceType: 'material', keyword: '钢管', category: '管材', status: 'inactive', selectedId: 'm1' });
+  assert.deepEqual(material, { resourceType: 'material', keyword: '钢管', category: '管材', status: 'inactive', selectedId: 'm1', page: 1 });
   const equipment = nextResourceViewState(material, 'equipment', { keyword: '泵', selectedId: 'e1' });
-  assert.deepEqual(equipment, { resourceType: 'equipment', keyword: '泵', category: '', status: '', selectedId: 'e1' });
+  assert.deepEqual(equipment, { resourceType: 'equipment', keyword: '泵', category: '', status: '', selectedId: 'e1', page: 1 });
   const back = nextResourceViewState(equipment, 'materials', { category: '阀门', status: 'active' });
-  assert.deepEqual(back, { resourceType: 'material', keyword: '', category: '阀门', status: 'active', selectedId: '' });
+  assert.deepEqual(back, { resourceType: 'material', keyword: '', category: '阀门', status: 'active', selectedId: '', page: 1 });
+}
+
+function testResourcePagination() {
+  const rows = Array.from({ length: 52 }, (_, index) => ({ id: index + 1 }));
+  const first = paginateResources(rows, 1, 50);
+  assert.deepEqual({ page: first.page, totalPages: first.totalPages, start: first.start, end: first.end, count: first.rows.length }, { page: 1, totalPages: 2, start: 1, end: 50, count: 50 });
+  const last = paginateResources(rows, 9, 50);
+  assert.deepEqual({ page: last.page, start: last.start, end: last.end, count: last.rows.length }, { page: 2, start: 51, end: 52, count: 2 });
 }
 
 function testImportReportRows() {
