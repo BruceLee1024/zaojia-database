@@ -1,8 +1,8 @@
-import { boqRepo, quotaResourceUsageRepo, resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.14';
-import { localDateKey } from '../utils/localDate.js?v=6.14';
-import { getUsageComparisonReasons } from './quotaResourceService.js?v=6.14';
-import { selectCurrentResourcePrice, selectResourcePrice } from './resourcePriceService.js?v=6.14';
-import { resourceCodeIdentity, resourceCompositeIdentity } from './resourceService.js?v=6.14';
+import { boqRepo, quotaResourceUsageRepo, resourceAttachmentRepo, resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.15';
+import { localDateKey } from '../utils/localDate.js?v=6.15';
+import { getUsageComparisonReasons } from './quotaResourceService.js?v=6.15';
+import { selectCurrentResourcePrice, selectResourcePrice } from './resourcePriceService.js?v=6.15';
+import { resourceCodeIdentity, resourceCompositeIdentity } from './resourceService.js?v=6.15';
 
 export const resourceHealthService = {
   async getHealth({ today = localDateKey() } = {}) {

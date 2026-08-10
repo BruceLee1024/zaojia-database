@@ -115,6 +115,8 @@
     background: var(--surface);
     padding: 16px;
   }
+  .library-toolbar--compact { padding: 10px 12px; }
+  .library-toolbar--compact .library-filter-row { margin-top: 0; }
   .library-toolbar-main { display: flex; align-items: center; gap: 12px; }
   .library-toolbar-icon {
     display: inline-flex;
@@ -131,6 +133,7 @@
   .library-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
   .library-filter-row { display: grid; grid-template-columns: minmax(240px, 1fr) auto; gap: 8px; margin-top: 16px; }
   .library-filter-controls { display: flex; min-width: 0; gap: 8px; }
+  .library-toolbar-divider { width: 1px; height: 24px; align-self: center; background: var(--line); }
   .library-summary-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .library-summary-grid.library-summary-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .library-metric-card { min-height: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: none; }
@@ -147,6 +150,7 @@
     .library-toolbar-actions { width: 100%; margin-left: 0; }
     .library-filter-row { grid-template-columns: 1fr; }
     .library-filter-controls { flex-wrap: wrap; }
+    .library-toolbar-divider { display: none; }
     .library-split { grid-template-columns: 1fr; }
     .library-detail-pane { min-height: 360px; }
   }
@@ -364,7 +368,7 @@
     <div class="px-5 py-4 text-[11px] text-slate-500 border-t border-slate-800 space-y-2">
       <div class="flex items-center justify-between">
         <span>运行版本</span>
-        <span class="font-data text-slate-400">v6.14</span>
+        <span class="font-data text-slate-400">v6.15</span>
       </div>
       <div class="flex items-center gap-2 text-slate-400">
         <span class="pulse-dot"></span>
@@ -475,6 +479,6 @@
 </div>
 
 <!-- 应用入口（ES Module） -->
-<script type="module" src="../app.js?v=6.14"></script>
+<script type="module" src="../app.js?v=6.15"></script>
 </body>
 </html>

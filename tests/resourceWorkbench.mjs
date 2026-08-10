@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.14';
-import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.14';
-import { resourceService } from '../assets/services/resourceService.js?v=6.14';
-import { buildCurrentPriceMap } from '../assets/services/resourcePriceService.js?v=6.14';
-import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.14';
-import { getResourceTemplateData } from '../assets/data/excel.js?v=6.14';
-import { createLatestResourceSelection, nextResourceViewState, paginateResources } from '../assets/views/resources.js?v=6.14';
-import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.14';
-import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from '../assets/services/importSemanticService.js?v=6.14';
+import { STORES, resourcePriceRepo, resourceRepo } from '../assets/data/repository.js?v=6.15';
+import { resourceImportService } from '../assets/services/resourceImportService.js?v=6.15';
+import { resourceService } from '../assets/services/resourceService.js?v=6.15';
+import { buildCurrentPriceMap } from '../assets/services/resourcePriceService.js?v=6.15';
+import { searchAll, searchGroups } from '../assets/services/globalSearchService.js?v=6.15';
+import { getResourceTemplateData } from '../assets/data/excel.js?v=6.15';
+import { createLatestResourceSelection, nextResourceViewState, paginateResources } from '../assets/views/resources.js?v=6.15';
+import { buildImportReportRows, buildImportReportViewModel, renderImportReportMetric } from '../assets/views/resourceImport.js?v=6.15';
+import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from '../assets/services/importSemanticService.js?v=6.15';
 
 export async function testResourceWorkbench() {
   const originalStorage = globalThis.localStorage;

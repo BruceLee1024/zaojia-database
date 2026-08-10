@@ -1,11 +1,11 @@
-import { boqService } from '../services/boqService.js?v=6.14';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.14';
-import { isPriceEffective } from '../services/resourcePriceService.js?v=6.14';
-import { resourceService } from '../services/resourceService.js?v=6.14';
-import { projectRepo, quotaRepo } from '../data/repository.js?v=6.14';
-import { exportResourceTemplate } from '../data/excel.js?v=6.14';
-import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.14';
-import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.14';
+import { boqService } from '../services/boqService.js?v=6.15';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.15';
+import { isPriceEffective } from '../services/resourcePriceService.js?v=6.15';
+import { resourceService } from '../services/resourceService.js?v=6.15';
+import { projectRepo, quotaRepo } from '../data/repository.js?v=6.15';
+import { exportResourceTemplate } from '../data/excel.js?v=6.15';
+import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
+import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.15';
 
 const PAGE_SIZE = 50;
 const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], healthLabel: '', rows: [], prices: new Map(), usage: null, page: 1 };
@@ -152,18 +152,11 @@ function paint(workspace = document.getElementById('workspace')) {
   const categories = [...new Set(state.rows.map(item => item.category).filter(Boolean))];
   workspace.innerHTML = `
     <div class="page-frame library-workbench h-full flex flex-col">
-      <section class="library-toolbar">
-        <div class="library-toolbar-main">
-          <div class="flex items-center gap-3">
-            <span class="library-toolbar-icon material-symbols-outlined">${meta.icon}</span>
-            <div><h1 class="text-xl font-semibold text-slate-950">${meta.plural}</h1><p class="mt-1 text-xs text-slate-500">维护主数据、价格快照与使用位置</p></div>
-          </div>
-          <div class="library-toolbar-actions"><button onclick="window.__resources.downloadTemplate()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button onclick="window.__resources.importExcel()" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__resources.edit()" class="h-9 px-4 brand-bg text-white text-sm">新增${meta.singular}</button></div>
-        </div>
+      <section class="library-toolbar library-toolbar--compact">
         ${state.resourceIds.length ? `<div role="status" class="mt-3 flex flex-wrap items-center justify-between gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><span>已按仪表盘“${esc(state.healthLabel || '资源健康')}”筛选，共 ${state.resourceIds.length} 条。</span><button onclick="window.__resources.clearHealthFilter()" class="font-medium underline">查看全部${meta.singular}</button></div>` : ''}
         <div class="library-filter-row">
           <label class="relative"><span class="sr-only">搜索${meta.singular}</span><input value="${esc(state.keyword)}" oninput="window.__resources.filter('keyword',this.value)" type="search" placeholder="搜索编码、名称、规格、品牌…" class="h-9 w-full border border-slate-300 bg-white pl-9 pr-3 text-sm"><span class="material-symbols-outlined absolute left-3 top-2.5 text-[17px] text-slate-400">search</span></label>
-          <div class="library-filter-controls"><select onchange="window.__resources.filter('category',this.value)" class="h-9 min-w-[150px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部分类</option>${categories.map(value => `<option ${value === state.category ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select><select onchange="window.__resources.filter('status',this.value)" class="h-9 min-w-[120px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部状态</option><option value="active" ${state.status === 'active' ? 'selected' : ''}>启用</option><option value="inactive" ${state.status === 'inactive' ? 'selected' : ''}>停用</option></select><button onclick="window.__resources.clearFilters()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-600">清除筛选</button></div>
+          <div class="library-filter-controls"><select onchange="window.__resources.filter('category',this.value)" class="h-9 min-w-[150px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部分类</option>${categories.map(value => `<option ${value === state.category ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select><select onchange="window.__resources.filter('status',this.value)" class="h-9 min-w-[120px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部状态</option><option value="active" ${state.status === 'active' ? 'selected' : ''}>启用</option><option value="inactive" ${state.status === 'inactive' ? 'selected' : ''}>停用</option></select><button onclick="window.__resources.clearFilters()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-600">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button onclick="window.__resources.downloadTemplate()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button onclick="window.__resources.importExcel()" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__resources.edit()" class="h-9 px-4 brand-bg text-white text-sm">新增${meta.singular}</button></div>
         </div>
       </section>
       <section class="library-summary-grid" aria-label="${meta.plural}概览">

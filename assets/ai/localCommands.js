@@ -1,12 +1,12 @@
 // AI 本地指令路由
-import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=6.14';
-import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.14';
-import { fmtMoney, fmt } from '../utils/dom.js?v=6.14';
-import { boqService } from '../services/boqService.js?v=6.14';
-import { versionService } from '../services/versionService.js?v=6.14';
-import { indicatorService } from '../services/indicatorService.js?v=6.14';
-import { experienceService } from '../services/experienceService.js?v=6.14';
-import { hasMissingPrice } from '../utils/costing.js?v=6.14';
+import { projectRepo, quotaRepo, boqRepo } from '../data/repository.js?v=6.15';
+import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.15';
+import { fmtMoney, fmt } from '../utils/dom.js?v=6.15';
+import { boqService } from '../services/boqService.js?v=6.15';
+import { versionService } from '../services/versionService.js?v=6.15';
+import { indicatorService } from '../services/indicatorService.js?v=6.15';
+import { experienceService } from '../services/experienceService.js?v=6.15';
+import { hasMissingPrice } from '../utils/costing.js?v=6.15';
 
 export async function tryLocalCommand(text) {
   const t = text.trim();
@@ -301,7 +301,7 @@ async function cmdExperience(text) {
       handled: true,
       msg: `可以为「${proj.name}」生成一次报价复盘：我会根据当前清单、版本和质量报告生成追问卡，确认后再沉淀为经验卡。`,
       actions: [{ label: '开始复盘', onClick: async () => {
-        const mod = await import('../views/experience.js?v=6.14');
+        const mod = await import('../views/experience.js?v=6.15');
         mod.openReview({ projectId: proj.id, sourceType: 'ai_review' });
       } }],
     };
@@ -319,7 +319,7 @@ async function cmdExperience(text) {
       handled: true,
       msg: `暂未找到相关经验卡。${proj ? `可以先为「${proj.name}」做一次报价复盘。` : '归档项目、保存版本或报价审查后可以沉淀经验。'}`,
       actions: proj ? [{ label: '开始复盘', onClick: async () => {
-        const mod = await import('../views/experience.js?v=6.14');
+        const mod = await import('../views/experience.js?v=6.15');
         mod.openReview({ projectId: proj.id, sourceType: 'ai_review' });
       } }] : [],
     };
@@ -330,7 +330,7 @@ async function cmdExperience(text) {
     actions: [
       { label: '打开经验知识库', onClick: () => { window.__app.go('experience'); window.__app.closeAI(); } },
       ...(proj ? [{ label: '继续复盘当前项目', onClick: async () => {
-        const mod = await import('../views/experience.js?v=6.14');
+        const mod = await import('../views/experience.js?v=6.15');
         mod.openReview({ projectId: proj.id, sourceType: 'ai_review' });
       } }] : []),
     ],

@@ -1,14 +1,14 @@
 // 视图：数据与备份
-import { AI_SYSTEM_PROMPT_PRESETS, getAIConfig, getAISystemPromptPreset, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=6.14';
-import { generateSystemPromptDraft } from '../services/aiPromptService.js?v=6.14';
-import { testAIConnection } from '../services/aiAssistService.js?v=6.14';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.14';
-import { experienceService } from '../services/experienceService.js?v=6.14';
-import { STORES, dbGetAll } from '../data/repository.js?v=6.14';
-import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, setDataProfile, storageGetAttachment, storageGetCache, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder, withFolderMirrorSuspended } from '../data/storage.js?v=6.14';
-import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=6.14';
-import { ensureDemoData, removeDemoData } from '../data/demo.js?v=6.14';
-import { esc, toast, fmt, scopedDom } from '../utils/dom.js?v=6.14';
+import { AI_SYSTEM_PROMPT_PRESETS, getAIConfig, getAISystemPromptPreset, setAIConfig, listProviders, getProviderDefaults } from '../services/aiService.js?v=6.15';
+import { generateSystemPromptDraft } from '../services/aiPromptService.js?v=6.15';
+import { testAIConnection } from '../services/aiAssistService.js?v=6.15';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.15';
+import { experienceService } from '../services/experienceService.js?v=6.15';
+import { STORES, dbGetAll } from '../data/repository.js?v=6.15';
+import { activateLocalFolderStorage, getStorageStatus, reconnectLocalFolderStorage, setDataProfile, storageGetAttachment, storageGetCache, storageRemoveAttachment, storageSetAttachment, storageSetStrict, switchToBrowserStorage, syncBrowserCacheToLocalFolder, withFolderMirrorSuspended } from '../data/storage.js?v=6.15';
+import { clearBackupData, createLegacyJsonBackup, createZipBackup, parseLegacyJsonBackupFile, restoreLegacyJsonBackup, restoreZipBackup } from '../services/backupService.js?v=6.15';
+import { ensureDemoData, removeDemoData } from '../data/demo.js?v=6.15';
+import { esc, toast, fmt, scopedDom } from '../utils/dom.js?v=6.15';
 
 const SETTINGS_TABS = [
   { id: 'storage', label: '数据保存', icon: 'folder_managed', desc: '本地数据' },
