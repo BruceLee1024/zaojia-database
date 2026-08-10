@@ -1,11 +1,12 @@
 // 视图：仪表盘
-import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=6.3';
-import { dataEngineService } from '../services/dataEngineService.js?v=6.3';
-import { experienceService } from '../services/experienceService.js?v=6.3';
-import { resourceHealthService } from '../services/resourceHealthService.js?v=6.3';
-import { fmt, fmtMoney, esc } from '../utils/dom.js?v=6.3';
-import { hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { categoryGuess } from '../utils/stats.js?v=6.3';
+import { quotaRepo, projectRepo, boqRepo, versionRepo } from '../data/repository.js?v=6.15';
+import { dataEngineService } from '../services/dataEngineService.js?v=6.15';
+import { experienceService } from '../services/experienceService.js?v=6.15';
+import { resourceHealthService } from '../services/resourceHealthService.js?v=6.15';
+import { fmt, fmtMoney, esc } from '../utils/dom.js?v=6.15';
+import { hasMissingPrice } from '../utils/costing.js?v=6.15';
+import { categoryGuess } from '../utils/stats.js?v=6.15';
+import { formatCurrencySummary, normalizeCurrency } from '../utils/currency.js?v=6.15';
 
 const chartState = {
   trend: null,
@@ -62,7 +63,9 @@ function buildDashboardStats({ quota, projects, boq, versions, engine, experienc
   const monthKey = new Date().toISOString().slice(0, 7);
   const monthProjects = projects.filter(p => dateKey(p.createdAt || p.updatedAt || p.archivedAt) === monthKey);
   const monthArchived = archived.filter(p => dateKey(p.archivedAt || p.updatedAt || p.createdAt) === monthKey);
-  const archivedTrend = buildMonthlyTrend(archived, 6);
+  const currencies = [...new Set(projects.map(project => normalizeCurrency(project.currency)))];
+  const mixedCurrencies = currencies.length > 1;
+  const archivedTrend = mixedCurrencies ? null : buildMonthlyTrend(archived, 6);
   const totalCost = projects.reduce((s, p) => s + Number(p.totalCost || 0), 0);
   const archivedCost = archived.reduce((s, p) => s + Number(p.totalCost || 0), 0);
   const missingQuota = quota.filter(q => hasMissingPrice(q.priceTotal));
@@ -89,7 +92,7 @@ function buildDashboardStats({ quota, projects, boq, versions, engine, experienc
   const priceBase = quota.length + boq.length;
   const priceCompleteness = priceBase ? Math.round(pricedItems / priceBase * 100) : 100;
   const priceRiskRate = priceBase ? Math.round((missingQuota.length + missingBoq.length) / priceBase * 100) : 0;
-  const categoryCost = categoryBreakdown(boq);
+  const categoryCost = mixedCurrencies ? [] : categoryBreakdown(boq);
   const recentVersions = versions.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
   const nextActions = buildNextActions({ missingQuota, missingBoq, noVersionProjects, archived, engine, experience, projects });
   return {
@@ -104,6 +107,10 @@ function buildDashboardStats({ quota, projects, boq, versions, engine, experienc
     archivedTrend,
     totalCost,
     archivedCost,
+    totalCostLabel: formatCurrencySummary(projects, project => project.totalCost, project => project.currency),
+    archivedCostLabel: formatCurrencySummary(archived, project => project.totalCost, project => project.currency),
+    mixedCurrencies,
+    currencies,
     missingQuota,
     missingBoq,
     missingPriceCount: missingQuota.length + missingBoq.length,
@@ -312,7 +319,7 @@ function personalStartCard(stats) {
 }
 
 function executiveSummary(stats) {
-  const archivedRatio = stats.totalCost ? Math.round(stats.archivedCost / stats.totalCost * 100) : 0;
+  const archivedRatio = stats.projects.length ? Math.round(stats.archived.length / stats.projects.length * 100) : 0;
   const healthTone = stats.riskTotal ? 'amber' : 'teal';
   const versionTone = stats.noVersionProjects.length ? 'amber' : 'teal';
   const dataScore = stats.engine.qualityScore || 0;
@@ -321,22 +328,22 @@ function executiveSummary(stats) {
     <div class="card p-4 overflow-hidden min-h-[202px]">
       <div class="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
         <div class="font-semibold text-slate-900">项目费用概览</div>
-        <span class="text-xs text-slate-500">按项目总造价汇总</span>
+        <span class="text-xs text-slate-500">${stats.mixedCurrencies ? '按币种分别汇总，不自动换汇' : '按项目总造价汇总'}</span>
       </div>
       <div class="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-5">
         <div class="min-w-0">
           <div class="text-xs text-slate-500">累计造价</div>
-          <div class="mt-2 text-3xl font-semibold tabular-nums text-slate-950 truncate">${fmtMoney(stats.totalCost)}</div>
-          <div class="mt-2 text-xs text-slate-500">已收录案例 ${fmtMoney(stats.archivedCost)}</div>
+          <div class="mt-2 text-3xl font-semibold tabular-nums text-slate-950 break-words">${stats.totalCostLabel}</div>
+          <div class="mt-2 text-xs text-slate-500">已收录案例 ${stats.archivedCostLabel}</div>
         </div>
         <div class="min-w-0 sm:border-l sm:border-slate-200 sm:pl-4">
           <div class="text-xs text-slate-500">案例费用</div>
-          <div class="mt-2 text-2xl font-semibold tabular-nums text-slate-900 truncate">${fmtMoney(stats.archivedCost)}</div>
+          <div class="mt-2 text-2xl font-semibold tabular-nums text-slate-900 break-words">${stats.archivedCostLabel}</div>
           <div class="mt-2 text-xs text-slate-500">${fmt(stats.archived.length)} 个已收录案例</div>
         </div>
         <div class="min-w-0 sm:border-l sm:border-slate-200 sm:pl-4">
           <div class="flex items-center justify-between text-xs text-slate-500">
-            <span>案例收录率</span>
+            <span>案例项目占比</span>
             <span class="${archivedRatio >= 60 ? 'text-teal-700' : 'text-amber-700'} font-semibold">${archivedRatio}%</span>
           </div>
           <div class="mt-3 h-2 rounded-full bg-slate-100 overflow-hidden">
@@ -471,6 +478,9 @@ function experienceMetric(label, value, unit, note, tone = 'slate') {
 }
 
 function trendPanel(stats) {
+  if (stats.mixedCurrencies) {
+    return `<section class="card p-0 overflow-hidden min-h-[410px] flex flex-col"><div class="px-4 py-3 border-b border-slate-200"><div class="font-semibold text-slate-900">造价与项目趋势</div><div class="mt-1 text-xs text-slate-500">跨币种项目不自动换汇，因此不合并绘制金额趋势。</div></div><div class="flex-1 flex items-center justify-center px-8 text-center text-sm text-slate-500">请在项目明细中按 ${stats.currencies.join(' / ')} 分别查看金额；当前仪表盘只保留项目数量与资料完整度的跨项目统计。</div></section>`;
+  }
   return `<section class="card p-0 overflow-hidden min-h-[410px] flex flex-col">
     <div class="px-4 py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div class="min-w-0">
@@ -619,7 +629,7 @@ function compositionQuickStats(stats) {
   return `<div class="pt-3 border-t border-slate-200 grid grid-cols-1 gap-2">
     ${flatStat('项目总量', `${fmt(stats.projects.length)} 个`, 'teal')}
     ${flatStat('样本结构', top ? `${top[0]} ${topRatio}% · ${sampleNote}` : '暂无类型样本', topRatio >= 70 ? 'amber' : 'slate')}
-    ${flatStat('平均造价', stats.projects.length ? fmtMoney(stats.totalCost / stats.projects.length) : '-', 'slate')}
+    ${flatStat('平均造价', stats.mixedCurrencies ? '不同币种不合并计算' : (stats.projects.length ? fmtMoney(stats.totalCost / stats.projects.length) : '-'), 'slate')}
   </div>`;
 }
 
@@ -661,7 +671,7 @@ function projectMiniRow(p) {
     <td class="py-3 px-4 font-medium text-slate-800">${esc(p.name)}</td>
     <td class="px-3"><span class="badge badge-blue">${esc(p.type || '-')}</span></td>
     <td class="px-3">${statusBadge(p.status)}</td>
-    <td class="px-3 text-right tabular-nums font-medium">${fmtMoney(p.totalCost || 0)}</td>
+    <td class="px-3 text-right tabular-nums font-medium">${fmtMoney(p.totalCost || 0, p.currency)}</td>
     <td class="px-4 text-right"><button class="text-teal-700 hover:underline" onclick="window.__app.go('boq',{projectId:'${p.id}'})">查看</button></td>
   </tr>`;
 }
@@ -755,7 +765,7 @@ function versionAssetRow(v, projects) {
       <div class="mt-1 text-xs text-slate-500 truncate">${esc(p?.name || '未知项目')}</div>
     </div>
     <div class="shrink-0 text-right">
-      <div class="text-sm font-medium tabular-nums text-slate-800">${fmtMoney(v.totalCost || 0)}</div>
+      <div class="text-sm font-medium tabular-nums text-slate-800">${fmtMoney(v.totalCost || 0, p?.currency || v.currency)}</div>
       <div class="mt-1 text-xs text-slate-500">${v.lineCount || 0} 条 · 缺价 ${v.missingPriceCount || 0}</div>
     </div>
   </button>`;
@@ -787,7 +797,7 @@ function compositionSummary(stats) {
   return `
     ${miniLine('项目总量', `${stats.projects.length} 个`, stats.projects.length ? 'teal' : 'slate')}
     ${miniLine('类型结构', sampleNote, topRatio >= 70 ? 'amber' : 'slate')}
-    ${miniLine('平均造价', stats.projects.length ? fmtMoney(stats.totalCost / stats.projects.length) : '-', 'slate')}
+    ${miniLine('平均造价', stats.mixedCurrencies ? '不同币种不合并计算' : (stats.projects.length ? fmtMoney(stats.totalCost / stats.projects.length) : '-'), 'slate')}
     ${miniLine('案例收录率', stats.projects.length ? `${Math.round(stats.archived.length / stats.projects.length * 100)}%` : '-', stats.archived.length ? 'teal' : 'amber')}
   `;
 }
@@ -820,7 +830,7 @@ function projectRow(p) {
     <td class="px-3 text-right tabular-nums">${fmt(p.lineCount)}</td>
     <td class="px-3 text-right tabular-nums ${p.missingCount ? 'text-amber-700 font-semibold' : 'text-slate-600'}">${fmt(p.missingCount)}</td>
     <td class="px-3 text-right tabular-nums">${fmt(p.versionCount)}</td>
-    <td class="px-3 text-right tabular-nums font-medium">${fmtMoney(p.totalCost || 0)}</td>
+    <td class="px-3 text-right tabular-nums font-medium">${fmtMoney(p.totalCost || 0, p.currency)}</td>
     <td class="px-4 text-right"><button class="text-teal-700 hover:underline" onclick="window.__app.go('boq',{projectId:'${p.id}'})">打开</button></td>
   </tr>`;
 }
@@ -898,7 +908,7 @@ function versionItem(v, projects) {
   return `<button onclick="window.__app.go('boq',{projectId:'${v.projectId}'})" class="w-full rounded border border-slate-200 bg-white px-3 py-2 text-left hover:bg-slate-50">
     <div class="flex items-center justify-between gap-2">
       <div class="truncate font-medium text-slate-800">${esc(v.name || '报价版本')}</div>
-      <div class="tabular-nums text-xs text-slate-500">${fmtMoney(v.totalCost || 0)}</div>
+      <div class="tabular-nums text-xs text-slate-500">${fmtMoney(v.totalCost || 0, p?.currency || v.currency)}</div>
     </div>
     <div class="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
       <span class="truncate">${esc(p?.name || '未知项目')}</span>

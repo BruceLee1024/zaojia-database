@@ -1,11 +1,11 @@
 // 视图：定额库
-import { quotaService } from '../services/quotaService.js?v=6.3';
-import { boqService } from '../services/boqService.js?v=6.3';
-import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.3';
-import { exportQuotaTemplate } from '../data/excel.js?v=6.3';
-import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.3';
-import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.3';
-import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.3';
+import { quotaService } from '../services/quotaService.js?v=6.15';
+import { boqService } from '../services/boqService.js?v=6.15';
+import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
+import { exportQuotaTemplate } from '../data/excel.js?v=6.15';
+import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.15';
+import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.15';
+import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.15';
 
 const BREAKDOWN_COLORS = ['bg-blue-600', 'bg-emerald-500', 'bg-cyan-600', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-rose-400'];
 const filterState = { keyword: '', category: '', unit: '', priceStatus: '' };
@@ -77,12 +77,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   exposeQuotaActions();
   workspace.innerHTML = `
     <div class="page-frame library-workbench h-full flex flex-col">
-      <section class="library-toolbar shrink-0">
-        <div class="library-toolbar-main">
-          <span class="library-toolbar-icon material-symbols-outlined">menu_book</span>
-          <div><h1 class="text-xl font-semibold text-slate-950">我的定额库</h1><p class="mt-1 text-xs text-slate-500">维护常用价格、项目特征、计算规则和人材机组成。</p></div>
-          <div class="library-toolbar-actions"><button id="btnTpl" class="h-9 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">下载模板</button><button id="btnImport" class="h-9 px-3 text-sm border border-teal-300 bg-white text-teal-700">导入 Excel</button><button onclick="window.__quota.newItem()" class="h-9 px-4 text-sm brand-bg text-white">新增定额</button></div>
-        </div>
+      <section class="library-toolbar library-toolbar--compact shrink-0">
 
         ${routeNotice ? `<div role="status" class="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">${esc(routeNotice)}</div>` : ''}
 
@@ -105,7 +100,7 @@ export async function render(workspace = document.getElementById('workspace')) {
             <option value="priced" ${filterState.priceStatus === 'priced' ? 'selected' : ''}>已有单价</option>
             <option value="missing" ${filterState.priceStatus === 'missing' ? 'selected' : ''}>缺单价</option>
           </select>
-          <button onclick="window.__quota.clearFilters()" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">清除筛选</button></div>
+          <button onclick="window.__quota.clearFilters()" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button id="btnTpl" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">下载模板</button><button id="btnImport" class="h-10 px-3 text-sm border border-teal-300 bg-white text-teal-700">导入 Excel</button><button onclick="window.__quota.newItem()" class="h-10 px-4 text-sm brand-bg text-white">新增定额</button></div>
         </div>
       </section>
 

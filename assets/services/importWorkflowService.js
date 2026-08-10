@@ -1,13 +1,13 @@
-import { buildImportColumnMapping } from './importMappingService.js?v=6.3';
-import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.3';
-import { boqService } from './boqService.js?v=6.3';
-import { boqLibraryService } from './boqLibraryService.js?v=6.3';
-import { quotaService } from './quotaService.js?v=6.3';
-import { resourceImportService } from './resourceImportService.js?v=6.3';
-import { dataEngineService } from './dataEngineService.js?v=6.3';
-import { importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.3';
-import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { categoryGuess } from '../utils/stats.js?v=6.3';
+import { buildImportColumnMapping } from './importMappingService.js?v=6.15';
+import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.15';
+import { boqService } from './boqService.js?v=6.15';
+import { boqLibraryService } from './boqLibraryService.js?v=6.15';
+import { quotaService } from './quotaService.js?v=6.15';
+import { resourceImportService } from './resourceImportService.js?v=6.15';
+import { dataEngineService } from './dataEngineService.js?v=6.15';
+import { importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.15';
+import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.15';
+import { categoryGuess } from '../utils/stats.js?v=6.15';
 
 export function analyzeImport(regions = [], {
   targetType = 'project_boq', mappings = {}, fixedValues = {}, amountRule = 'calculated', selectedRegionIds = null,
@@ -110,6 +110,7 @@ export async function commitImport(preview, options = {}) {
   } else if (preview.targetType === 'material' || preview.targetType === 'equipment') {
     const resourcePreview = await resourceImportService.preview(validRows.map(resourceRowForDomain), preview.targetType);
     domainResult = await resourceImportService.commit(resourcePreview, { updateExisting: options.updateExisting !== false });
+    if (domainResult.counts?.pricesPending) warnings.push(`${domainResult.counts.pricesPending} 条价格未作为有效价格写入，已标记为待确认`);
   } else {
     throw new Error('不支持的导入目标');
   }
@@ -130,7 +131,7 @@ function domainCounts(result = {}, targetType, attempted) {
     return {
     committed,
     added: Number(result.counts?.resourcesCreated || 0), updated: Number(result.counts?.resourcesUpdated || 0),
-    duplicate: Number(result.counts?.resourcesSkipped || 0), conflict: Number(result.counts?.errors || 0), attempted,
+    duplicate: Number(result.counts?.resourcesSkipped || 0), pending: Number(result.counts?.pricesPending || 0), conflict: Number(result.counts?.errors || 0), attempted,
     notWritten: Math.max(0, attempted - committed),
     };
   }
@@ -157,7 +158,7 @@ export function mergeCommitRows(previewRows = [], domainResult = {}, targetType 
       sourceRowNumber: row.sourceRowNumber,
       status: result?.status || 'uncertain',
       priceStatus: result?.priceStatus || 'none',
-      issues: [...(row.issues || []), ...(result?.errors || []).map(message => ({ severity: 'error', message }))],
+      issues: [...(row.issues || []), ...(result?.errors || []).map(message => ({ severity: result?.priceStatus === 'pending' ? 'warning' : 'error', message }))],
     };
   });
 }
@@ -217,6 +218,6 @@ function resourceRowForDomain(row) {
   return {
     编码: row.code, 分类: row.category, 名称: row.name, 规格型号: row.specModel, 单位: row.unit, 品牌: row.brand, 生产厂家: row.manufacturer,
     单价: row.unitPrice || '', 价格来源: row.sourceType, 价格口径: row.priceBasis, 含税: row.taxIncluded ? '是' : '否', 税率: Number(row.taxRate || 0) * 100,
-    省: row.province, 市: row.city, 区县: row.district, 价格日期: row.priceDate, 供应商: row.supplier, 备注: row.note,
+    省: row.province, 地区: row.province, 市: row.city, 区县: row.district, 价格日期: row.priceDate, 供应商: row.supplier, 备注: row.note,
   };
 }

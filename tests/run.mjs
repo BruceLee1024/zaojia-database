@@ -2,21 +2,22 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { testResourceHealth } from './resourceHealth.mjs';
-import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.3';
-import { decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.3';
-import { buildHeaderTree, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.3';
-import { applyMappingTemplate, buildImportColumnMapping, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.3';
-import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../assets/services/importSchemaService.js?v=6.3';
-import { analyzeImport, mergeCommitRows } from '../assets/services/importWorkflowService.js?v=6.3';
-import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js?v=6.3';
-import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.3';
-import { createHierarchicalRecognitionRequest, createRecognitionRequest, validateColumnRecognitionPayload, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.3';
-import { applyHierarchicalTemplate, getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js?v=6.3';
-import { normalizeHubImportResult } from '../assets/views/importer.js?v=6.3';
-import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js?v=6.3';
-import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js?v=6.3';
-import { AI_SYSTEM_PROMPT_PRESETS, DEFAULT_AI_SYSTEM_PROMPT, getAIConfig, getAISystemPromptPreset, restoreBackupSafeAIConfig, toBackupSafeAIConfig } from '../assets/services/aiService.js?v=6.3';
-import { buildSystemPromptGenerationMessages, parseSystemPromptDraft } from '../assets/services/aiPromptService.js?v=6.3';
+import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.15';
+import { formatCurrency, normalizeCurrency, sumByCurrency } from '../assets/utils/currency.js?v=6.15';
+import { decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
+import { buildHeaderTree, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.15';
+import { applyMappingTemplate, buildImportColumnMapping, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.15';
+import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../assets/services/importSchemaService.js?v=6.15';
+import { analyzeImport, mergeCommitRows } from '../assets/services/importWorkflowService.js?v=6.15';
+import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js?v=6.15';
+import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.15';
+import { createHierarchicalRecognitionRequest, createRecognitionRequest, validateColumnRecognitionPayload, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.15';
+import { applyHierarchicalTemplate, getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js?v=6.15';
+import { normalizeHubImportResult } from '../assets/views/importer.js?v=6.15';
+import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js?v=6.15';
+import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js?v=6.15';
+import { AI_SYSTEM_PROMPT_PRESETS, DEFAULT_AI_SYSTEM_PROMPT, getAIConfig, getAISystemPromptPreset, restoreBackupSafeAIConfig, toBackupSafeAIConfig } from '../assets/services/aiService.js?v=6.15';
+import { buildSystemPromptGenerationMessages, parseSystemPromptDraft } from '../assets/services/aiPromptService.js?v=6.15';
 import { testMaterialEquipmentDomain } from './materialEquipmentDomain.mjs';
 import { testResourceWorkbench } from './resourceWorkbench.mjs';
 import { testResourceAttachments } from './resourceAttachments.mjs';
@@ -33,6 +34,16 @@ function testCosting() {
   assert.equal(hasMissingPrice(0), true);
   assert.equal(hasMissingPrice(''), true);
   assert.equal(hasMissingPrice(1), false);
+}
+
+function testProjectCurrencies() {
+  assert.equal(normalizeCurrency('usd'), 'USD');
+  assert.equal(normalizeCurrency('unknown'), 'CNY');
+  assert.equal(formatCurrency(12.5, 'USD'), '$ 12.50');
+  assert.equal(formatCurrency(12.5, 'IQD'), 'IQD 13');
+  assert.deepEqual(sumByCurrency([
+    { currency: 'CNY', amount: 10 }, { currency: 'USD', amount: 5 }, { currency: 'CNY', amount: 3 },
+  ]), [{ currency: 'CNY', amount: 13 }, { currency: 'USD', amount: 5 }]);
 }
 
 function testBackupSafeAIConfig() {
@@ -490,8 +501,9 @@ function testHierarchicalAiRecognitionValidation() {
     rows: [{ values: { c1: '池壁混凝土', c2: 680 } }],
   });
   assert.equal(request.columns[0].samples[0], '池壁混凝土');
-  const result = validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'name', columnId: 'c1', confidence: 'high', reason: '完整路径匹配' }] }, request, { mapping: {} });
+  const result = validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'name', columnId: 'c1', confidence: 'high', reason: '完整路径匹配' }], semanticSuggestions: [{ fieldKey: 'unitPrice', sampleValue: '实际采购', suggestedMeaning: '历史采购价', confidence: 'high', reason: '采购业务语义' }] }, request, { mapping: {} });
   assert.equal(result.mapping.name, 'c1');
+  assert.equal(result.semanticSuggestions[0].suggestedMeaning, '历史采购价');
   assert.throws(() => validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'unknown', columnId: 'c1' }] }, request), /不支持的字段/);
   assert.throws(() => validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'name', columnId: 'c1' }, { fieldKey: 'feature', columnId: 'c1' }] }, request), /重复列映射/);
 }
@@ -699,6 +711,7 @@ function notFound() {
 }
 
 testCosting();
+testProjectCurrencies();
 testBackupSafeAIConfig();
 testAISystemPromptPresets();
 testLegacyDefaultSystemPromptMigration();
@@ -980,7 +993,7 @@ async function testArchiveEligibility() {
 
   const project = { id: 'pa', name: '归档校验项目', status: 'doing', totalCost: 0 };
   assert.deepEqual(normalizeProjectMetadata({ code: ' P-01 ', client: ' 业主 ', region: ' 南京 ', stage: '投标报价', priceYear: 2026 }), {
-    code: 'P-01', client: '业主', region: '南京', stage: '投标报价', priceYear: '2026',
+    code: 'P-01', client: '业主', region: '南京', stage: '投标报价', priceYear: '2026', currency: 'CNY',
     pricingRegion: { province: '', city: '', district: '' }, pricingDate: '',
   });
   assert.equal(normalizeProjectMetadata({ priceYear: '20x6' }).priceYear, '');
@@ -1344,7 +1357,7 @@ async function testBoqLibraryService() {
   const memory = new Map();
   globalThis.localStorage = { getItem: () => null, setItem: () => {} };
   globalThis.window = { idbKeyval: { get: async key => memory.get(key), set: async (key, value) => memory.set(key, value) } };
-  const repo = await import('../assets/data/repository.js?v=6.3');
+  const repo = await import('../assets/data/repository.js?v=6.15');
   const { boqLibraryService } = await import('../assets/services/boqLibraryService.js');
   await repo.projectRepo.replaceAll([{ id: 'library-project', name: '清单库测试项目', totalCost: 0 }]);
   await repo.quotaRepo.replaceAll([{ id: 'library-quota', name: '池壁定额', unit: 'm³', priceTotal: 680, useBreakdown: false }]);

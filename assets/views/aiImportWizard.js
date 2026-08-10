@@ -1,13 +1,13 @@
 // 统一表格导入向导：五类目标共用文件、数据区、层级映射、预览和写入流程。
-import { parseImportFile } from '../data/excel.js?v=6.3';
-import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.3';
-import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.3';
-import { getImportSchema } from '../services/importSchemaService.js?v=6.3';
-import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.3';
-import { analyzeImport, commitImport } from '../services/importWorkflowService.js?v=6.3';
-import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.3';
-import { projectRepo } from '../data/repository.js?v=6.3';
-import { esc, toast } from '../utils/dom.js?v=6.3';
+import { parseImportFile } from '../data/excel.js?v=6.15';
+import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.15';
+import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.15';
+import { getImportSchema } from '../services/importSchemaService.js?v=6.15';
+import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.15';
+import { analyzeImport, commitImport } from '../services/importWorkflowService.js?v=6.15';
+import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.15';
+import { projectRepo } from '../data/repository.js?v=6.15';
+import { esc, toast } from '../utils/dom.js?v=6.15';
 
 const TARGETS = {
   'boq_quota_bundle': { label: '清单及定额组合', back: 'boq-library' },
@@ -116,7 +116,7 @@ function regionCard(region) {
 
 function mappingPanel(projects) {
   const groups = groupSelectedRegions();
-  return `<section class="space-y-4"><div class="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">AI 默认对低置信字段提供建议；模型不可用时会自动保留本地映射。来源列使用完整路径，同名“单价”不会互相覆盖。</div>${groups.map(mappingGroup).join('')}<footer class="sticky bottom-0 flex justify-between border border-slate-200 bg-white p-4"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">返回数据区</button><button onclick="window.__aiImport.buildPreview()" class="h-9 px-4 brand-bg text-white text-sm">生成质量预览</button></footer></section>`;
+  return `<section class="space-y-4"><div class="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">AI 默认对低置信字段和业务表达提供建议；模型不可用时会自动保留本地映射。所有推断都会在预览中展示，不能静默改写源数据。</div>${groups.map(mappingGroup).join('')}<footer class="sticky bottom-0 flex justify-between border border-slate-200 bg-white p-4"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">返回数据区</button><button onclick="window.__aiImport.buildPreview()" class="h-9 px-4 brand-bg text-white text-sm">生成质量预览</button></footer></section>`;
 }
 
 function mappingGroup(group) {
@@ -137,7 +137,12 @@ function mappingGroup(group) {
   });
   const desktopRows = fields.map(item => `<tr class="border-t border-slate-100"><td class="p-3 font-medium text-slate-800">${esc(item.field.label)}${item.field.required ? '<span class="text-red-600"> *</span>' : ''}</td><td class="p-3">${item.control}</td><td class="p-3 text-slate-600">${item.sample}</td><td class="p-3 text-xs ${item.statusTone}">${item.status}</td></tr>`).join('');
   const mobileCards = fields.map(item => `<section class="border-t border-slate-100 p-4"><div class="flex items-center justify-between gap-2"><h3 class="font-medium text-slate-800">${esc(item.field.label)}${item.field.required ? '<span class="text-red-600"> *</span>' : ''}</h3><span class="text-xs ${item.statusTone}">${item.status}</span></div><div class="mt-3">${item.control}</div><p class="mt-2 truncate text-xs text-slate-500">样本：${item.sample}</p></section>`).join('');
-  return `<article class="rounded-lg border border-slate-200 bg-white overflow-hidden"><header class="border-b border-slate-200 p-4"><div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="font-semibold text-slate-900">${esc(representative.sheetName)}${group.regions.length > 1 ? ` 等 ${group.regions.length} 个同结构数据区` : ''}</h2><p class="mt-1 text-xs ${ai?.degraded ? 'text-amber-700' : 'text-slate-500'}">${esc(ai?.degraded ? ai.degradationReason : ai?.summary || '本地规则已完成映射')}</p></div>${templateControls(group)}</div></header><div class="md:hidden">${mobileCards}</div><div class="hidden overflow-auto md:block"><table class="w-full min-w-[780px] text-sm"><thead class="bg-slate-50 text-left text-xs text-slate-500"><tr><th class="p-3">系统字段</th><th class="p-3">Excel 完整列路径</th><th class="p-3">样本</th><th class="p-3">状态</th></tr></thead><tbody>${desktopRows}</tbody></table></div></article>`;
+  return `<article class="rounded-lg border border-slate-200 bg-white overflow-hidden"><header class="border-b border-slate-200 p-4"><div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="font-semibold text-slate-900">${esc(representative.sheetName)}${group.regions.length > 1 ? ` 等 ${group.regions.length} 个同结构数据区` : ''}</h2><p class="mt-1 text-xs ${ai?.degraded ? 'text-amber-700' : 'text-slate-500'}">${esc(ai?.degraded ? ai.degradationReason : ai?.summary || '本地规则已完成映射')}</p></div>${templateControls(group)}</div>${semanticSuggestionMarkup(ai?.semanticSuggestions)}</header><div class="md:hidden">${mobileCards}</div><div class="hidden overflow-auto md:block"><table class="w-full min-w-[780px] text-sm"><thead class="bg-slate-50 text-left text-xs text-slate-500"><tr><th class="p-3">系统字段</th><th class="p-3">Excel 完整列路径</th><th class="p-3">样本</th><th class="p-3">状态</th></tr></thead><tbody>${desktopRows}</tbody></table></div></article>`;
+}
+
+function semanticSuggestionMarkup(suggestions = []) {
+  if (!suggestions.length) return '';
+  return `<div class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><div class="font-medium">AI 业务语义建议（仅供确认，不会自动改写数据）</div><ul class="mt-2 space-y-1">${suggestions.map(item => `<li>“${esc(item.sampleValue || item.fieldKey)}” → ${esc(item.suggestedMeaning)}（${confidenceLabel(item.confidence)}置信：${esc(item.reason)}）</li>`).join('')}</ul></div>`;
 }
 
 function templateControls(group) {
@@ -176,7 +181,7 @@ function previewRowsHtml(rows) {
 
 function resultPanel() {
   const report = state.report;
-  return `<section class="rounded-lg border ${report?.warnings?.length ? 'border-amber-200 bg-amber-50' : 'border-teal-200 bg-teal-50'} p-6"><span class="material-symbols-outlined text-4xl ${report?.warnings?.length ? 'text-amber-700' : 'text-teal-700'}">${report?.warnings?.length ? 'warning' : 'check_circle'}</span><h2 class="mt-2 text-lg font-semibold text-slate-950">${report?.warnings?.length ? '导入完成，但有后处理警告' : '导入已完成'}</h2><p class="mt-2 text-sm text-slate-700">${esc(report?.sourceName || state.fileName)} · 尝试写入 ${report?.counts?.attempted || 0} 行，实际写入 ${report?.counts?.committed || 0} 行，未写入 ${report?.counts?.notWritten || 0} 行。</p><div class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">${metric('新增', report?.counts?.added)}${metric('更新', report?.counts?.updated)}${metric('重复/跳过', report?.counts?.duplicate)}${metric('冲突/失败', report?.counts?.conflict, report?.counts?.conflict ? 'red' : 'slate')}</div>${report?.warnings?.length ? warningBox(report.warnings) : ''}<button onclick="window.__aiImport.cancel()" class="mt-5 h-9 px-4 bg-teal-700 text-white text-sm">返回${esc(TARGETS[state.targetType].label)}</button></section>`;
+  return `<section class="rounded-lg border ${report?.warnings?.length ? 'border-amber-200 bg-amber-50' : 'border-teal-200 bg-teal-50'} p-6"><span class="material-symbols-outlined text-4xl ${report?.warnings?.length ? 'text-amber-700' : 'text-teal-700'}">${report?.warnings?.length ? 'warning' : 'check_circle'}</span><h2 class="mt-2 text-lg font-semibold text-slate-950">${report?.warnings?.length ? '导入完成，但有待确认项' : '导入已完成'}</h2><p class="mt-2 text-sm text-slate-700">${esc(report?.sourceName || state.fileName)} · 尝试写入 ${report?.counts?.attempted || 0} 行，实际写入 ${report?.counts?.committed || 0} 行，未写入 ${report?.counts?.notWritten || 0} 行。</p><div class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">${metric('新增', report?.counts?.added)}${metric('更新', report?.counts?.updated)}${metric('重复/跳过', report?.counts?.duplicate)}${metric('待确认价格', report?.counts?.pending, report?.counts?.pending ? 'amber' : 'slate')}${metric('冲突/失败', report?.counts?.conflict, report?.counts?.conflict ? 'red' : 'slate')}</div>${report?.warnings?.length ? warningBox(report.warnings) : ''}<button onclick="window.__aiImport.cancel()" class="mt-5 h-9 px-4 bg-teal-700 text-white text-sm">返回${esc(TARGETS[state.targetType].label)}</button></section>`;
 }
 
 function bindUpload(workspace) {

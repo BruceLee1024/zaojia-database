@@ -113,7 +113,7 @@ function resourceSchema(key, label) {
     field('sourceType', '价格来源', ['价格来源', '来源类型', 'sourceType'], 'text'),
     field('priceBasis', '价格口径', ['价格口径', '口径', 'priceBasis'], 'text'),
     field('taxIncluded', '含税', ['含税', 'taxIncluded'], 'boolean'), field('taxRate', '税率', ['税率', 'taxRate'], 'percent'),
-    field('province', '省份', ['省', '省份', 'province'], 'text'), field('city', '城市', ['市', '城市', 'city'], 'text'), field('district', '区县', ['区县', '区', 'district'], 'text'),
+    field('province', '省份', ['省', '省份', '地区', '区域', 'province', 'region'], 'text'), field('city', '城市', ['市', '城市', 'city'], 'text'), field('district', '区县', ['区县', '区', 'district'], 'text'),
     field('priceDate', '价格日期', ['价格日期', '日期', 'priceDate'], 'date'), field('supplier', '供应商', ['供应商', 'supplier'], 'text'),
     field('note', '备注', ['备注', '说明', 'note'], 'text'),
   ]);

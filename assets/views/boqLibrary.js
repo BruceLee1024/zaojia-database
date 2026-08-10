@@ -1,10 +1,10 @@
 // 视图：独立清单库
-import { boqLibraryService } from '../services/boqLibraryService.js?v=6.3';
-import { suggestLibraryItem } from '../services/aiAssistService.js?v=6.3';
-import { projectRepo, quotaRepo } from '../data/repository.js?v=6.3';
-import { exportBoqLibraryTemplate } from '../data/excel.js?v=6.3';
-import { esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.3';
-import { ICONS } from '../utils/icons.js?v=6.3';
+import { boqLibraryService } from '../services/boqLibraryService.js?v=6.15';
+import { suggestLibraryItem } from '../services/aiAssistService.js?v=6.15';
+import { projectRepo, quotaRepo } from '../data/repository.js?v=6.15';
+import { exportBoqLibraryTemplate } from '../data/excel.js?v=6.15';
+import { esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
+import { ICONS } from '../utils/icons.js?v=6.15';
 
 const state = { keyword: '', selectedId: '' };
 let items = [];
@@ -16,9 +16,8 @@ export async function render(workspace = document.getElementById('workspace')) {
   window.__boqLibrary = { select: id => select(workspace, id), create, edit, apply, remove, importExcel };
   workspace.innerHTML = `
     <div class="page-frame library-workbench h-full flex flex-col">
-      <section class="library-toolbar">
-        <div class="library-toolbar-main"><span class="library-toolbar-icon material-symbols-outlined">format_list_bulleted</span><div><h1 class="text-xl font-semibold text-slate-950">我的清单库</h1><p class="mt-1 text-xs text-slate-500">维护可复用的标准清单，套用后可在项目内独立调整。</p></div><div class="library-toolbar-actions"><button id="libTemplate" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button id="libImport" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__boqLibrary.create()" class="h-9 px-4 brand-bg text-white text-sm">新建清单</button></div></div>
-        <div class="library-filter-row"><div class="relative"><input id="libKeyword" value="${esc(state.keyword)}" placeholder="搜索清单编码 / 名称 / 项目特征" class="h-10 w-full border px-3 text-sm" /></div><div class="library-filter-controls"><span class="inline-flex h-10 items-center px-3 text-xs text-slate-500">从标准清单中选择查看详情</span></div></div>
+      <section class="library-toolbar library-toolbar--compact">
+        <div class="library-filter-row"><div class="relative"><input id="libKeyword" value="${esc(state.keyword)}" placeholder="搜索清单编码 / 名称 / 项目特征" class="h-10 w-full border px-3 text-sm" /></div><div class="library-filter-controls"><button id="libTemplate" class="h-10 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button id="libImport" class="h-10 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__boqLibrary.create()" class="h-10 px-4 brand-bg text-white text-sm">新建清单</button></div></div>
       </section>
       <div id="libraryMetrics" class="library-summary-grid library-summary-grid--4"></div>
       <div class="library-split"><section class="library-list-pane overflow-auto"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50"><tr><th class="p-3 text-left">清单编码</th><th class="p-3 text-left">清单名称</th><th class="p-3 text-left">项目特征</th><th class="p-3 text-left">单位</th><th class="p-3 text-right">默认工程量</th><th class="p-3 text-center">关联定额</th></tr></thead><tbody id="libraryRows"></tbody></table></section><aside id="libraryDetail" class="library-detail-pane"></aside></div>

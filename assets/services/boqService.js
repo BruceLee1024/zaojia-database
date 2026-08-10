@@ -1,15 +1,16 @@
 // 工程量清单服务
-import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.3';
-import { uid } from '../utils/dom.js?v=6.3';
-import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.3';
-import { calculateAmount } from '../utils/costing.js?v=6.3';
-import { hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { localDateKey } from '../utils/localDate.js?v=6.3';
-import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.3';
-import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.3';
-import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.3';
-import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.3';
-import { calculateQuotaRelations } from './boqQuotaRelationService.js?v=6.3';
+import { boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo, resourcePriceRepo, resourceRepo, versionRepo } from '../data/repository.js?v=6.15';
+import { uid } from '../utils/dom.js?v=6.15';
+import { pickBestQuota, categoryGuess } from '../utils/stats.js?v=6.15';
+import { calculateAmount } from '../utils/costing.js?v=6.15';
+import { hasMissingPrice } from '../utils/costing.js?v=6.15';
+import { localDateKey } from '../utils/localDate.js?v=6.15';
+import { createSerializedKeyCoordinator } from '../utils/requestCoordinator.js?v=6.15';
+import { assertResourceAvailableForNewUse } from './resourceService.js?v=6.15';
+import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.15';
+import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.15';
+import { calculateQuotaRelations } from './boqQuotaRelationService.js?v=6.15';
+import { normalizeCurrency } from '../utils/currency.js?v=6.15';
 
 const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 
@@ -21,8 +22,9 @@ export const boqService = {
   /** 通过定额 id 添加一条清单 */
   async addFromQuota(projectId, quotaItemId, qty = 0) {
     await assertProjectEditableById(projectId);
-    const it = await quotaRepo.findById(quotaItemId);
+    const [project, it] = await Promise.all([projectRepo.findById(projectId), quotaRepo.findById(quotaItemId)]);
     if (!it) throw new Error('定额不存在');
+    assertCurrencyMatch(project?.currency, it.currency, '定额');
     const unitPrice = it.useBreakdown
       ? Object.values(it.breakdown || {}).reduce((a, b) => a + (+b || 0), 0)
       : (it.priceTotal || 0);
@@ -67,12 +69,14 @@ export const boqService = {
     if (!resource || resource.resourceType !== 'equipment') throw new Error('只能将设备加入项目');
     assertResourceAvailableForNewUse(resource);
     if (!price || price.resourceId !== resourceId) throw new Error('设备价格不存在或不属于当前设备');
+    assertCurrencyMatch(project.currency, price.currency, '设备价格');
     assertPriceUsableForCosting(price, resource, {
       context: 'equipment', pricingContext: { projectId: project.id, region: project.pricingRegion, asOf: project.pricingDate },
     });
     const quantity = Number(qty);
     if (!Number.isFinite(quantity) || quantity < 0) throw new Error('设备数量不能为负数');
     if (installQuotaId && !installQuota) throw new Error('安装定额不存在');
+    if (installQuota) assertCurrencyMatch(project.currency, installQuota.currency, '安装定额');
     if (price.priceBasis === 'installed_composite' && installQuotaId) throw new Error('安装综合价不能重复计取安装定额');
 
     const [originalLines, originalProjects] = await Promise.all([boqRepo.all(), projectRepo.all()]);
@@ -294,6 +298,8 @@ export const boqService = {
     const [all, quota] = await Promise.all([boqRepo.all(), quotaRepo.findById(quotaItemId)]);
     const line = all.find(b => b.id === lineId);
     if (!line || !quota) throw new Error('清单或定额不存在');
+    const project = await projectRepo.findById(line.projectId);
+    assertCurrencyMatch(project?.currency, quota.currency, '定额');
     const unitPrice = quota.useBreakdown
       ? Object.values(quota.breakdown || {}).reduce((a, b) => a + (+b || 0), 0)
       : Number(quota.priceTotal || 0);
@@ -365,6 +371,12 @@ export const boqService = {
     };
   },
 };
+
+function assertCurrencyMatch(projectCurrency, sourceCurrency, sourceLabel) {
+  const projectCode = normalizeCurrency(projectCurrency);
+  const sourceCode = normalizeCurrency(sourceCurrency);
+  if (projectCode !== sourceCode) throw new Error(`${sourceLabel}币种为 ${sourceCode}，与项目本位币 ${projectCode} 不一致，不能直接计价。`);
+}
 
 /** 重算项目总造价 */
 export async function recomputeProjectCost(projectId) {

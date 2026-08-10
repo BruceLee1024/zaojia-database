@@ -1,5 +1,6 @@
-import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.3';
-import { resourceCodeIdentity, resourceCompositeIdentity, validateResourceCollection } from './resourceService.js?v=6.3';
+import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.15';
+import { resourceCodeIdentity, resourceCompositeIdentity, validateResourceCollection } from './resourceService.js?v=6.15';
+import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from './importSemanticService.js?v=6.15';
 
 const SOURCE_TYPE_MAP = new Map([
   ['official', 'official'], ['官方信息价', 'official'], ['信息价', 'official'],
@@ -40,7 +41,8 @@ export const resourceImportService = {
     const previewRows = (Array.isArray(rows) ? rows : []).map((raw, index) => {
       const resource = normalizeResourceRow(raw, resourceType);
       const price = normalizePriceRow(raw);
-      const errors = validateRow(resource, price);
+      const errors = validateResourceRow(resource);
+      const priceReview = classifyResourcePriceReview(price);
       const codeIdentity = resourceCodeIdentity(resource);
       const compositeIdentity = resourceCompositeIdentity(resource);
       const identity = codeIdentity || compositeIdentity;
@@ -72,6 +74,7 @@ export const resourceImportService = {
         duplicateOf: firstIndex ?? null,
         duplicateIdentity: first?.identity || '',
         errors,
+        priceReview,
       };
     });
     return {
@@ -86,6 +89,7 @@ export const resourceImportService = {
         duplicate: previewRows.filter(row => row.action === 'duplicate').length,
         conflict: previewRows.filter(row => row.action === 'conflict').length,
         withPrice: previewRows.filter(row => row.price).length,
+        priceReview: previewRows.filter(row => row.priceReview.length).length,
       },
     };
   },
@@ -98,7 +102,7 @@ export const resourceImportService = {
     const prices = structuredClone(beforePrices);
     const report = {
       resourceType: preview.resourceType,
-      counts: { resourcesCreated: 0, resourcesUpdated: 0, resourcesSkipped: 0, pricesCreated: 0, pricesSkipped: 0, errors: 0 },
+      counts: { resourcesCreated: 0, resourcesUpdated: 0, resourcesSkipped: 0, pricesCreated: 0, pricesSkipped: 0, pricesPending: 0, errors: 0 },
       rows: [],
     };
     const resolved = new Map();
@@ -106,7 +110,7 @@ export const resourceImportService = {
     const now = new Date().toISOString();
 
     for (const row of preview.rows) {
-      const invariantErrors = validateRow(row.resource || {}, row.price || null);
+      const invariantErrors = validateResourceRow(row.resource || {});
       if (row.action === 'invalid' || row.action === 'conflict' || invariantErrors.length) {
         report.counts.errors += 1;
         report.rows.push({ index: row.index, status: 'error', errors: [...new Set([...(row.errors || []), ...(row.action === 'conflict' ? ['编码或规格身份与已有资源冲突'] : []), ...invariantErrors])] });
@@ -140,7 +144,11 @@ export const resourceImportService = {
       resolved.set(row.identity, resourceId);
 
       let priceStatus = 'none';
-      if (row.price && resourceId) {
+      const priceReview = classifyResourcePriceReview(row.price);
+      if (row.price && resourceId && priceReview.length) {
+        report.counts.pricesPending += 1;
+        priceStatus = 'pending';
+      } else if (row.price && resourceId) {
         const price = { ...row.price, resourceId };
         const key = priceIdentity(price);
         if (priceKeys.has(key)) {
@@ -153,7 +161,7 @@ export const resourceImportService = {
           priceStatus = 'created';
         }
       }
-      report.rows.push({ index: row.index, status: resourceStatus, resourceId, priceStatus, errors: [] });
+      report.rows.push({ index: row.index, status: resourceStatus, resourceId, priceStatus, errors: priceReview });
     }
 
     try {
@@ -190,6 +198,7 @@ export function buildFailureReport(report, failureCode, failureMessage = '') {
     resourcesSkipped: partial ? null : 0,
     pricesCreated: partial ? null : 0,
     pricesSkipped: partial ? null : 0,
+    pricesPending: partial ? null : 0,
     errors: attemptedCounts.errors || 0,
   };
   return {
@@ -254,14 +263,18 @@ function normalizePriceRow(raw) {
   const value = (...keys) => firstValue(raw, keys);
   const rawPrice = value('单价', '不含税单价', '含税单价', '价格', 'unitPrice');
   if (rawPrice === '' || rawPrice == null) return null;
+  const semantic = normalizeResourcePriceSemantics({
+    sourceType: value('价格来源', '来源类型', 'sourceType'), priceBasis: value('价格口径', '口径', 'priceBasis'),
+    province: value('省', '省份', 'province'), city: value('市', '城市', 'city'), district: value('区县', '区', 'district'), region: value('地区', 'region'),
+  });
   return {
-    sourceType: mapValue(SOURCE_TYPE_MAP, value('价格来源', '来源类型', 'sourceType'), 'official', true),
-    priceBasis: mapValue(PRICE_BASIS_MAP, value('价格口径', '口径', 'priceBasis'), 'delivered', true),
+    sourceType: semantic.sourceType,
+    priceBasis: semantic.priceBasis,
     unitPrice: Number(rawPrice),
     currency: 'CNY',
     taxIncluded: booleanValue(value('含税', 'taxIncluded')),
     taxRate: numericValue(value('税率', 'taxRate')),
-    region: { province: text(value('省', '省份', 'province')), city: text(value('市', '城市', 'city')), district: text(value('区县', '区', 'district')) },
+    region: semantic.region,
     priceDate: normalizeDate(value('价格日期', '日期', 'priceDate')),
     validFrom: normalizeDate(value('生效日期', 'validFrom')),
     validTo: normalizeDate(value('失效日期', 'validTo')),
@@ -278,25 +291,14 @@ function normalizePriceRow(raw) {
     },
     installationScope: text(value('安装范围', 'installationScope')),
     note: text(value('价格备注', 'priceNote')),
+    importMeta: { raw: semantic.raw, suggestions: semantic.suggestions },
   };
 }
 
-function validateRow(resource, price) {
+function validateResourceRow(resource) {
   const errors = [];
   if (!resource.name) errors.push('名称不能为空');
   if (!resource.unit) errors.push('单位不能为空');
-  if (price) {
-    if (!SOURCE_TYPES.has(price.sourceType)) errors.push('价格来源类型无效');
-    if (!PRICE_BASES.has(price.priceBasis)) errors.push('价格口径无效');
-    if (!(price.unitPrice > 0)) errors.push('单价必须大于 0');
-    if (!Number.isFinite(price.taxRate) || price.taxRate < 0 || price.taxRate > 100) errors.push('税率必须在 0 到 100 之间');
-    if (!isDate(price.priceDate)) errors.push('价格日期不能为空且必须有效');
-    if (!price.region.province && !price.region.city && !price.region.district) errors.push('价格地区至少填写一项');
-    if (price.validFrom && !isDate(price.validFrom)) errors.push('生效日期无效');
-    if (price.validTo && !isDate(price.validTo)) errors.push('失效日期无效');
-    if (price.validFrom && price.validTo && price.validFrom > price.validTo) errors.push('失效日期不能早于生效日期');
-    if (price.priceBasis === 'installed_composite' && !price.installationScope) errors.push('安装综合价必须填写安装范围');
-  }
   return errors;
 }
 

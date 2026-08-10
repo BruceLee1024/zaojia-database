@@ -1,12 +1,13 @@
 // 视图：我的项目
-import { projectService } from '../services/projectService.js?v=6.3';
-import { indicatorService } from '../services/indicatorService.js?v=6.3';
-import { boqRepo, versionRepo } from '../data/repository.js?v=6.3';
-import { fmt, fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.3';
-import { hasMissingPrice } from '../utils/costing.js?v=6.3';
-import { openReview } from './experience.js?v=6.3';
-import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.3';
-import { suggestProjectInfo } from '../services/aiAssistService.js?v=6.3';
+import { projectService } from '../services/projectService.js?v=6.15';
+import { indicatorService } from '../services/indicatorService.js?v=6.15';
+import { boqRepo, versionRepo } from '../data/repository.js?v=6.15';
+import { fmt, fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
+import { hasMissingPrice } from '../utils/costing.js?v=6.15';
+import { openReview } from './experience.js?v=6.15';
+import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.15';
+import { suggestProjectInfo } from '../services/aiAssistService.js?v=6.15';
+import { CURRENCY_OPTIONS, currencyLabel, normalizeCurrency } from '../utils/currency.js?v=6.15';
 
 const TYPES = [
   '水厂', '污水处理厂', '再生水厂', '工业废水', '泵站', '管网', '调蓄池', '水池', '污泥处理',
@@ -136,6 +137,10 @@ export async function render(workspace = document.getElementById('workspace')) {
         toast(`暂不能收录：${archiveBlockerText(err.eligibility)}`, 'error');
         return;
       }
+      if (err?.code === 'PROJECT_CURRENCY_LOCKED') {
+        toast(err.message, 'error');
+        return;
+      }
       throw err;
     }
   });
@@ -160,7 +165,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   });
   if (params.action === 'new') {
     window.__app.state.routeParams = {};
-    editForm({ id: '', name: '', code: '', client: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing' });
+    editForm({ id: '', name: '', code: '', client: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing', currency: 'CNY' });
   }
 }
 
@@ -283,7 +288,7 @@ function projectCard(summary) {
       <div class="mt-4 flex items-end justify-between gap-3">
         <div>
           <div class="text-xs text-slate-500">项目总造价</div>
-          <div class="mt-1 text-2xl font-semibold tabular-nums text-teal-700">${fmtMoney(p.totalCost || 0)}</div>
+          <div class="mt-1 text-2xl font-semibold tabular-nums text-teal-700">${fmtMoney(p.totalCost || 0, p.currency)}</div>
         </div>
         <div class="text-right text-xs text-slate-500">
           <div>${lineCount} 条清单</div>
@@ -297,8 +302,8 @@ function projectCard(summary) {
       <div class="grid grid-cols-2 gap-2 text-sm">
         ${miniMetric('日处理量', p.dailyCapacity ? `${esc(p.dailyCapacity)} 万m³/d` : '-')}
         ${miniMetric('建筑面积', p.area ? `${esc(p.area)} ㎡` : '-')}
-        ${miniMetric('单方造价', p.area ? `${fmt(unitCost)} 元/㎡` : '-')}
-        ${miniMetric('单水造价', p.dailyCapacity ? `${fmt(waterCost)} 元/(m³·d)` : '-')}
+        ${miniMetric('单方造价', p.area ? `${fmtMoney(unitCost, p.currency)}/㎡` : '-')}
+        ${miniMetric('单水造价', p.dailyCapacity ? `${fmtMoney(waterCost, p.currency)}/(m³·d)` : '-')}
         ${miniMetric('报价版本', `${versionCount} 个`)}
         ${miniMetric('缺价条目', `${missing} 条`)}
       </div>
@@ -400,7 +405,7 @@ function editForm(p) {
             <input id="pf_area" type="number" step="0.01" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-right tabular-nums" value="${esc(p.area || '')}" />
           </label>
           <label class="block text-xs font-medium text-slate-500">当前总造价
-            <input readonly tabindex="-1" class="mt-1 h-9 w-full rounded border border-slate-300 bg-slate-50 px-2 text-sm text-right font-medium tabular-nums text-slate-700" value="${fmtMoney(p.totalCost || 0)}" />
+            <input readonly tabindex="-1" class="mt-1 h-9 w-full rounded border border-slate-300 bg-slate-50 px-2 text-sm text-right font-medium tabular-nums text-slate-700" value="${fmtMoney(p.totalCost || 0, p.currency)}" />
           </label>
         </div>
       </section>
@@ -434,6 +439,10 @@ function editForm(p) {
           </label>
           <label class="block text-xs font-medium text-slate-500">计价日期
             <input id="pf_pricing_date" type="date" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.pricingDate || '')}" />
+          </label>
+          <label class="block text-xs font-medium text-slate-500">项目本位币
+            <select id="pf_currency" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${CURRENCY_OPTIONS.map(currency => `<option value="${currency.code}" ${normalizeCurrency(p.currency) === currency.code ? 'selected' : ''}>${esc(currencyLabel(currency.code))}</option>`).join('')}</select>
+            <span class="mt-1 block text-[11px] leading-4 text-slate-400">项目金额不自动换汇；不同币种项目将分开汇总。</span>
           </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">计价阶段
             <select id="pf_stage" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${['概算', '预算', '招标控制价', '投标报价', '结算参考'].map(stage => `<option value="${stage}" ${p.stage === stage ? 'selected' : ''}>${stage}</option>`).join('')}</select>
@@ -487,6 +496,7 @@ function editForm(p) {
         district: document.getElementById('pf_price_district').value.trim(),
       },
       pricingDate: document.getElementById('pf_pricing_date').value,
+      currency: document.getElementById('pf_currency').value,
       priceYear: document.getElementById('pf_price_year').value.trim(),
       stage: document.getElementById('pf_stage').value,
       status: document.getElementById('pf_status').value,

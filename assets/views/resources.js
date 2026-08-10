@@ -1,13 +1,14 @@
-import { boqService } from '../services/boqService.js?v=6.3';
-import { resourcePriceService } from '../services/resourcePriceService.js?v=6.3';
-import { isPriceEffective } from '../services/resourcePriceService.js?v=6.3';
-import { resourceService } from '../services/resourceService.js?v=6.3';
-import { projectRepo, quotaRepo } from '../data/repository.js?v=6.3';
-import { exportResourceTemplate } from '../data/excel.js?v=6.3';
-import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.3';
-import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.3';
+import { boqService } from '../services/boqService.js?v=6.15';
+import { resourcePriceService } from '../services/resourcePriceService.js?v=6.15';
+import { isPriceEffective } from '../services/resourcePriceService.js?v=6.15';
+import { resourceService } from '../services/resourceService.js?v=6.15';
+import { projectRepo, quotaRepo } from '../data/repository.js?v=6.15';
+import { exportResourceTemplate } from '../data/excel.js?v=6.15';
+import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
+import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.15';
 
-const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], healthLabel: '', rows: [], prices: new Map(), usage: null };
+const PAGE_SIZE = 50;
+const state = { resourceType: 'material', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], healthLabel: '', rows: [], prices: new Map(), usage: null, page: 1 };
 let attachmentRenderGeneration = 0;
 let resourceRenderGeneration = 0;
 const LABELS = {
@@ -33,6 +34,7 @@ export function nextResourceViewState(current = {}, route = 'materials', params 
     category: changedType ? '' : String(current.category || ''),
     status: changedType ? '' : String(current.status || ''),
     selectedId: changedType ? '' : String(current.selectedId || ''),
+    page: changedType ? 1 : Math.max(1, Number(current.page) || 1),
   };
   for (const key of ['keyword', 'category', 'status', 'selectedId']) {
     if (Object.prototype.hasOwnProperty.call(params, key)) next[key] = String(params[key] || '');
@@ -67,7 +69,7 @@ export function createLatestResourceSelection({ setSelectedId, getSelectedId, lo
   return select;
 }
 
-export function createAtomicResourceRefresh({ list, currentPrice, usage, isCurrent = () => true, commit }) {
+export function createAtomicResourceRefresh({ list, currentPrices, currentPrice, usage, isCurrent = () => true, commit }) {
   let requestGeneration = 0;
   const refresh = async snapshot => {
     const request = ++requestGeneration;
@@ -78,7 +80,9 @@ export function createAtomicResourceRefresh({ list, currentPrice, usage, isCurre
     let selectedId = snapshot.selectedId;
     if (selectedId && !rows.some(item => item.id === selectedId)) selectedId = '';
     if (!selectedId && rows.length) selectedId = rows[0].id;
-    const prices = new Map(await Promise.all(rows.map(async item => [item.id, await currentPrice(item)])));
+    const prices = currentPrices
+      ? await currentPrices(rows)
+      : new Map(await Promise.all(rows.map(async item => [item.id, await currentPrice(item)])));
     if (!valid()) return false;
     const selectedUsage = selectedId ? await usage(selectedId) : null;
     if (!valid()) return false;
@@ -111,7 +115,7 @@ const selectResource = createLatestResourceSelection({
 
 const runAtomicResourceRefresh = createAtomicResourceRefresh({
   list: filters => resourceService.list(filters),
-  currentPrice: item => resourcePriceService.getCurrentPrice(item.id),
+  currentPrices: rows => resourcePriceService.getCurrentPriceMap(rows),
   usage: id => resourceService.usage(id),
   isCurrent: snapshot => isResourceContextCurrent(snapshot.context),
   commit: async (result, snapshot) => {
@@ -147,19 +151,12 @@ function paint(workspace = document.getElementById('workspace')) {
   const selected = state.rows.find(item => item.id === state.selectedId);
   const categories = [...new Set(state.rows.map(item => item.category).filter(Boolean))];
   workspace.innerHTML = `
-    <div class="page-frame library-workbench min-h-full flex flex-col">
-      <section class="library-toolbar">
-        <div class="library-toolbar-main">
-          <div class="flex items-center gap-3">
-            <span class="library-toolbar-icon material-symbols-outlined">${meta.icon}</span>
-            <div><h1 class="text-xl font-semibold text-slate-950">${meta.plural}</h1><p class="mt-1 text-xs text-slate-500">维护主数据、价格快照与使用位置</p></div>
-          </div>
-          <div class="library-toolbar-actions"><button onclick="window.__resources.downloadTemplate()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button onclick="window.__resources.importExcel()" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__resources.edit()" class="h-9 px-4 brand-bg text-white text-sm">新增${meta.singular}</button></div>
-        </div>
+    <div class="page-frame library-workbench h-full flex flex-col">
+      <section class="library-toolbar library-toolbar--compact">
         ${state.resourceIds.length ? `<div role="status" class="mt-3 flex flex-wrap items-center justify-between gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><span>已按仪表盘“${esc(state.healthLabel || '资源健康')}”筛选，共 ${state.resourceIds.length} 条。</span><button onclick="window.__resources.clearHealthFilter()" class="font-medium underline">查看全部${meta.singular}</button></div>` : ''}
         <div class="library-filter-row">
           <label class="relative"><span class="sr-only">搜索${meta.singular}</span><input value="${esc(state.keyword)}" oninput="window.__resources.filter('keyword',this.value)" type="search" placeholder="搜索编码、名称、规格、品牌…" class="h-9 w-full border border-slate-300 bg-white pl-9 pr-3 text-sm"><span class="material-symbols-outlined absolute left-3 top-2.5 text-[17px] text-slate-400">search</span></label>
-          <div class="library-filter-controls"><select onchange="window.__resources.filter('category',this.value)" class="h-9 min-w-[150px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部分类</option>${categories.map(value => `<option ${value === state.category ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select><select onchange="window.__resources.filter('status',this.value)" class="h-9 min-w-[120px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部状态</option><option value="active" ${state.status === 'active' ? 'selected' : ''}>启用</option><option value="inactive" ${state.status === 'inactive' ? 'selected' : ''}>停用</option></select><button onclick="window.__resources.clearFilters()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-600">清除筛选</button></div>
+          <div class="library-filter-controls"><select onchange="window.__resources.filter('category',this.value)" class="h-9 min-w-[150px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部分类</option>${categories.map(value => `<option ${value === state.category ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select><select onchange="window.__resources.filter('status',this.value)" class="h-9 min-w-[120px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部状态</option><option value="active" ${state.status === 'active' ? 'selected' : ''}>启用</option><option value="inactive" ${state.status === 'inactive' ? 'selected' : ''}>停用</option></select><button onclick="window.__resources.clearFilters()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-600">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button onclick="window.__resources.downloadTemplate()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button onclick="window.__resources.importExcel()" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__resources.edit()" class="h-9 px-4 brand-bg text-white text-sm">新增${meta.singular}</button></div>
         </div>
       </section>
       <section class="library-summary-grid" aria-label="${meta.plural}概览">
@@ -177,11 +174,27 @@ function paint(workspace = document.getElementById('workspace')) {
 }
 
 function resourceTable(meta) {
-  return `<section class="library-list-pane min-h-[420px]">
-    <div class="border-b border-slate-200 px-4 py-3 flex items-center"><h2 class="font-semibold text-slate-900">${meta.plural}清单</h2><span class="ml-2 text-xs text-slate-500">${state.rows.length} 条</span></div>
-    <div class="mobile-card-list divide-y divide-slate-100">${state.rows.length ? state.rows.map(item => resourceMobileCard(item, state.prices.get(item.id))).join('') : `<div class="px-5 py-16 text-center text-sm text-slate-400">暂无符合条件的${meta.singular}。</div>`}</div>
-    <div class="mobile-table overflow-auto"><table class="w-full text-sm"><thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="px-3 py-2 text-left">编码 / 名称</th><th class="px-3 text-left">规格型号</th><th class="px-3 text-left">分类</th><th class="px-3 text-right">当前价</th><th class="px-3 text-left">状态</th><th class="px-3 w-28"></th></tr></thead>
-    <tbody class="divide-y divide-slate-100">${state.rows.length ? state.rows.map(item => resourceRowHtml(item, state.prices.get(item.id), item.id === state.selectedId)).join('') : `<tr><td colspan="6" class="py-16 text-center text-slate-400">暂无符合条件的${meta.singular}。</td></tr>`}</tbody></table></div></section>`;
+  const pagination = paginateResources(state.rows, state.page, PAGE_SIZE);
+  if (state.page !== pagination.page) state.page = pagination.page;
+  return `<section class="library-list-pane min-h-0 flex flex-col">
+    <div class="border-b border-slate-200 px-4 py-3 flex items-center shrink-0"><h2 class="font-semibold text-slate-900">${meta.plural}清单</h2><span class="ml-2 text-xs text-slate-500">${state.rows.length} 条</span><span class="ml-auto text-xs text-slate-400">第 ${pagination.page} / ${pagination.totalPages} 页</span></div>
+    <div class="mobile-card-list divide-y divide-slate-100">${pagination.rows.length ? pagination.rows.map(item => resourceMobileCard(item, state.prices.get(item.id))).join('') : `<div class="px-5 py-16 text-center text-sm text-slate-400">暂无符合条件的${meta.singular}。</div>`}</div>
+    <div class="mobile-table overflow-auto scroll-thin flex-1 min-h-0"><table class="w-full text-sm"><thead class="sticky top-0 z-10 bg-slate-50 text-xs text-slate-500"><tr><th class="px-3 py-2 text-left">编码 / 名称</th><th class="px-3 text-left">规格型号</th><th class="px-3 text-left">分类</th><th class="px-3 text-right">当前价</th><th class="px-3 text-left">状态</th><th class="px-3 w-28"></th></tr></thead>
+    <tbody class="divide-y divide-slate-100">${pagination.rows.length ? pagination.rows.map(item => resourceRowHtml(item, state.prices.get(item.id), item.id === state.selectedId)).join('') : `<tr><td colspan="6" class="py-16 text-center text-slate-400">暂无符合条件的${meta.singular}。</td></tr>`}</tbody></table></div>
+    ${resourcePaginationMarkup(pagination)}
+  </section>`;
+}
+
+export function paginateResources(rows = [], page = 1, pageSize = PAGE_SIZE) {
+  const total = Array.isArray(rows) ? rows.length : 0;
+  const safeSize = Math.max(1, Number(pageSize) || PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / safeSize));
+  const safePage = Math.min(totalPages, Math.max(1, Number(page) || 1));
+  return { page: safePage, totalPages, start: total ? (safePage - 1) * safeSize + 1 : 0, end: Math.min(total, safePage * safeSize), rows: rows.slice((safePage - 1) * safeSize, safePage * safeSize) };
+}
+
+function resourcePaginationMarkup({ page, totalPages, start, end, rows }) {
+  return `<footer class="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 shrink-0"><span>${rows.length ? `显示 ${start}–${end} 条` : '暂无数据'}</span><div class="flex items-center gap-2"><button data-resource-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} class="h-8 px-3 border border-slate-300 bg-white disabled:cursor-not-allowed disabled:opacity-40">上一页</button><span class="tabular-nums">${page} / ${totalPages}</span><button data-resource-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''} class="h-8 px-3 border border-slate-300 bg-white disabled:cursor-not-allowed disabled:opacity-40">下一页</button></div></footer>`;
 }
 
 function resourceMobileCard(item, price) {
@@ -223,8 +236,9 @@ function exposeActions(workspace, generation) {
       const item = state.rows.find(row => row.id === id);
       if (item) openModal(`${LABELS[state.resourceType].singular}详情`, mobileResourceDetail(item, state.prices.get(id)));
     },
-    filter: (key, value) => { if (!isResourceContextCurrent(context)) return; state[key] = value; clearTimeout(window.__resourceFilterTimer); window.__resourceFilterTimer = setTimeout(() => refresh(workspace, generation), 150); },
-    clearFilters: () => { if (!isResourceContextCurrent(context)) return; state.keyword = ''; state.category = ''; state.status = ''; refresh(workspace, generation); },
+    filter: (key, value) => { if (!isResourceContextCurrent(context)) return; state[key] = value; state.page = 1; clearTimeout(window.__resourceFilterTimer); window.__resourceFilterTimer = setTimeout(() => refresh(workspace, generation), 150); },
+    clearFilters: () => { if (!isResourceContextCurrent(context)) return; state.keyword = ''; state.category = ''; state.status = ''; state.page = 1; refresh(workspace, generation); },
+    setPage: page => { if (!isResourceContextCurrent(context)) return; state.page = Math.max(1, Number(page) || 1); paint(workspace); },
     clearHealthFilter: () => { if (!isResourceContextCurrent(context)) return; state.resourceIds = []; state.healthLabel = ''; refresh(workspace, generation); },
     edit: id => showResourceEditor(id, workspace, generation),
     copy: async id => { const copy = await resourceService.copy(id); if (!isResourceContextCurrent(context)) return; state.selectedId = copy.id; toast('已创建副本', 'success'); await refresh(workspace, generation); },
@@ -264,6 +278,7 @@ function bindResourceIdActions(root) {
   root?.querySelectorAll('[data-resource-action]').forEach(button => button.addEventListener('click', () => {
     window.__resources[button.dataset.resourceAction]?.(button.dataset.resourceId);
   }));
+  root?.querySelectorAll('[data-resource-page]').forEach(button => button.addEventListener('click', () => window.__resources.setPage(button.dataset.resourcePage)));
 }
 
 async function showResourceEditor(id = '', workspace = document.getElementById('workspace'), generation = resourceRenderGeneration) {
