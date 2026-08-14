@@ -4,7 +4,8 @@ import { boqService, groupForLine } from '../services/boqService.js?v=6.15';
 import { boqLibraryService } from '../services/boqLibraryService.js?v=6.15';
 import { projectService } from '../services/projectService.js?v=6.15';
 import { versionService, defaultVersionName, exportVersionDiffText } from '../services/versionService.js?v=6.15';
-import { suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.15';
+import { suggestBoqDraft, suggestBoqLine, suggestMissingPrices, suggestVersionSummary, reviewQuote } from '../services/aiAssistService.js?v=6.15';
+import { getAIConfig } from '../services/aiService.js?v=6.15';
 import { openReview } from './experience.js?v=6.15';
 import { fmtMoney, esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
 import { exportBOQExcel } from '../data/excel.js?v=6.15';
@@ -27,6 +28,7 @@ const boqState = {
   treeGroup: '',
   detailCollapsed: localStorage.getItem('boq_detail_collapsed') === 'true',
   expandedProjectIds: new Set(),
+  collapsedSourceSections: new Set(),
   currency: 'CNY',
   workspaceTab: 'boq',
 };
@@ -81,7 +83,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   if (boqState.activeId && !filteredBoq.find(b => b.id === boqState.activeId)) boqState.activeId = '';
   const activeLine = boq.find(b => b.id === boqState.activeId) || filteredBoq[0] || null;
   if (!boqState.activeId && activeLine) boqState.activeId = activeLine.id;
-  const activeRecommendations = activeLine ? await boqService.recommendQuota(activeLine, 4) : [];
+  const activeRecommendations = activeLine && activeLine.lineType !== 'other_charge' ? await boqService.recommendQuota(activeLine, 4) : [];
   const activeQuotaRelations = activeLine ? await projectBoqQuotaRelationRepo.byBoqLine(activeLine.id) : [];
   const librarySource = activeLine?.boqLibraryItemId ? await boqLibraryRepo.findById(activeLine.boqLibraryItemId) : null;
   const totalCost = boq.reduce((s, b) => s + (b.amount || 0), 0);
@@ -201,6 +203,7 @@ export async function render(workspace = document.getElementById('workspace')) {
     });
   });
   document.getElementById('btnAdd').onclick = pickQuota;
+  document.getElementById('btnAiDraft').onclick = () => openAiDraftDialog(proj);
   document.getElementById('btnAddLibrary').onclick = pickBoqLibrary;
   document.getElementById('btnImportBOQ').onclick = () => window.__app.go('ai-import', { targetType: 'project_boq', projectId: proj.id });
   document.getElementById('btnAdj').onclick = batchAdjust;
@@ -285,24 +288,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   });
 
   const tbody = document.getElementById('boqList');
-  tbody.innerHTML = pageRows.map((b, i) => `
-    <tr class="border-b border-slate-100 hover:bg-slate-50/80 ${b.id === boqState.activeId ? 'bg-teal-50 ring-1 ring-inset ring-teal-200' : ''}" data-id="${b.id}" draggable="true">
-      <td class="px-3 py-2"><input type="checkbox" data-select="${b.id}" ${boqState.selectedIds.has(b.id) ? 'checked' : ''} /></td>
-      <td class="px-2 py-2 text-slate-400">${pageStart + i + 1}</td>
-      <td class="px-2"><input class="w-full bg-transparent text-slate-700 border-0 px-0 py-1" value="${esc(b.code || '')}" /></td>
-      <td class="px-2">${riskBadges(b)}</td>
-      <td class="px-2 font-medium text-slate-800 cursor-pointer" title="${esc(b.name || '')}" data-open-detail>${esc(b.name)}</td>
-      <td class="px-2 text-slate-500 truncate cursor-pointer" title="${esc(b.feature || '')}" data-open-detail>${esc((b.feature || '').slice(0, 60))}</td>
-      <td class="px-2 text-center">${esc(b.unit || '')}</td>
-      <td class="px-2 text-right tabular-nums"><input type="number" step="0.01" class="w-20 text-right bg-transparent border-0 px-0 py-1" value="${b.qty || 0}" /></td>
-      <td class="px-2 text-right tabular-nums">
-        <input type="number" step="0.01" class="w-24 text-right bg-transparent border-0 px-0 py-1 ${hasMissingPrice(b.unitPrice) ? 'text-amber-700 font-semibold' : ''}" value="${b.unitPrice || 0}" title="${hasMissingPrice(b.unitPrice) ? '综合单价为空或为 0，合价会按 0 计' : ''}" />
-      </td>
-      <td class="px-2 text-right"><input type="number" step="0.001" class="w-14 text-right bg-transparent border-0 px-0 py-1" value="${b.factor || 1}" /></td>
-      <td class="px-2 text-right tabular-nums font-semibold ${hasMissingPrice(b.unitPrice) ? 'text-amber-700' : 'text-slate-900'}" data-amount>${money(b.amount || 0)}</td>
-      <td class="px-2 text-right"><button class="text-red-600 hover:underline text-xs" data-del="${b.id}">删除</button></td>
-    </tr>
-  `).join('') || (boq.length ? `<tr><td colspan="12" class="py-16">
+  tbody.innerHTML = renderBoqTableRows(pageRows, pageStart, filteredBoq) || (boq.length ? `<tr><td colspan="12" class="py-16">
     <div class="flex flex-col items-center justify-center text-center">
       <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded border border-amber-200 bg-amber-50 text-amber-700">
         <span class="material-symbols-outlined text-[24px]">filter_alt_off</span>
@@ -323,14 +309,26 @@ export async function render(workspace = document.getElementById('workspace')) {
           <div class="w-1/2 h-2 bg-slate-100 rounded-full"></div>
       </div>
       <div class="text-base font-semibold text-slate-700 mb-2">暂无清单数据</div>
-      <div class="text-slate-500 mb-6 max-w-md">当前项目下尚未添加任何工程量清单。可以手动选择定额后填写工程量。</div>
-      <button id="btnEmptyAdd" class="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 hover:text-teal-700">
-        <span class="material-symbols-outlined text-[20px] text-teal-700">add</span>立即添加清单
-      </button>
+      <div class="text-slate-500 mb-6 max-w-lg">描述项目建设内容，AI 可从本地定额库筛选清单草稿；所有建议都需预览确认后才会写入。</div>
+      <div class="flex flex-wrap items-center justify-center gap-2">
+        <button id="btnEmptyAi" class="inline-flex items-center gap-2 px-5 py-2.5 brand-bg text-white text-sm font-medium hover:opacity-90">
+          <span class="material-symbols-outlined text-[20px]">auto_awesome</span>AI 生成清单草稿
+        </button>
+        <button id="btnEmptyAdd" class="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 hover:text-teal-700">
+          <span class="material-symbols-outlined text-[20px] text-teal-700">add</span>手动添加清单
+        </button>
+      </div>
     </div>
   </td></tr>`);
 
   tbody.querySelectorAll('tr[data-id]').forEach(tr => bindRowEvents(tr, proj.id));
+  tbody.querySelectorAll('[data-boq-section-toggle]').forEach(button => button.onclick = () => {
+    const key = button.dataset.boqSectionToggle;
+    boqState.collapsedSourceSections.has(key)
+      ? boqState.collapsedSourceSections.delete(key)
+      : boqState.collapsedSourceSections.add(key);
+    render();
+  });
   tbody.querySelectorAll('tr[data-id]').forEach(tr => {
     tr.addEventListener('dragstart', ev => {
       ev.dataTransfer.setData('text/boq-line', tr.dataset.id);
@@ -346,6 +344,11 @@ export async function render(workspace = document.getElementById('workspace')) {
     if (confirm('删除该清单项？')) { await boqService.remove(b.dataset.del); render(); }
   });
   document.getElementById('btnEmptyAdd')?.addEventListener('click', pickQuota);
+  document.getElementById('btnEmptyAi')?.addEventListener('click', () => openAiDraftDialog(proj));
+  if (routeParams.action === 'ai-draft') {
+    window.__app.state.routeParams = { projectId: proj.id };
+    openAiDraftDialog(proj);
+  }
   document.getElementById('btnClearBoqFilters')?.addEventListener('click', () => {
     boqState.keyword = '';
     boqState.priceStatus = '';
@@ -357,11 +360,75 @@ export async function render(workspace = document.getElementById('workspace')) {
   bindDetailActions(activeLine, proj);
 }
 
+function renderBoqTableRows(lines, pageStart = 0, summaryLines = lines) {
+  let html = '';
+  let activeKey = '';
+  let activeLines = [];
+  const closeSection = () => {
+    if (!activeKey || !activeLines.length) return;
+    const subtotal = activeLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const missing = activeLines.filter(line => hasMissingPrice(line.unitPrice)).length;
+    html += `<tr class="border-b border-slate-200 bg-slate-50/70 text-xs">
+      <td colspan="10" class="px-3 py-2 text-right font-medium text-slate-500">分部小计${missing ? ` · <span class="text-amber-700">缺价 ${missing} 项</span>` : ''}</td>
+      <td class="px-2 py-2 text-right font-semibold tabular-nums text-slate-800">${money(subtotal)}</td><td></td>
+    </tr>`;
+  };
+
+  lines.forEach((line, index) => {
+    const key = sourceSectionKey(line);
+    if (key !== activeKey) {
+      closeSection();
+      activeKey = key;
+      activeLines = key ? summaryLines.filter(item => sourceSectionKey(item) === key) : [];
+      if (key) {
+        const collapsed = boqState.collapsedSourceSections.has(key);
+        html += `<tr class="border-y border-slate-200 bg-slate-100/90">
+          <td colspan="12" class="p-0">
+            <button type="button" data-boq-section-toggle="${esc(key)}" aria-expanded="${collapsed ? 'false' : 'true'}" class="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-100">
+              <span class="material-symbols-outlined text-[18px] text-slate-500">${collapsed ? 'chevron_right' : 'expand_more'}</span>
+              <span class="font-mono text-xs text-slate-500">${esc(line.sourceSectionCode || '')}</span>
+              <span class="font-semibold text-slate-900">${esc(line.sourceSectionName || '未命名分部')}</span>
+              ${line.sourceUnitName ? `<span class="text-xs text-slate-400">${esc(line.sourceUnitName)}</span>` : ''}
+              <span class="ml-auto text-xs tabular-nums text-slate-500">${activeLines.length} 项 · ${money(activeLines.reduce((sum, item) => sum + Number(item.amount || 0), 0))}</span>
+            </button>
+          </td>
+        </tr>`;
+      }
+    }
+    if (!key || !boqState.collapsedSourceSections.has(key)) html += boqTableLineRow(line, pageStart + index + 1);
+    if (!key) activeLines = [];
+  });
+  closeSection();
+  return html;
+}
+
+function boqTableLineRow(line, index) {
+  return `<tr class="border-b border-slate-100 hover:bg-slate-50/80 ${line.id === boqState.activeId ? 'bg-teal-50 ring-1 ring-inset ring-teal-200' : ''}" data-id="${esc(line.id)}" draggable="true">
+    <td class="px-3 py-2"><input type="checkbox" data-select="${esc(line.id)}" ${boqState.selectedIds.has(line.id) ? 'checked' : ''} /></td>
+    <td class="px-2 py-2 text-slate-400">${index}</td>
+    <td class="px-2"><input class="w-full bg-transparent text-slate-700 border-0 px-0 py-1" value="${esc(line.code || '')}" /></td>
+    <td class="px-2">${riskBadges(line)}</td>
+    <td class="px-2 font-medium text-slate-800 cursor-pointer" title="${esc(line.name || '')}" data-open-detail>${esc(line.name)}</td>
+    <td class="px-2 text-slate-500 truncate cursor-pointer" title="${esc(line.feature || '')}" data-open-detail>${esc((line.feature || '').slice(0, 60))}</td>
+    <td class="px-2 text-center">${esc(line.unit || '')}</td>
+    <td class="px-2 text-right tabular-nums"><input type="number" step="0.01" class="w-20 text-right bg-transparent border-0 px-0 py-1" value="${line.qty || 0}" /></td>
+    <td class="px-2 text-right tabular-nums"><input type="number" step="0.01" class="w-24 text-right bg-transparent border-0 px-0 py-1 ${hasMissingPrice(line.unitPrice) ? 'text-amber-700 font-semibold' : ''}" value="${line.unitPrice || 0}" title="${hasMissingPrice(line.unitPrice) ? '综合单价为空或为 0，合价会按 0 计' : ''}" /></td>
+    <td class="px-2 text-right"><input type="number" step="0.001" class="w-14 text-right bg-transparent border-0 px-0 py-1" value="${line.factor || 1}" /></td>
+    <td class="px-2 text-right tabular-nums font-semibold ${hasMissingPrice(line.unitPrice) ? 'text-amber-700' : 'text-slate-900'}" data-amount>${money(line.amount || 0)}</td>
+    <td class="px-2 text-right"><button class="text-red-600 hover:underline text-xs" data-del="${esc(line.id)}">删除</button></td>
+  </tr>`;
+}
+
+function sourceSectionKey(line = {}) {
+  if (!line.sourceSectionName && !line.sourceSectionCode) return '';
+  return [line.sourceUnitName, line.sourceSectionCode, line.sourceSectionName].map(value => String(value || '').trim()).join(' · ');
+}
+
 function boqMobileCard(line, index) {
   const missing = hasMissingPrice(line.unitPrice);
   return `<article class="boq-mobile-card ${line.id === boqState.activeId ? 'bg-teal-50/50' : 'bg-white'}">
     <div class="flex items-start gap-3"><input type="checkbox" class="mt-1 h-5 w-5 shrink-0" aria-label="选择${esc(line.name || '清单项')}" data-mobile-boq-select="${esc(line.id)}" ${boqState.selectedIds.has(line.id) ? 'checked' : ''} />
-      <button type="button" class="min-w-0 flex-1 text-left" data-mobile-boq-open="${esc(line.id)}"><div class="flex items-center gap-2"><span class="text-xs text-slate-400">${index}</span>${riskBadges(line)}</div><div class="mt-1 truncate font-semibold text-slate-900">${esc(line.name || '未命名清单')}</div><div class="mt-1 truncate text-xs text-slate-500">${esc(line.code || '未编码')} · ${esc(line.feature || '未填写项目特征')}</div><div class="mt-3 grid grid-cols-3 gap-2 text-xs"><span><b class="block text-slate-400 font-normal">工程量</b><span class="mt-0.5 block tabular-nums text-slate-800">${line.qty || 0} ${esc(line.unit || '')}</span></span><span><b class="block text-slate-400 font-normal">综合单价</b><span class="mt-0.5 block tabular-nums ${missing ? 'text-amber-700' : 'text-slate-800'}">${missing ? '待补价' : money(line.unitPrice)}</span></span><span class="text-right"><b class="block text-slate-400 font-normal">合价</b><span class="mt-0.5 block tabular-nums font-semibold text-slate-900">${money(line.amount || 0)}</span></span></div></button><span class="material-symbols-outlined mt-8 text-slate-400" aria-hidden="true">chevron_right</span>
+      <button type="button" class="min-w-0 flex-1 text-left" data-mobile-boq-open="${esc(line.id)}"><div class="flex items-center gap-2"><span class="text-xs text-slate-400">${index}</span>${line.sourceSectionName ? `<span class="badge badge-gray">${esc(line.sourceSectionName)}</span>` : ''}${riskBadges(line)}</div><div class="mt-1 truncate font-semibold text-slate-900">${esc(line.name || '未命名清单')}</div><div class="mt-1 truncate text-xs text-slate-500">${esc(line.code || '未编码')} · ${esc(line.feature || '未填写项目特征')}</div><div class="mt-3 grid grid-cols-3 gap-2 text-xs"><span><b class="block text-slate-400 font-normal">工程量</b><span class="mt-0.5 block tabular-nums text-slate-800">${line.qty || 0} ${esc(line.unit || '')}</span></span><span><b class="block text-slate-400 font-normal">综合单价</b><span class="mt-0.5 block tabular-nums ${missing ? 'text-amber-700' : 'text-slate-800'}">${missing ? '待补价' : money(line.unitPrice)}</span></span><span class="text-right"><b class="block text-slate-400 font-normal">合价</b><span class="mt-0.5 block tabular-nums font-semibold text-slate-900">${money(line.amount || 0)}</span></span></div></button><span class="material-symbols-outlined mt-8 text-slate-400" aria-hidden="true">chevron_right</span>
     </div>
   </article>`;
 }
@@ -370,7 +437,7 @@ function boqWorkbenchStatus(project, lines, versions, extra = {}) {
   const missing = lines.filter(line => hasMissingPrice(line.unitPrice)).length;
   const zeroQty = lines.filter(line => !(Number(line.qty) > 0)).length;
   const factorRisk = lines.filter(line => Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8).length;
-  const unmatched = lines.filter(line => !line.quotaItemId).length;
+  const unmatched = lines.filter(line => line.lineType !== 'other_charge' && !line.quotaItemId).length;
   const priced = lines.length - missing;
   const completion = lines.length ? Math.round(priced / lines.length * 100) : 0;
   const totalCost = lines.reduce((s, b) => s + Number(b.amount || 0), 0);
@@ -636,6 +703,7 @@ function boqToolbar(selectedCount) {
       </select>
       ${toolbarGroup('数据', [
         ['btnAdd', 'add', '添加清单', 'primary'],
+        ['btnAiDraft', 'auto_awesome', 'AI 生成草稿', 'ai'],
         ['btnAddLibrary', 'library_add', '从清单库', 'plain'],
         ['btnImportBOQ', 'upload_file', '导入 Excel', 'plain'],
       ])}
@@ -662,6 +730,7 @@ function toolbarGroup(label, buttons) {
     <span class="px-1.5 text-[11px] font-medium text-slate-500">${esc(label)}</span>
     ${buttons.map(([id, icon, text, kind]) => {
       const cls = kind === 'primary' ? 'brand-bg text-white'
+        : kind === 'ai' ? 'border border-teal-300 bg-teal-50 text-teal-800 hover:bg-teal-100'
         : kind === 'warn' ? 'border border-amber-300 bg-white text-amber-700 hover:bg-amber-50'
           : kind === 'disabled' ? 'border border-slate-300 bg-white text-slate-400 opacity-50'
             : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
@@ -818,7 +887,7 @@ function lineRisks(line) {
   if (hasMissingPrice(line.unitPrice)) risks.push({ id: 'missingPrice', label: '缺单价', cls: 'badge-yellow' });
   if (!(Number(line.qty) > 0)) risks.push({ id: 'zeroQty', label: '工程量0', cls: 'badge-gray' });
   if (Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8) risks.push({ id: 'factorRisk', label: '系数异常', cls: 'badge-red' });
-  if (!line.quotaItemId) risks.push({ id: 'unmatchedQuota', label: '未匹配', cls: 'badge-gray' });
+  if (line.lineType !== 'other_charge' && !line.quotaItemId) risks.push({ id: 'unmatchedQuota', label: '未匹配', cls: 'badge-gray' });
   if (line.quotaReferenceStatus === 'missing') risks.push({ id: 'invalidQuotaReference', label: '定额已删除', cls: 'badge-red' });
   const resourceView = buildBoqResourceViewModel(line);
   resourceView.badges.forEach(label => risks.push({
@@ -871,7 +940,7 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
         </div>
         <div class="shrink-0 text-right"><div class="text-[11px] text-slate-500">当前合价</div><div class="font-semibold tabular-nums text-slate-900">${line ? money(line.amount || 0) : '-'}</div></div>
       </div>
-      ${line ? `<div class="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1" role="tablist" aria-label="清单明细分类"><button data-detail-tab="content" class="${tabClass('content')}" role="tab" aria-selected="${activeTab === 'content'}" tabindex="${activeTab === 'content' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">description</span><span class="truncate">清单内容</span></button><button data-detail-tab="pricing" class="${tabClass('pricing')}" role="tab" aria-selected="${activeTab === 'pricing'}" tabindex="${activeTab === 'pricing' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">payments</span><span class="truncate">计价归属</span></button><button data-detail-tab="relation" class="${tabClass('relation')}" role="tab" aria-selected="${activeTab === 'relation'}" tabindex="${activeTab === 'relation' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">link</span><span class="truncate">定额关联</span></button></div>` : ''}
+      ${line ? `<div class="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1" role="tablist" aria-label="清单明细分类"><button data-detail-tab="content" class="${tabClass('content')}" role="tab" aria-selected="${activeTab === 'content'}" tabindex="${activeTab === 'content' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">description</span><span class="truncate">清单内容</span></button><button data-detail-tab="pricing" class="${tabClass('pricing')}" role="tab" aria-selected="${activeTab === 'pricing'}" tabindex="${activeTab === 'pricing' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">payments</span><span class="truncate">计价归属</span></button><button data-detail-tab="relation" class="${tabClass('relation')}" role="tab" aria-selected="${activeTab === 'relation'}" tabindex="${activeTab === 'relation' ? 0 : -1}"><span class="material-symbols-outlined text-[15px]" aria-hidden="true">${line.lineType === 'other_charge' ? 'account_balance_wallet' : 'link'}</span><span class="truncate">${line.lineType === 'other_charge' ? '费用口径' : '定额关联'}</span></button></div>` : ''}
     </div>`;
   if (!line) {
     return `<div class="h-full flex flex-col bg-white">
@@ -911,6 +980,7 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
               <input id="detailUnit" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(line.unit || '')}" />
             </label>
             ${librarySource ? `<div class="col-span-2 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800"><div class="font-medium">来自清单库</div><div class="mt-1 truncate" title="${esc(librarySource.name || '')}">${esc(librarySource.code || '未编码')} · ${esc(librarySource.name || '')}</div></div>` : ''}
+            ${line.sourceSectionName ? `<div class="col-span-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><div class="font-medium text-slate-800">原始清单层级</div><div class="mt-1">${esc([line.sourceUnitName, [line.sourceSectionCode, line.sourceSectionName].filter(Boolean).join(' ')].filter(Boolean).join(' / '))}</div><div class="mt-1 text-slate-400">${esc(line.sourceSheetName || 'Excel')} · 原始第 ${Number(line.sourceRowNumber || 0) || '-'} 行</div></div>` : ''}
             <label class="col-span-2 block text-xs font-medium text-slate-500">结构分组
               <select id="detailStructureGroup" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">
                 ${structureGroups([line]).map(g => `<option value="${esc(g.id)}" ${classifyLineGroup(line) === g.id ? 'selected' : ''}>${esc(g.label)}</option>`).join('')}
@@ -950,10 +1020,7 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
           </div>
         </section>
         <section data-detail-pane="relation" class="detail-pane ${activeTab === 'relation' ? '' : 'hidden'} bg-white border border-slate-200 rounded-xl p-4">
-          <div class="mb-3 flex items-center justify-between"><div><div class="font-medium text-slate-800">定额与资源关联</div><div class="mt-1 text-xs text-slate-500">项目内保存独立用量和价格快照，不随定额库自动变价。</div></div>${quotaRelations.length || line.quotaItemId ? `<span class="badge badge-green">${quotaRelations.length || 1} 条定额</span>` : '<span class="badge badge-yellow">未匹配</span>'}</div>
-          ${projectQuotaRelationsHtml(quotaRelations)}
-          ${renderBoqResourceReference(buildBoqResourceViewModel(line))}
-          <div class="mt-3 grid grid-cols-1 gap-2">${recommendations.length ? recommendations.map(item => `<button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50"><div class="truncate font-medium text-slate-800">${esc(item.name || '')}</div><div class="mt-1 flex justify-between text-xs text-slate-500"><span>${esc(item.unit || '-')} · 匹配 ${Number(item.score || 0).toFixed(1)}</span><span>${hasMissingPrice(item.priceTotal) ? '缺单价' : money(item.priceTotal)}</span></div></button>`).join('') : '<div class="rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}</div>
+          ${line.lineType === 'other_charge' ? `<div class="rounded border border-teal-200 bg-teal-50 px-3 py-3 text-sm text-teal-800"><div class="font-medium">其他项目费无需匹配定额</div><div class="mt-1 text-xs">该行以 Excel 汇总金额为报价依据，内部成本可在“成本测算”中单独复核。</div></div>` : `<div class="mb-3 flex items-center justify-between"><div><div class="font-medium text-slate-800">定额与资源关联</div><div class="mt-1 text-xs text-slate-500">项目内保存独立用量和价格快照，不随定额库自动变价。</div></div>${quotaRelations.length || line.quotaItemId ? `<span class="badge badge-green">${quotaRelations.length || 1} 条定额</span>` : '<span class="badge badge-yellow">未匹配</span>'}</div>${projectQuotaRelationsHtml(quotaRelations)}${renderBoqResourceReference(buildBoqResourceViewModel(line))}<div class="mt-3 grid grid-cols-1 gap-2">${recommendations.length ? recommendations.map(item => `<button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50"><div class="truncate font-medium text-slate-800">${esc(item.name || '')}</div><div class="mt-1 flex justify-between text-xs text-slate-500"><span>${esc(item.unit || '-')} · 匹配 ${Number(item.score || 0).toFixed(1)}</span><span>${hasMissingPrice(item.priceTotal) ? '缺单价' : money(item.priceTotal)}</span></div></button>`).join('') : '<div class="rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}</div>`}
         </section>
       </div>
     </div>
@@ -1051,6 +1118,80 @@ async function saveDetail(id) {
   });
   toast('清单明细已保存', 'success');
   render();
+}
+
+function openAiDraftDialog(project) {
+  if (project?.status === 'archived') {
+    toast('该项目已收录为案例，当前为只读状态。', 'error');
+    return;
+  }
+  const aiConfigured = Boolean(getAIConfig().api_key);
+  openModal('AI 生成清单草稿', `
+    <div class="space-y-4 text-sm">
+      <div class="rounded-lg border border-teal-200 bg-teal-50 p-3 text-teal-900">
+        <div class="font-medium">从本地定额库筛选，不凭空编价</div>
+        <div class="mt-1 text-xs leading-5 text-teal-800">AI 只生成候选清单，工程量默认为 0；预览勾选并确认后才写入项目。</div>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="rounded border border-slate-200 bg-slate-50 p-3"><div class="text-xs text-slate-500">当前项目</div><div class="mt-1 font-medium text-slate-900">${esc(project.name || '未命名项目')}</div><div class="mt-1 text-xs text-slate-500">${esc([project.type, project.structure, project.process].filter(Boolean).join(' · ') || '尚未填写项目特征')}</div></div>
+        <div class="rounded border border-slate-200 bg-slate-50 p-3"><div class="text-xs text-slate-500">生成边界</div><div class="mt-1 font-medium text-slate-900">本地定额候选 + 人工确认</div><div class="mt-1 text-xs text-slate-500">不自动生成工程量，不直接覆盖现有清单。</div></div>
+      </div>
+      <label class="block text-xs font-medium text-slate-600">建设内容 / 清单范围 <span class="text-red-500">*</span>
+        <textarea id="aiDraftBrief" rows="5" maxlength="1200" class="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm leading-6" placeholder="例如：填写主要建设内容、结构形式、专业范围和需要纳入报价的工作。"></textarea>
+      </label>
+      ${aiConfigured ? '<label class="flex items-start gap-2 rounded border border-slate-200 p-3 text-xs text-slate-600"><input id="aiDraftRemote" type="checkbox" class="mt-0.5" /><span><b class="block text-slate-800">使用已配置的远端模型增强</b><span class="mt-1 block">将发送去标识化的项目概况、上述描述和候选定额摘要。</span></span></label>' : '<div class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">未配置远端模型，本次使用本地匹配生成草稿。</div>'}
+    </div>
+  `, `<button onclick="window.__modalClose()" class="h-9 px-3 border border-slate-300 bg-white text-sm">取消</button><button id="aiDraftGenerate" class="h-9 px-4 brand-bg text-white text-sm">AI 生成草稿</button>`);
+  document.getElementById('aiDraftBrief').focus();
+  document.getElementById('aiDraftGenerate').onclick = async event => {
+    const brief = document.getElementById('aiDraftBrief').value.trim();
+    if (!brief) { toast('请先填写建设内容或清单范围', 'error'); return; }
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = '正在生成…';
+    try {
+      const result = await suggestBoqDraft(project, brief, { useRemote: Boolean(document.getElementById('aiDraftRemote')?.checked) });
+      showAiDraftPreview(project, result);
+    } catch (error) {
+      toast(error.message || '清单草稿生成失败', 'error');
+      button.disabled = false;
+      button.textContent = 'AI 生成草稿';
+    }
+  };
+}
+
+function showAiDraftPreview(project, result) {
+  const rows = result.suggestions || [];
+  openModal('AI 清单草稿预览', `
+    <div class="space-y-3 text-sm">
+      <div class="rounded border border-teal-200 bg-teal-50 px-3 py-2 text-teal-900"><div class="font-medium">${esc(result.summary || '已生成清单草稿')}</div><div class="mt-1 text-xs">来源：${result.source === 'remote' ? '远端 AI + 本地定额库' : '本地定额匹配'}。请勾选需要的项目并填写工程量。</div></div>
+      ${rows.length ? `<div class="max-h-[480px] overflow-auto rounded border border-slate-200"><table class="w-full min-w-[820px] text-sm"><thead class="sticky top-0 bg-slate-50 text-left text-xs text-slate-500"><tr><th class="p-2 w-12">选择</th><th class="p-2">清单名称</th><th class="p-2">项目特征</th><th class="p-2 w-20">单位</th><th class="p-2 w-28 text-right">工程量</th><th class="p-2 w-28 text-right">参考单价</th><th class="p-2 w-44">匹配依据</th></tr></thead><tbody>${rows.map((row, index) => `<tr class="border-t"><td class="p-2"><input type="checkbox" data-ai-draft-check="${index}" ${row.apply ? 'checked' : ''} /></td><td class="p-2 font-medium text-slate-900">${esc(row.name)}</td><td class="p-2 text-xs text-slate-500">${esc(row.feature || '-')}</td><td class="p-2">${esc(row.unit || '-')}</td><td class="p-2"><input data-ai-draft-qty="${index}" type="number" min="0" step="0.001" value="0" class="h-8 w-full rounded border border-slate-300 px-2 text-right tabular-nums" aria-label="${esc(row.name)}工程量" /></td><td class="p-2 text-right tabular-nums">${money(row.unitPrice || 0)}</td><td class="p-2 text-xs text-slate-500">${esc(row.reason || '')}<span class="ml-1 badge ${confidenceBadgeClass(row.confidence)}">${confidenceLabel(row.confidence)}</span></td></tr>`).join('')}</tbody></table></div>` : '<div class="rounded border border-dashed border-slate-300 p-8 text-center text-slate-500">未找到匹配草稿。请补充建设内容，或先完善本地定额库。</div>'}
+      ${(result.warnings || []).length ? `<div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">${result.warnings.map(esc).join('<br>')}</div>` : ''}
+    </div>
+  `, `<button onclick="window.__modalClose()" class="h-9 px-3 border border-slate-300 bg-white text-sm">取消</button>${rows.length ? '<button id="aiDraftApply" class="h-9 px-4 brand-bg text-white text-sm">确认写入选中清单</button>' : ''}`);
+  document.getElementById('aiDraftApply')?.addEventListener('click', async event => {
+    const selected = [];
+    document.querySelectorAll('[data-ai-draft-check]:checked').forEach(input => {
+      const index = Number(input.dataset.aiDraftCheck);
+      const row = rows[index];
+      if (!row) return;
+      selected.push({ code: row.code, name: row.name, feature: row.feature, unit: row.unit, qty: Number(document.querySelector(`[data-ai-draft-qty="${index}"]`)?.value || 0), factor: 1, unitPrice: row.unitPrice, quotaItemId: row.quotaId, aiDraftSource: result.source, aiDraftCreatedAt: new Date().toISOString() });
+    });
+    if (!selected.length) { toast('请至少勾选一条清单', 'error'); return; }
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = '写入中…';
+    try {
+      const imported = await boqService.importLines(project.id, selected, { mode: 'append' });
+      closeModal();
+      toast(`已写入 ${imported.success} 条 AI 清单草稿，请复核工程量和价格`, 'success');
+      render();
+    } catch (error) {
+      toast(error.message || '清单草稿写入失败', 'error');
+      button.disabled = false;
+      button.textContent = '确认写入选中清单';
+    }
+  });
 }
 
 async function showAiLineAssist(line, project) {

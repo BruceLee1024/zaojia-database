@@ -1,5 +1,5 @@
-import { buildImportColumnMapping } from './importMappingService.js?v=6.15';
-import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.15';
+import { buildImportColumnMapping } from './importMappingService.js?v=6.15&build=20260814';
+import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.15&build=20260814';
 import { boqService } from './boqService.js?v=6.15';
 import { boqLibraryService } from './boqLibraryService.js?v=6.15';
 import { quotaService } from './quotaService.js?v=6.15';
@@ -18,8 +18,10 @@ export function analyzeImport(regions = [], {
   const outputRows = [];
   const issues = [];
   const skippedRows = [];
+  const hierarchyRows = [];
 
   regions.filter(region => selected.has(region.id)).forEach(region => {
+    const regionKind = detectProjectBoqRegionKind(region, targetType);
     const automatic = buildImportColumnMapping(region.columns, region.rows, targetType);
     const configured = mappings[region.signature] || mappings[region.id] || {};
     const mapping = { ...automatic.mapping, ...configured };
@@ -31,6 +33,12 @@ export function analyzeImport(regions = [], {
       fixedValue: regionFixed[field.key] ?? '',
     }]));
     const inheritedContext = {};
+    const hierarchyContext = {
+      unitName: detectSourceUnitName(region),
+      sectionCode: '',
+      sectionName: '',
+      sectionRowNumber: null,
+    };
     const orderedRows = [...region.rows, ...region.skippedRows].sort((a, b) => a.sourceRow - b.sourceRow);
     orderedRows.forEach(sourceRow => {
       schema.fields.filter(field => field.inheritContext).forEach(field => {
@@ -38,16 +46,54 @@ export function analyzeImport(regions = [], {
         const raw = source ? sourceRow.values[source] : '';
         if (raw !== '' && raw !== null && raw !== undefined) inheritedContext[field.key] = raw;
       });
+      if (sourceRow.kind === 'section') {
+        const section = readSourceSection(sourceRow, fieldState);
+        if (section.name) {
+          hierarchyContext.sectionCode = section.code;
+          hierarchyContext.sectionName = section.name;
+          hierarchyContext.sectionRowNumber = sourceRow.sourceRowNumber;
+          hierarchyRows.push({
+            kind: 'section', regionId: region.id, sheetName: region.sheetName,
+            sourceRowNumber: sourceRow.sourceRowNumber, unitName: hierarchyContext.unitName, ...section,
+          });
+        }
+        return;
+      }
+      if (sourceRow.kind === 'subtotal') {
+        hierarchyRows.push({
+          kind: 'subtotal', regionId: region.id, sheetName: region.sheetName,
+          sourceRowNumber: sourceRow.sourceRowNumber, unitName: hierarchyContext.unitName,
+          sectionCode: hierarchyContext.sectionCode, sectionName: hierarchyContext.sectionName,
+          sourceAmount: readMappedValue(sourceRow, fieldState.amount),
+        });
+        return;
+      }
       if (sourceRow.kind !== 'detail') return;
       const values = {};
+      const provided = {};
       schema.fields.forEach(field => {
         const state = fieldState[field.key];
         let raw = state.sourceType === 'fixed' ? state.fixedValue : state.source ? sourceRow.values[state.source] : '';
         if (field.inheritContext && (raw === '' || raw === null || raw === undefined)) raw = inheritedContext[field.key] ?? '';
+        provided[field.key] = raw !== '' && raw !== null && raw !== undefined;
         values[field.key] = normalizeImportValue(raw, field.kind);
       });
-      const normalized = normalizeTargetRow(values, targetType, amountRule);
-      const rowIssues = validateTargetRow(normalized, schema, sourceRow);
+      const normalized = normalizeTargetRow(values, targetType, amountRule, { regionKind, provided });
+      if (targetType === 'project_boq') {
+        const sectionCode = hierarchyContext.sectionCode || normalized.sourceSectionCode || '';
+        const sectionName = hierarchyContext.sectionName || normalized.sourceSectionName || '';
+        Object.assign(normalized, {
+          sourceSheetName: region.sheetName || '',
+          sourceDocumentTitle: region.title || '',
+          sourceUnitName: hierarchyContext.unitName,
+          sourceSectionCode: sectionCode,
+          sourceSectionName: sectionName,
+          sourceSectionPath: [hierarchyContext.unitName, sectionName].filter(Boolean),
+          sourceSectionRowNumber: hierarchyContext.sectionRowNumber,
+          sourceRowNumber: sourceRow.sourceRowNumber,
+        });
+      }
+      const rowIssues = validateTargetRow(normalized, schema, sourceRow, { targetType, region, regionKind });
       const record = {
         id: `${region.id}:R${sourceRow.sourceRowNumber}`,
         targetType,
@@ -64,7 +110,7 @@ export function analyzeImport(regions = [], {
       issues.push(...rowIssues.map(issue => ({ ...issue, rowId: record.id, sheetName: region.sheetName, sourceRowNumber: sourceRow.sourceRowNumber })));
     });
     skippedRows.push(...region.skippedRows.map(row => ({ ...row, regionId: region.id, sheetName: region.sheetName })));
-    analyzedRegions.push({ ...region, mapping, fieldState });
+    analyzedRegions.push({ ...region, mapping, fieldState, regionKind });
   });
   return {
     targetType,
@@ -72,6 +118,7 @@ export function analyzeImport(regions = [], {
     amountRule,
     regions: analyzedRegions,
     rows: outputRows,
+    hierarchyRows,
     skippedRows,
     issues,
     counts: {
@@ -163,7 +210,7 @@ export function mergeCommitRows(previewRows = [], domainResult = {}, targetType 
   });
 }
 
-function normalizeTargetRow(values, targetType, amountRule) {
+function normalizeTargetRow(values, targetType, amountRule, context = {}) {
   if (targetType === 'boq_quota_bundle') {
     return {
       ...values, layer: values.layer || '', rowKind: normalizeBundleLayer(values.layer), qty: Number(values.qty || 0),
@@ -173,6 +220,16 @@ function normalizeTargetRow(values, targetType, amountRule) {
   }
   if (targetType === 'project_boq') {
     const split = splitNameFeature(values.name, values.feature);
+    if (context.regionKind === 'other_charge_summary') {
+      const sourceAmount = Number(values.amount || 0);
+      return {
+        code: values.code || '', name: split.name, feature: split.feature, unit: '项', qty: 1, factor: 1,
+        unitPrice: sourceAmount, amount: sourceAmount, priceMissing: !(sourceAmount > 0),
+        lineType: 'other_charge', sourceTableKind: 'other_charge_summary',
+        chargeType: classifyOtherCharge(split.name), sourceAmountProvided: Boolean(context.provided?.amount),
+        process: values.process || '', structureGroup: 'other', sourceSectionName: '其他项目费',
+      };
+    }
     const qty = Number(values.qty || 0);
     const sourcePrice = Number(values.unitPrice || 0);
     const sourceAmount = Number(values.amount || 0);
@@ -180,6 +237,8 @@ function normalizeTargetRow(values, targetType, amountRule) {
     return {
       code: values.code || '', name: split.name, feature: split.feature, unit: values.unit || '', qty, factor: 1, unitPrice,
       amount: amountRule === 'sourceAmount' && sourceAmount ? sourceAmount : calculateAmount(qty, unitPrice, 1),
+      laborAmount: Number(values.laborAmount || 0), machineAmount: Number(values.machineAmount || 0),
+      provisionalAmount: Number(values.provisionalAmount || 0),
       priceMissing: hasMissingPrice(unitPrice), process: values.process || '', structureGroup: values.costCategory || categoryGuess(split.name),
     };
   }
@@ -193,18 +252,46 @@ function normalizeTargetRow(values, targetType, amountRule) {
   return { ...values, resourceType: targetType };
 }
 
-function validateTargetRow(row, schema, sourceRow) {
+function validateTargetRow(row, schema, sourceRow, context = {}) {
   const issues = [];
-  schema.fields.filter(field => field.required).forEach(field => {
+  schema.fields.filter(field => isImportFieldRequired(field, context.targetType, context.region)).forEach(field => {
     if (row[field.key] === '' || row[field.key] === null || row[field.key] === undefined || ((field.kind === 'number' || field.kind === 'money') && !Number.isFinite(Number(row[field.key])))) {
       issues.push({ code: `missing_${field.key}`, severity: 'error', message: `缺少必填字段「${field.label}」` });
     }
   });
-  if (schema.key === 'project_boq' && !(row.qty > 0)) issues.push({ code: 'invalid_qty', severity: 'error', message: '工程量必须大于 0' });
-  if (schema.key === 'project_boq' && row.priceMissing) issues.push({ code: 'missing_price', severity: 'warning', message: '综合单价为空或 0' });
+  if (context.regionKind === 'other_charge_summary' && !row.sourceAmountProvided) issues.push({ code: 'missing_amount', severity: 'error', message: '汇总费用缺少金额' });
+  if (schema.key === 'project_boq' && context.regionKind !== 'other_charge_summary' && !(row.qty > 0)) issues.push({ code: 'invalid_qty', severity: 'error', message: '工程量必须大于 0' });
+  if (schema.key === 'project_boq' && context.regionKind !== 'other_charge_summary' && row.priceMissing) issues.push({ code: 'missing_price', severity: 'warning', message: '综合单价为空或 0' });
   if (schema.key === 'boq_quota_bundle' && row.rowKind === 'structure') issues.push({ code: 'unknown_layer', severity: 'error', message: '层级必须是“清单”或“定额”' });
   if (sourceRow.kind !== 'detail') issues.push({ code: 'not_detail', severity: 'error', message: '该行不是有效明细' });
   return issues;
+}
+
+export function detectProjectBoqRegionKind(region = {}, targetType = 'project_boq') {
+  if (targetType !== 'project_boq') return 'detail_boq';
+  const headerText = [
+    region.sheetName, region.title,
+    ...(region.columns || []).flatMap(column => [column.displayName, column.leaf, ...(column.path || [])]),
+    ...(region.matrix || []).slice(0, Math.max(0, Number(region.dataStart || 0))).flat(),
+  ].map(value => String(value || '').replace(/\s+/g, '')).filter(Boolean).join('|');
+  if (/(?:其他项目(?:清单|费).*(?:计价)?汇总|暂列金额.*计日工.*总承包服务费)/.test(headerText)) return 'other_charge_summary';
+  return 'detail_boq';
+}
+
+export function isImportFieldRequired(field = {}, targetType = '', region = {}) {
+  if (targetType === 'project_boq' && detectProjectBoqRegionKind(region, targetType) === 'other_charge_summary') {
+    return field.key === 'name' || field.key === 'amount';
+  }
+  return Boolean(field.required);
+}
+
+function classifyOtherCharge(name = '') {
+  const text = String(name || '');
+  if (/暂列金额/.test(text)) return 'provisional_sum';
+  if (/专业工程暂估|暂估价/.test(text)) return 'professional_provisional';
+  if (/计日工/.test(text)) return 'daywork';
+  if (/总承包服务/.test(text)) return 'main_contractor_service';
+  return 'other';
 }
 
 function splitNameFeature(name, feature) {
@@ -212,6 +299,32 @@ function splitNameFeature(name, feature) {
   const featureText = String(feature || '').replace(/\r\n?/g, '\n').trim();
   const lines = nameText.split('\n').map(value => value.trim()).filter(Boolean);
   return { name: lines[0] || '', feature: featureText || lines.slice(1).join('\n') };
+}
+
+function detectSourceUnitName(region = {}) {
+  const values = (region.matrix || []).slice(0, Math.max(0, Number(region.dataStart || 0)))
+    .flatMap(row => Array.isArray(row) ? row : [])
+    .map(value => String(value ?? '').trim())
+    .filter(Boolean);
+  for (const value of values) {
+    const match = value.match(/(?:工程名称|单位工程名称)\s*[:：]\s*(.+)$/);
+    if (match?.[1]) return match[1].trim();
+  }
+  return '';
+}
+
+function readSourceSection(sourceRow, fieldState) {
+  const mappedCode = readMappedValue(sourceRow, fieldState.code);
+  const mappedName = readMappedValue(sourceRow, fieldState.name);
+  const fallback = (sourceRow.raw || []).map(value => String(value ?? '').trim()).filter(Boolean);
+  const code = String(mappedCode || (fallback.length > 1 && /^\w[\w.-]*$/.test(fallback[0]) ? fallback[0] : '')).trim();
+  const name = String(mappedName || fallback.find(value => value !== code) || '').trim();
+  return { code, name };
+}
+
+function readMappedValue(sourceRow, field = {}) {
+  if (!field?.source) return '';
+  return sourceRow.values?.[field.source] ?? '';
 }
 
 function resourceRowForDomain(row) {

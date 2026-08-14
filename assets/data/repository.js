@@ -98,6 +98,7 @@ export const projectRepo = {
 export const boqRepo = {
   all: () => dbGetAll(STORES.project_boq),
   byProject: pid => dbQuery(STORES.project_boq, b => b.projectId === pid),
+  findById: id => dbFind(STORES.project_boq, id),
   upsert: obj => dbAdd(STORES.project_boq, obj),
   update: (id, patch) => dbUpdate(STORES.project_boq, id, patch),
   remove: id => dbRemove(STORES.project_boq, id),

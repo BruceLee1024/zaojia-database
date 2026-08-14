@@ -15,10 +15,68 @@ export function projectDims(p = {}) {
     scale: p.scale || UNSET,
     process: p.process || p.processType || UNSET,
     structure: p.structure || UNSET,
-    region: p.region || UNSET,
+    region: projectRegionLabel(p),
     year: String(p.priceYear || p.baseYear || (p.archivedAt ? new Date(p.archivedAt).getFullYear() : '') || UNSET),
     stage: p.stage || UNSET,
   };
+}
+
+export function projectRegionLabel(project = {}, level = 'full') {
+  const pricing = project.pricingRegion || {};
+  if (level === 'province') return pricing.province || project.region || UNSET;
+  if (level === 'city') return pricing.city || pricing.province || project.region || UNSET;
+  if (level === 'district') return pricing.district || pricing.city || pricing.province || project.region || UNSET;
+  return [pricing.province, pricing.city, pricing.district].filter(Boolean).join(' · ') || project.region || UNSET;
+}
+
+export function aggregateReferenceProjects(projects = [], facts = [], dimension = 'type') {
+  const projectMap = new Map(projects.filter(project => project.status === 'archived').map(project => [project.id, project]));
+  const latestFacts = new Map();
+  facts
+    .filter(fact => fact.status === 'formal' && fact.sourceType === 'archived_project' && fact.factType === 'project_cost' && projectMap.has(fact.projectId))
+    .sort((a, b) => String(a.updatedAt || a.createdAt || '').localeCompare(String(b.updatedAt || b.createdAt || '')))
+    .forEach(fact => latestFacts.set(fact.projectId, fact));
+  const rows = [...latestFacts.entries()].map(([projectId, fact]) => {
+    const project = projectMap.get(projectId);
+    const totalCost = Number(fact.payload?.totalCost || 0);
+    const area = Number(project.area || project.buildingArea || 0);
+    const capacity = Number(project.dailyCapacity || 0);
+    return {
+      project,
+      fact,
+      totalCost,
+      areaCost: area > 0 ? totalCost / area : null,
+      waterCost: capacity > 0 ? totalCost / (capacity * 10000) : null,
+      dimension: referenceDimensionValue(project, dimension),
+    };
+  }).filter(row => row.totalCost > 0);
+  const grouped = new Map();
+  rows.forEach(row => {
+    const key = row.dimension || UNSET;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  });
+  return [...grouped.entries()].map(([key, items]) => {
+    const total = stats(items.map(item => item.totalCost));
+    const areaValues = items.map(item => item.areaCost).filter(Number.isFinite);
+    const waterValues = items.map(item => item.waterCost).filter(Number.isFinite);
+    return {
+      key,
+      count: items.length,
+      total,
+      area: stats(areaValues),
+      water: stats(waterValues),
+      areaCoverage: items.length ? areaValues.length / items.length : 0,
+      waterCoverage: items.length ? waterValues.length / items.length : 0,
+      projectIds: items.map(item => item.project.id),
+    };
+  }).sort((a, b) => b.count - a.count || Number(b.total?.median || 0) - Number(a.total?.median || 0));
+}
+
+function referenceDimensionValue(project, dimension) {
+  if (dimension === 'province' || dimension === 'city' || dimension === 'district') return projectRegionLabel(project, dimension);
+  if (dimension === 'year') return projectDims(project).year;
+  return projectDims(project)[dimension] || UNSET;
 }
 
 function bucketKey(dims, mode = 'core') {

@@ -94,7 +94,7 @@ export const dataEngineService = {
     const issues = [];
     const missingPrice = lines.filter(line => hasMissingPrice(line.unitPrice));
     const zeroQty = lines.filter(line => !(Number(line.qty) > 0));
-    const unmatchedQuota = lines.filter(line => !line.quotaItemId);
+    const unmatchedQuota = lines.filter(line => line.lineType !== 'other_charge' && !line.quotaItemId);
     const duplicates = lines.filter(line => duplicateKeys.get([line.code, line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|')) > 1);
     if (project && !(Number(project.totalCost) > 0)) issues.push({ type: 'zero_total', severity: 'high', message: '项目总造价为 0，不能作为高可信样本' });
     if (missingPrice.length) issues.push({ type: 'missing_price', severity: 'high', count: missingPrice.length, message: `${missingPrice.length} 条清单缺少综合单价` });
@@ -322,11 +322,11 @@ function qualityForLine(line) {
   const issues = [];
   if (hasMissingPrice(line.unitPrice)) issues.push('missing_price');
   if (!(Number(line.qty) > 0)) issues.push('zero_qty');
-  if (!line.quotaItemId) issues.push('unmatched_quota');
+  if (line.lineType !== 'other_charge' && !line.quotaItemId) issues.push('unmatched_quota');
   const score = scoreQuality(1, {
     missingPrice: hasMissingPrice(line.unitPrice) ? 1 : 0,
     zeroQty: !(Number(line.qty) > 0) ? 1 : 0,
-    unmatchedQuota: line.quotaItemId ? 0 : 1,
+    unmatchedQuota: line.lineType === 'other_charge' || line.quotaItemId ? 0 : 1,
     duplicateLines: 0,
   });
   return {

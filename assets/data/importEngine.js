@@ -8,7 +8,7 @@ const HEADER_TERMS = [
   '金额', '专业', '工艺段', '分类', '费用分类', '备注', '价格日期', '价格来源', '税率', '品牌', '生产厂家',
 ];
 const UNIT_RE = /^(?:m|m2|m3|m²|m³|㎡|㎥|t|kg|kw|kwh|h|米|平方米|立方米|吨|千克|台|套|项|个|根|座|块|组|工日|元|%|元\/[^\s]+)$/i;
-const TOTAL_RE = /^(?:其中[:：]?)?(?:小计|合计|总计|累计|费用合计|合计金额)$/;
+const TOTAL_RE = /^(?:其中[:：]?)?(?:分部小计|分项小计|本页小计|小计|合计|总计|累计|费用合计|合计金额)$/;
 const NOTE_RE = /^(?:说明|备注|注|注意|编制说明)[:：]/;
 
 export function normalizeHeaderText(value) {
@@ -160,8 +160,15 @@ export function classifyImportRow(values = [], columns = []) {
   if (texts.length === 1 && NOTE_RE.test(texts[0])) return 'note';
   const headerMatches = texts.filter(text => isHeaderTerm(text) || matchesImportColumn(text, columns)).length;
   if (headerMatches >= Math.min(2, Math.max(1, nonEmpty.length - 1))) return 'repeated_header';
-  const numericCount = nonEmpty.filter(item => isNumeric(item.value)).length;
-  if (nonEmpty.length <= 2 && numericCount === 0 && combined.length <= 80) return 'section';
+  const numericMeasureCount = nonEmpty.filter(item => {
+    if (!isNumeric(item.value)) return false;
+    const column = columns.find(candidate => candidate.columnIndex === item.index);
+    return /(?:工程量|数量|单价|合价|金额|人工费|材料费|机械费|暂估价)/.test(
+      normalizeHeaderText([...(column?.path || []), column?.leaf || ''].join('')),
+    );
+  }).length;
+  // 分部行常以“0101 + 土石方工程”出现。编码虽由数字组成，但不是计量值。
+  if (nonEmpty.length <= 2 && numericMeasureCount === 0 && combined.length <= 80) return 'section';
   const meaningfulColumns = columns.filter(column => !/^(?:序号|编号)$/i.test(normalizeHeaderText(column.leaf)));
   const meaningfulValues = meaningfulColumns.filter(column => !isBlank(values[column.columnIndex]));
   return meaningfulValues.length ? 'detail' : 'invalid';
@@ -171,9 +178,13 @@ function findHeaderCandidates(sheet, maxDepth, schemaTerms = []) {
   const matrix = sheet.matrix || [];
   const candidates = [];
   for (let start = 0; start < matrix.length; start += 1) {
+    // “分部小计 / 合计 / 说明”属于数据区结构行，不能借用后续明细中的
+    // 表头关键词成为新数据区起点。标准计价表通常会在每个分部末尾重复出现这类行。
+    if (isLikelyBodyRow(matrix[start])) continue;
     if (!hasPossibleHeaderSignal(matrix, start, maxDepth, schemaTerms)) continue;
     for (let depth = 1; depth <= maxDepth && start + depth < matrix.length; depth += 1) {
       const end = start + depth - 1;
+      if (depth > 1 && isLikelyBodyRow(matrix[end])) break;
       const header = buildHeaderTree({ sheetName: sheet.name || '', regionId: 'candidate', matrix, merges: sheet.merges || [], headerStart: start, headerEnd: end });
       const score = scoreHeaderCandidate(matrix, header, end + 1, sheet.merges || [], schemaTerms);
       if (score < 0.45) continue;
@@ -185,7 +196,13 @@ function findHeaderCandidates(sheet, maxDepth, schemaTerms = []) {
 
 function selectHeaderCandidates(candidates) {
   if (!candidates.length) return [];
-  const ranked = [...candidates].sort((a, b) => b.score - a.score || a.headerStart - b.headerStart || a.headerEnd - b.headerEnd);
+  const strongest = Math.max(...candidates.map(candidate => candidate.score));
+  // 一旦工作表存在可靠正式表头，只保留同等级候选。项目特征长文本常包含
+  // “单位、工程量、专业”等词，但这类低分命中不应把标准清单切成多个数据区。
+  const eligible = strongest >= 0.8
+    ? candidates.filter(candidate => candidate.score >= 0.75)
+    : candidates;
+  const ranked = [...eligible].sort((a, b) => b.score - a.score || a.headerStart - b.headerStart || a.headerEnd - b.headerEnd);
   const selected = [];
   for (const candidate of ranked) {
     const conflicts = selected.some(item => rangesOverlap(candidate.headerStart, candidate.headerEnd, item.headerStart, item.headerEnd)
@@ -243,9 +260,34 @@ function detectTitleRows(grid, merges, start, end, columnCount) {
     const values = (grid[row] || []).slice(0, columnCount).filter(value => !isBlank(value));
     const normalized = [...new Set(values.map(normalizeHeaderText).filter(Boolean))];
     const signalCount = values.filter(isHeaderTerm).length;
-    if ((merge || (values.length / columnCount >= 0.7 && normalized.length === 1)) && signalCount < 2) titles.add(row);
+    const projectMetadata = normalized.length <= 2 && values.some(value => /^\s*(?:工程名称|项目名称|单位工程名称|招标人|建设单位)\s*[:：]/.test(String(value)));
+    const fullWidthMergedTitle = Boolean(merge) && normalized.length === 1;
+    if (projectMetadata || fullWidthMergedTitle
+      || ((values.length / columnCount >= 0.7 && normalized.length === 1) && signalCount < 2)) titles.add(row);
   }
   return titles;
+}
+
+function isStructuralStartRow(row = []) {
+  const texts = (Array.isArray(row) ? row : [])
+    .filter(value => !isBlank(value))
+    .map(value => String(value).trim());
+  if (!texts.length) return false;
+  return texts.some(text => TOTAL_RE.test(text.replace(/\s/g, '')))
+    || (texts.length === 1 && NOTE_RE.test(texts[0]));
+}
+
+function isLikelyBodyRow(row = []) {
+  if (isStructuralStartRow(row)) return true;
+  const values = (Array.isArray(row) ? row : []).filter(value => !isBlank(value));
+  if (values.length < 2) return false;
+  const first = String(values[0] ?? '').trim().replace(/\s/g, '');
+  const numericLikeCount = values.filter(value => {
+    const text = String(value ?? '').trim().replace(/[,，¥￥\s]/g, '');
+    return isNumeric(value) || /^(?:[a-z]{0,4}[.-]?)?\d{2,}[a-z\d.-]*$/i.test(text);
+  }).length;
+  if (values.length >= 3 && numericLikeCount >= 1) return true;
+  return values.length === 2 && numericLikeCount >= 1 && !isHeaderTerm(first) && !values.every(isHeaderTerm);
 }
 
 function hasPossibleHeaderSignal(matrix, start, maxDepth, schemaTerms = []) {

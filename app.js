@@ -1,9 +1,10 @@
 // 应用入口：路由 + 启动
-import * as dashboard from './assets/views/dashboard.js?v=6.15';
+import * as dashboard from './assets/views/dashboard.js?v=6.15&build=20260814e';
 import * as importer  from './assets/views/importer.js?v=6.15';
 import * as quota     from './assets/views/quota.js?v=6.15';
 import * as projects  from './assets/views/projects.js?v=6.15';
 import * as boq       from './assets/views/boq.js?v=6.15';
+import * as costEstimation from './assets/views/costEstimation.js?v=6.15&build=20260814f';
 import * as indicators from './assets/views/indicators.js?v=6.15';
 import * as experience from './assets/views/experience.js?v=6.15';
 import * as settings  from './assets/views/settings.js?v=6.15';
@@ -28,6 +29,7 @@ const VIEWS = [
   { id: 'boq-library', label: '我的清单库', icon: ICONS.navigation.boqLibrary, group: '我的工作台', desc: '通用清单复用' },
   { id: 'projects',   label: '我的项目',   icon: ICONS.navigation.projects, group: '我的工作台', desc: '项目资料与案例' },
   { id: 'boq',        label: '工程量清单', icon: ICONS.navigation.boq, group: '工作台', desc: '报价编制' },
+  { id: 'cost-estimation', label: '成本测算', icon: 'payments', group: '工作台', desc: '内部覆价与利润' },
   { id: 'indicators', label: '造价参考',   icon: ICONS.navigation.indicators, group: '工作台', desc: '案例与指标' },
   { id: 'experience', label: '复盘笔记',   icon: ICONS.navigation.experience, group: '个人积累', desc: '记录可复用经验' },
   { id: 'settings',   label: '数据与备份', icon: ICONS.navigation.settings, group: '个人积累', desc: '本地存储与维护' },
@@ -41,6 +43,7 @@ const state = {
 
 const renderers = {
   dashboard, importer, quota, projects, boq, indicators, experience, settings,
+  'cost-estimation': costEstimation,
   materials: resources,
   equipment: resources,
   'resource-import': {
@@ -57,7 +60,7 @@ const renderers = {
   },
   'ai-import': {
     render: async workspace => {
-      const module = await import('./assets/views/aiImportWizard.js?v=6.15');
+      const module = await import('./assets/views/aiImportWizard.js?v=6.15&build=20260814');
       return module.render(workspace);
     },
   },
@@ -136,7 +139,7 @@ function openMobileSearch() {
 async function go(view, params = {}) {
   state.currentView = view;
   state.routeParams = params || {};
-  if (view === 'boq' && params.projectId) state.currentProjectId = params.projectId;
+  if ((view === 'boq' || view === 'cost-estimation') && params.projectId) state.currentProjectId = params.projectId;
   renderNav();
   const generation = ++routeGeneration;
   return renderWorkspace(generation);

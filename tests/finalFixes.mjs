@@ -189,7 +189,7 @@ async function testAtomicResourceRefreshRace() {
 
 async function testRouteRenderersAcceptWorkspace() {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const views = ['dashboard', 'importer', 'quota', 'projects', 'boq', 'indicators', 'experience', 'settings', 'resources', 'resourceImport', 'boqLibrary', 'aiImportWizard'];
+  const views = ['dashboard', 'importer', 'quota', 'projects', 'boq', 'costEstimation', 'indicators', 'experience', 'settings', 'resources', 'resourceImport', 'boqLibrary', 'aiImportWizard'];
   for (const view of views) {
     const source = await readFile(join(root, 'assets', 'views', `${view}.js`), 'utf8');
     assert.match(source, /export async function render\(workspace\b/, `${view} must accept an isolated workspace root`);
@@ -200,6 +200,7 @@ async function testRouteRenderersAcceptWorkspace() {
     quota: [/await renderList\(workspace\)/, /scopedDom\(workspace\)/],
     projects: [/const document = scopedDom\(workspace\)/],
     boq: [/const document = scopedDom\(workspace\)/],
+    costEstimation: [/const document = scopedDom\(workspace\)/],
     indicators: [/expose\(workspace\)/, /drawCharts\(workspace\)/],
     experience: [/bindExperiencePage\(projects, document\)/, /bindReviewWorkspace\([^;]*document\)/],
     settings: [/bindSettingsEvents\(document\)/, /bindTabEvents\(document\)/],
@@ -300,7 +301,10 @@ async function testCoherentModuleVersionGraph() {
     const source = await readFile(file, 'utf8');
     for (const match of source.matchAll(edge)) {
       const specifier = match[2] || match[3];
-      if (/^(?:\.|\/)/.test(specifier) && !specifier.endsWith('?v=6.15')) violations.push(`${file}: ${specifier}`);
+      if (/^(?:\.|\/)/.test(specifier)) {
+        const version = new URL(specifier, 'https://local.invalid/').searchParams.get('v');
+        if (version !== '6.15') violations.push(`${file}: ${specifier}`);
+      }
     }
   }
   assert.deepEqual(violations, []);

@@ -5,7 +5,7 @@ export async function testResourceHealth() {
   const { selectCurrentResourcePrice, selectUsableResourcePrice } = await import('../assets/services/resourcePriceService.js?v=test-health');
   const { getUsageComparisonReasons } = await import('../assets/services/quotaResourceService.js?v=test-health');
   const { buildResourceHealth, selectResourcePriceForHealth } = await import('../assets/services/resourceHealthService.js?v=test-health');
-  const { healthResourceRouteParams, resourceHealthSection } = await import('../assets/views/dashboard.js?v=test-health');
+  const { dashboardTabNav, healthResourceRouteParams, resourceHealthSection } = await import('../assets/views/dashboard.js?v=test-health');
   const { nextResourceViewState } = await import('../assets/views/resources.js?v=test-health');
   const { quotaRouteNotice } = await import('../assets/views/quota.js?v=test-health');
   const { navigationItemHtml } = await import('../assets/views/navigation.js?v=test-health');
@@ -122,6 +122,20 @@ export async function testResourceHealth() {
   assert.equal(html.includes('data-health-issue="pendingQuotaUpdates"'), true);
   assert.equal(html.includes('查看待更新定额'), true);
 
+  const dashboardTabs = dashboardTabNav({
+    nextActions: [{ id: 'pending' }],
+    projects: [{ id: 'project-1' }, { id: 'project-2' }],
+    recentVersions: [{ id: 'version-1' }],
+    resourceHealth: health,
+  }, 'resources');
+  assert.equal((dashboardTabs.match(/role="tab"/g) || []).length, 4, '概览应按职责拆分为 4 个 Tab');
+  assert.equal(dashboardTabs.includes('工作概览'), true);
+  assert.equal(dashboardTabs.includes('项目分析'), true);
+  assert.equal(dashboardTabs.includes('资源健康'), true);
+  assert.equal(dashboardTabs.includes('版本与复盘'), true);
+  assert.match(dashboardTabs, /data-dashboard-tab="resources"[^>]+aria-selected="true"/);
+  assert.equal(dashboardTabs.includes('border-b-'), false, 'Tab 不使用底部下划线表示选中');
+
   const filtered = nextResourceViewState(
     { resourceType: 'material', keyword: '旧关键词', resourceIds: [] },
     'materials',
@@ -147,13 +161,15 @@ export async function testResourceHealth() {
   assert.equal(activeNav.includes('title="我的材料库"'), true);
   assert.equal(activeNav.includes('aria-current="page"'), true);
   assert.equal(navigationItemHtml({ id: 'equipment', label: '我的设备库', desc: '设备选型与价格', icon: 'build' }, false).includes('aria-current'), false);
+  const appSource = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  assert.match(appSource, /id: 'cost-estimation',[^\n]+icon: 'payments'/, '成本测算导航必须保留与其他菜单一致的图标占位');
 
   assertCacheGraph();
 }
 
 function assertCacheGraph() {
   const expectations = [
-    ['../app.js', "./assets/views/dashboard.js?v=6.15", "./assets/views/quota.js?v=6.15", "./assets/views/resources.js?v=6.15", "./assets/views/navigation.js?v=6.15"],
+    ['../app.js', "./assets/views/dashboard.js?v=6.15&build=20260814e", "./assets/views/quota.js?v=6.15", "./assets/views/resources.js?v=6.15", "./assets/views/navigation.js?v=6.15"],
     ['../assets/views/dashboard.js', "../services/resourceHealthService.js?v=6.15"],
     ['../assets/views/resources.js', "../services/resourcePriceService.js?v=6.15", "./resourceAttachments.js?v=6.15"],
     ['../assets/views/quota.js', "./quotaResourceComposition.js?v=6.15", "./quotaResourceCompositionPanel.js?v=6.15"],

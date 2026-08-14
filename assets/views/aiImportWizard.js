@@ -1,10 +1,10 @@
 // 统一表格导入向导：五类目标共用文件、数据区、层级映射、预览和写入流程。
-import { parseImportFile } from '../data/excel.js?v=6.15';
-import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.15';
-import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.15';
-import { getImportSchema } from '../services/importSchemaService.js?v=6.15';
+import { parseImportFile } from '../data/excel.js?v=6.15&build=20260814';
+import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.15&build=20260814';
+import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.15&build=20260814';
+import { getImportSchema } from '../services/importSchemaService.js?v=6.15&build=20260814';
 import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.15';
-import { analyzeImport, commitImport } from '../services/importWorkflowService.js?v=6.15';
+import { analyzeImport, commitImport, detectProjectBoqRegionKind, isImportFieldRequired } from '../services/importWorkflowService.js?v=6.15&build=20260814';
 import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.15';
 import { projectRepo } from '../data/repository.js?v=6.15';
 import { esc, toast } from '../utils/dom.js?v=6.15';
@@ -122,22 +122,24 @@ function mappingPanel(projects) {
 function mappingGroup(group) {
   const representative = group.regions[0];
   const schema = getImportSchema(state.targetType);
+  const regionKind = detectProjectBoqRegionKind(representative, state.targetType);
   const mapping = state.mappingByRegion[representative.id] || {};
   const fixed = state.fixedByRegion[representative.id] || {};
   const ai = state.aiStatusBySignature[group.signature];
   const fields = schema.fields.map(field => {
+    const effectiveField = { ...field, required: isImportFieldRequired(field, state.targetType, representative) };
     const source = mapping[field.key] || '';
     const meta = state.fieldMetaBySignature[group.signature]?.[field.key] || {};
     const column = representative.columns.find(item => item.id === (source || meta.candidateSource));
     const sample = column ? representative.rows.find(row => String(row.values[column.id] ?? '').trim())?.values[column.id] : fixed[field.key];
-    const status = source ? '已映射' : Object.prototype.hasOwnProperty.call(fixed, field.key) ? '固定值' : meta.candidateSource ? `建议确认（${confidenceLabel(meta.confidence)}）` : field.required ? '待补充' : '不导入';
-    const statusTone = source || Object.prototype.hasOwnProperty.call(fixed, field.key) ? 'text-teal-700' : meta.candidateSource || field.required ? 'text-amber-700' : 'text-slate-400';
-    const control = mappingControl(group.signature, field, representative.columns, source, fixed, meta);
-    return { field, sample: esc(sample == null || sample === '' ? '-' : String(sample).slice(0, 80)), status, statusTone, control };
+    const status = source ? '已映射' : Object.prototype.hasOwnProperty.call(fixed, field.key) ? '固定值' : meta.candidateSource ? `建议确认（${confidenceLabel(meta.confidence)}）` : effectiveField.required ? '待补充' : '不导入';
+    const statusTone = source || Object.prototype.hasOwnProperty.call(fixed, field.key) ? 'text-teal-700' : meta.candidateSource || effectiveField.required ? 'text-amber-700' : 'text-slate-400';
+    const control = mappingControl(group.signature, effectiveField, representative.columns, source, fixed, meta);
+    return { field: effectiveField, sample: esc(sample == null || sample === '' ? '-' : String(sample).slice(0, 80)), status, statusTone, control };
   });
   const desktopRows = fields.map(item => `<tr class="border-t border-slate-100"><td class="p-3 font-medium text-slate-800">${esc(item.field.label)}${item.field.required ? '<span class="text-red-600"> *</span>' : ''}</td><td class="p-3">${item.control}</td><td class="p-3 text-slate-600">${item.sample}</td><td class="p-3 text-xs ${item.statusTone}">${item.status}</td></tr>`).join('');
   const mobileCards = fields.map(item => `<section class="border-t border-slate-100 p-4"><div class="flex items-center justify-between gap-2"><h3 class="font-medium text-slate-800">${esc(item.field.label)}${item.field.required ? '<span class="text-red-600"> *</span>' : ''}</h3><span class="text-xs ${item.statusTone}">${item.status}</span></div><div class="mt-3">${item.control}</div><p class="mt-2 truncate text-xs text-slate-500">样本：${item.sample}</p></section>`).join('');
-  return `<article class="rounded-lg border border-slate-200 bg-white overflow-hidden"><header class="border-b border-slate-200 p-4"><div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="font-semibold text-slate-900">${esc(representative.sheetName)}${group.regions.length > 1 ? ` 等 ${group.regions.length} 个同结构数据区` : ''}</h2><p class="mt-1 text-xs ${ai?.degraded ? 'text-amber-700' : 'text-slate-500'}">${esc(ai?.degraded ? ai.degradationReason : ai?.summary || '本地规则已完成映射')}</p></div>${templateControls(group)}</div>${semanticSuggestionMarkup(ai?.semanticSuggestions)}</header><div class="md:hidden">${mobileCards}</div><div class="hidden overflow-auto md:block"><table class="w-full min-w-[780px] text-sm"><thead class="bg-slate-50 text-left text-xs text-slate-500"><tr><th class="p-3">系统字段</th><th class="p-3">Excel 完整列路径</th><th class="p-3">样本</th><th class="p-3">状态</th></tr></thead><tbody>${desktopRows}</tbody></table></div></article>`;
+  return `<article class="rounded-lg border border-slate-200 bg-white overflow-hidden"><header class="border-b border-slate-200 p-4"><div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="font-semibold text-slate-900">${esc(representative.sheetName)}${group.regions.length > 1 ? ` 等 ${group.regions.length} 个同结构数据区` : ''}</h2><p class="mt-1 text-xs ${ai?.degraded ? 'text-amber-700' : 'text-slate-500'}">${esc(ai?.degraded ? ai.degradationReason : ai?.summary || '本地规则已完成映射')}</p></div>${templateControls(group)}</div>${regionKind === 'other_charge_summary' ? '<div class="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800"><span class="font-medium">已识别为其他项目费汇总表</span>：只需映射费用名称与金额；单位、工程量和综合单价不再必填。</div>' : ''}${semanticSuggestionMarkup(ai?.semanticSuggestions)}</header><div class="md:hidden">${mobileCards}</div><div class="hidden overflow-auto md:block"><table class="w-full min-w-[780px] text-sm"><thead class="bg-slate-50 text-left text-xs text-slate-500"><tr><th class="p-3">系统字段</th><th class="p-3">Excel 完整列路径</th><th class="p-3">样本</th><th class="p-3">状态</th></tr></thead><tbody>${desktopRows}</tbody></table></div></article>`;
 }
 
 function semanticSuggestionMarkup(suggestions = []) {
@@ -167,7 +169,16 @@ function previewPanel(projects) {
   const preview = state.preview;
   if (!preview) return '<div class="p-10 text-center text-slate-400">请先生成预览</div>';
   const rows = preview.rows.filter(row => (!state.issueOnly || row.issues.length) && (!state.issueSeverity || row.issues.some(issue => issue.severity === state.issueSeverity))).slice(0, 100);
-  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden"><header class="border-b border-slate-200 p-5"><h2 class="font-semibold text-slate-900">质量预览</h2><div class="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-6">${metric('数据区', preview.counts.regions)}${metric('读取明细', preview.counts.total)}${metric('可导入', preview.counts.valid, 'teal')}${metric('无效', preview.counts.invalid, 'red')}${metric('自动跳过', preview.counts.skipped)}${metric('警告', preview.counts.warnings, 'amber')}</div><div class="mt-3 flex flex-wrap items-center gap-3 text-xs"><label><input type="checkbox" ${state.issueOnly ? 'checked' : ''} onchange="window.__aiImport.setIssueOnly(this.checked)"> 只看问题行</label><label>问题级别<select onchange="window.__aiImport.setIssueSeverity(this.value)" class="ml-2 h-8 border border-slate-300 bg-white px-2"><option value="">全部</option><option value="error" ${state.issueSeverity === 'error' ? 'selected' : ''}>错误</option><option value="warning" ${state.issueSeverity === 'warning' ? 'selected' : ''}>警告</option></select></label><button onclick="window.__aiImport.back()" class="text-teal-700 hover:underline">返回修改映射</button><span class="text-slate-400">当前显示 ${rows.length} 行</span></div>${state.targetType === 'boq_quota_bundle' ? '<div class="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800">清单行作为父项；后续定额行将写入定额库，并通过独立关系记录挂到该清单。相同定额可以被其他清单继续引用。</div>' : ''}${preview.issues.length ? warningBox(preview.issues.slice(0, 20).map(issue => `${issue.sheetName} 第 ${issue.sourceRowNumber} 行：${issue.message}`)) : ''}</header><div class="max-h-[480px] overflow-auto"><table class="w-full min-w-[760px] text-xs"><thead class="sticky top-0 bg-slate-50 text-left text-slate-500"><tr><th class="p-2">来源</th><th class="p-2">名称</th><th class="p-2">单位</th><th class="p-2 text-right">数量/默认量</th><th class="p-2 text-right">单价</th><th class="p-2">检查</th></tr></thead><tbody>${previewRowsHtml(rows)}</tbody></table></div><footer class="border-t border-slate-200 bg-slate-50 p-4"><div class="grid gap-4 lg:grid-cols-[1fr_auto]">${commitOptions(projects)}<div class="flex items-end gap-2"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">返回映射</button><button onclick="window.__aiImport.commit()" ${preview.counts.valid && !state.busy ? '' : 'disabled'} class="h-9 px-4 brand-bg text-white text-sm disabled:opacity-40">${state.busy ? '导入中…' : `确认导入 ${preview.counts.valid} 行`}</button></div></div></footer></section>`;
+  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden"><header class="border-b border-slate-200 p-5"><h2 class="font-semibold text-slate-900">质量预览</h2><div class="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-6">${metric('数据区', preview.counts.regions)}${metric('读取明细', preview.counts.total)}${metric('可导入', preview.counts.valid, 'teal')}${metric('无效', preview.counts.invalid, 'red')}${metric('自动跳过', preview.counts.skipped)}${metric('警告', preview.counts.warnings, 'amber')}</div><div class="mt-3 flex flex-wrap items-center gap-3 text-xs"><label><input type="checkbox" ${state.issueOnly ? 'checked' : ''} onchange="window.__aiImport.setIssueOnly(this.checked)"> 只看问题行</label><label>问题级别<select onchange="window.__aiImport.setIssueSeverity(this.value)" class="ml-2 h-8 border border-slate-300 bg-white px-2"><option value="">全部</option><option value="error" ${state.issueSeverity === 'error' ? 'selected' : ''}>错误</option><option value="warning" ${state.issueSeverity === 'warning' ? 'selected' : ''}>警告</option></select></label><button onclick="window.__aiImport.back()" class="text-teal-700 hover:underline">返回修改映射</button><span class="text-slate-400">当前显示 ${rows.length} 行</span></div>${state.targetType === 'project_boq' ? hierarchyPreviewNotice(preview) : ''}${state.targetType === 'boq_quota_bundle' ? '<div class="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800">清单行作为父项；后续定额行将写入定额库，并通过独立关系记录挂到该清单。相同定额可以被其他清单继续引用。</div>' : ''}${preview.issues.length ? warningBox(preview.issues.slice(0, 20).map(issue => `${issue.sheetName} 第 ${issue.sourceRowNumber} 行：${issue.message}`)) : ''}</header><div class="max-h-[480px] overflow-auto"><table class="w-full min-w-[760px] text-xs"><thead class="sticky top-0 bg-slate-50 text-left text-slate-500"><tr><th class="p-2">来源</th><th class="p-2">名称</th><th class="p-2">单位</th><th class="p-2 text-right">数量/默认量</th><th class="p-2 text-right">单价</th><th class="p-2">检查</th></tr></thead><tbody>${previewRowsHtml(rows)}</tbody></table></div><footer class="border-t border-slate-200 bg-slate-50 p-4"><div class="grid gap-4 lg:grid-cols-[1fr_auto]">${commitOptions(projects)}<div class="flex items-end gap-2"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">返回映射</button><button onclick="window.__aiImport.commit()" ${preview.counts.valid && !state.busy ? '' : 'disabled'} class="h-9 px-4 brand-bg text-white text-sm disabled:opacity-40">${state.busy ? '导入中…' : `确认导入 ${preview.counts.valid} 行`}</button></div></div></footer></section>`;
+}
+
+function hierarchyPreviewNotice(preview) {
+  const otherChargeRegions = (preview.regions || []).filter(region => region.regionKind === 'other_charge_summary');
+  if (otherChargeRegions.length) return `<div class="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800">已识别 ${otherChargeRegions.length} 个其他项目费汇总数据区。费用行将按“1 项 × 源金额”保存，并标记为其他项目费，不会要求补填单位或工程量。</div>`;
+  const sections = (preview.hierarchyRows || []).filter(row => row.kind === 'section');
+  const subtotals = (preview.hierarchyRows || []).filter(row => row.kind === 'subtotal');
+  if (!sections.length && !subtotals.length) return '<div class="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">未识别到分部层级，将按普通明细清单导入。</div>';
+  return `<div class="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800">已识别 ${sections.length} 个分部、${subtotals.length} 个小计行。分部归属会随明细保存；小计不作为计价项写入，导入后由系统自动重算。</div>`;
 }
 
 function previewRowsHtml(rows) {
@@ -175,7 +186,8 @@ function previewRowsHtml(rows) {
     const bundle = state.targetType === 'boq_quota_bundle';
     const child = bundle && row.data.rowKind === 'quota';
     const badge = bundle ? `<span class="badge ${child ? 'badge-yellow' : 'badge-blue'}">${child ? '定额' : '清单'}</span>` : '';
-    return `<tr class="border-t ${row.importable ? child ? 'bg-amber-50/30' : '' : 'bg-red-50/50'}"><td class="p-2 text-slate-500">${esc(row.sheetName)}:${row.sourceRowNumber}</td><td class="p-2 font-medium text-slate-800"><div class="flex items-center gap-2 ${child ? 'pl-5' : ''}">${child ? '<span class="text-slate-300">└</span>' : ''}${badge}<span>${esc(row.data.code || '')}${row.data.code ? ' · ' : ''}${esc(row.data.name || '-')}</span></div></td><td class="p-2">${esc(row.data.unit || '-')}</td><td class="p-2 text-right">${esc(row.data.qty ?? row.data.defaultQty ?? '-')}</td><td class="p-2 text-right ${Number(row.data.unitPrice ?? row.data.priceTotal ?? 0) < 0 ? 'text-amber-700 font-semibold' : ''}">${esc(row.data.unitPrice ?? row.data.priceTotal ?? '-')}</td><td class="p-2 ${row.issues.some(issue => issue.severity === 'error') ? 'text-red-700' : row.issues.length ? 'text-amber-700' : 'text-teal-700'}">${esc(row.issues.map(issue => issue.message).join('；') || (child ? '关联上方最近清单' : '父清单'))}</td></tr>`;
+    const section = state.targetType === 'project_boq' && row.data.sourceSectionName ? `<div class="mt-1 text-[11px] font-normal text-slate-500">${esc([row.data.sourceSectionCode, row.data.sourceSectionName].filter(Boolean).join(' '))}</div>` : '';
+    return `<tr class="border-t ${row.importable ? child ? 'bg-amber-50/30' : '' : 'bg-red-50/50'}"><td class="p-2 text-slate-500">${esc(row.sheetName)}:${row.sourceRowNumber}</td><td class="p-2 font-medium text-slate-800"><div class="flex items-center gap-2 ${child ? 'pl-5' : ''}">${child ? '<span class="text-slate-300">└</span>' : ''}${badge}<span>${esc(row.data.code || '')}${row.data.code ? ' · ' : ''}${esc(row.data.name || '-')}${section}</span></div></td><td class="p-2">${esc(row.data.unit || '-')}</td><td class="p-2 text-right">${esc(row.data.qty ?? row.data.defaultQty ?? '-')}</td><td class="p-2 text-right ${Number(row.data.unitPrice ?? row.data.priceTotal ?? 0) < 0 ? 'text-amber-700 font-semibold' : ''}">${esc(row.data.unitPrice ?? row.data.priceTotal ?? '-')}</td><td class="p-2 ${row.issues.some(issue => issue.severity === 'error') ? 'text-red-700' : row.issues.length ? 'text-amber-700' : 'text-teal-700'}">${esc(row.issues.map(issue => issue.message).join('；') || (child ? '关联上方最近清单' : '检查通过'))}</td></tr>`;
   }).join('');
 }
 
@@ -338,7 +350,7 @@ function buildPreview(workspace) {
   const schema = getImportSchema(state.targetType);
   const missing = [];
   for (const region of selectedRegions()) {
-    schema.fields.filter(field => field.required).forEach(field => {
+    schema.fields.filter(field => isImportFieldRequired(field, state.targetType, region)).forEach(field => {
       if (!state.mappingByRegion[region.id]?.[field.key] && !String(state.fixedByRegion[region.id]?.[field.key] ?? '').trim()) missing.push(`${region.sheetName}：${field.label}`);
     });
   }

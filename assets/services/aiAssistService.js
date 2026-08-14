@@ -33,6 +33,49 @@ export async function suggestBoqLine(line = {}, context = {}) {
   });
 }
 
+// 从本地定额库生成项目清单草稿。远端模型只能从候选定额中挑选，不允许凭空生成价格。
+export async function suggestBoqDraft(project = {}, brief = '', options = {}) {
+  const description = String(brief || '').trim();
+  if (!description) throw new Error('请先填写项目建设内容或清单范围');
+  const quotas = await quotaRepo.all();
+  if (!quotas.length) return wrap({ source: 'local', confidence: 'low', summary: '当前定额库为空，暂无法生成可核验的清单草稿。', suggestions: [], warnings: ['请先导入或建立常用定额库。'] });
+  const contextText = [project.name, project.type, project.structure, project.process, description].filter(Boolean).join(' ');
+  const candidates = rankQuotas(quotas, { name: contextText, feature: description })
+    .slice(0, 40)
+    .map(item => ({
+      quotaId: item.id,
+      code: item.code || '',
+      name: item.name || '',
+      feature: item.feature || '',
+      unit: item.unit || '',
+      unitPrice: Number(item.priceTotal || 0),
+      score: Number(item.score || 0),
+      confidence: item.score >= 5 ? 'high' : item.score >= 3 ? 'medium' : 'low',
+      reason: `与项目描述的关键词匹配得分 ${item.score.toFixed(1)}`,
+      apply: item.score >= 3,
+    }));
+  const local = wrap({
+    source: 'local',
+    confidence: candidates.some(item => item.confidence === 'high') ? 'high' : candidates.some(item => item.confidence === 'medium') ? 'medium' : 'low',
+    summary: candidates.length ? `已从本地定额库筛选 ${Math.min(candidates.length, 12)} 条清单草稿。` : '未找到与建设内容匹配的本地定额。',
+    suggestions: candidates.slice(0, 12),
+    warnings: candidates.some(item => item.confidence === 'low') ? ['低置信度项默认不勾选，写入前请人工复核工程量和价格。'] : [],
+  });
+  const cfg = getAIConfig();
+  if (!options.useRemote || !cfg.api_key || !candidates.length) return local;
+  try {
+    const remote = await enhanceBoqDraft(project, description, candidates, cfg);
+    const selected = new Map((remote.items || []).map(item => [item.quotaId, item]));
+    const suggestions = candidates
+      .filter(item => selected.has(item.quotaId))
+      .slice(0, 20)
+      .map(item => ({ ...item, apply: true, reason: String(selected.get(item.quotaId)?.reason || '远端模型结合项目描述选中') }));
+    return wrap({ ...local, source: 'remote', confidence: suggestions.length ? 'medium' : local.confidence, summary: suggestions.length ? `已结合远端 AI 与本地定额库生成 ${suggestions.length} 条草稿。` : local.summary, suggestions: suggestions.length ? suggestions : local.suggestions });
+  } catch (error) {
+    return wrap({ ...local, warnings: [...(local.warnings || []), `远端 AI 增强不可用，已保留本地建议：${String(error?.message || error).slice(0, 100)}`] });
+  }
+}
+
 // 清单库维护专用：只生成可选择的字段与定额建议，不写入任何数据。
 export async function suggestLibraryItem(item = {}, quotas) {
   const availableQuotas = Array.isArray(quotas) ? quotas : await quotaRepo.all();
@@ -134,12 +177,12 @@ export function suggestProjectInfo(projectName = '') {
   const text = String(projectName || '');
   const daily = extractDailyCapacity(text);
   const process = (text.match(/AAO|A2O|MBR|SBR|氧化沟|CAST|CASS/i)?.[0] || '').toUpperCase();
-  const type = /住宅|住宅楼|商品房/.test(text) ? '住宅建筑' : /房建|房屋建筑|建筑工程/.test(text) ? '房屋建筑' : /公共建筑|学校|医院|办公楼|商业综合体/.test(text) ? '公共建筑' : /工业厂房|厂房|工业园/.test(text) ? '工业厂房' : /工业废水|工业污水/.test(text) ? '工业废水' : /园区/.test(text) ? '园区建设' : /道路|公路|路基|路面/.test(text) ? '市政道路' : /桥梁|隧道/.test(text) ? '桥梁隧道' : /管廊/.test(text) ? '综合管廊' : /水利|河道|闸站|灌溉/.test(text) ? '水利工程' : /电力|输电|配电/.test(text) ? '电力工程' : /再生水|中水/.test(text) ? '再生水厂' : /污泥/.test(text) ? '污泥处理' : /调蓄/.test(text) ? '调蓄池' : /泵站/.test(text) ? '泵站' : /管网|管道/.test(text) ? '管网' : /水厂|污水|处理厂/.test(text) ? '污水处理厂' : '水厂';
+  const type = /住宅|住宅楼|商品房/.test(text) ? '住宅建筑' : /房建|房屋建筑|建筑工程/.test(text) ? '房屋建筑' : /公共建筑|学校|医院|办公楼|商业综合体/.test(text) ? '公共建筑' : /工业厂房|厂房|工业园/.test(text) ? '工业厂房' : /工业废水|工业污水/.test(text) ? '工业废水' : /园区/.test(text) ? '园区建设' : /道路|公路|路基|路面/.test(text) ? '市政道路' : /桥梁|隧道/.test(text) ? '桥梁隧道' : /管廊/.test(text) ? '综合管廊' : /水利|河道|闸站|灌溉/.test(text) ? '水利工程' : /电力|输电|配电/.test(text) ? '电力工程' : /再生水|中水/.test(text) ? '再生水厂' : /污泥/.test(text) ? '污泥处理' : /调蓄/.test(text) ? '调蓄池' : /泵站/.test(text) ? '泵站' : /管网|管道/.test(text) ? '管网' : /水厂|污水|处理厂/.test(text) ? '污水处理厂' : '';
   const structure = /钢结构/.test(text) ? '钢结构' : /砖混/.test(text) ? '砖混' : /改扩建|二期|水池|污水/.test(text) ? '钢筋砼' : '';
   return wrap({
     source: 'local',
     confidence: text ? 'medium' : 'low',
-    summary: daily || process ? '已从项目名称识别关键参数。' : '项目信息较少，已给出默认项目口径。',
+    summary: daily || process || type || structure ? '已从项目名称识别关键参数。' : '未识别到明确项目口径，请手动选择项目类型。',
     suggestions: [
       { field: 'type', suggestedValue: type, confidence: 'medium', reason: '按项目名称关键词识别' },
       { field: 'dailyCapacity', suggestedValue: daily || '', confidence: daily ? 'high' : 'low', reason: '识别“万吨/日、万m³/d”等容量表达' },
@@ -318,6 +361,24 @@ function buildLocalLibrarySuggestion(item = {}, quotas = []) {
 
 function libraryFieldSuggestion(field, currentValue, suggestedValue, confidence, reason) {
   return { field, currentValue: String(currentValue || ''), suggestedValue, confidence, reason, apply: !currentValue && confidence === 'high' };
+}
+
+async function enhanceBoqDraft(project, brief, candidates, cfg) {
+  const allowed = candidates.map(item => ({ quotaId: item.quotaId, name: item.name, feature: item.feature, unit: item.unit, score: item.score }));
+  const prompt = `从候选定额中选择适合形成工程量清单草稿的项目。只返回 JSON，不要 Markdown：{"items":[{"quotaId":"必须是候选ID","reason":"选中依据"}]}。不得新建定额、不得编造单价或工程量。项目概况：${JSON.stringify({ name: project.name || '', type: project.type || '', structure: project.structure || '', specialty: project.process || '' })}。建设内容：${brief}。候选定额：${JSON.stringify(allowed)}`;
+  const url = String(cfg.base_url || '').replace(/\/$/, '') + '/chat/completions';
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
+    body: JSON.stringify({ model: cfg.model, messages: [{ role: 'system', content: '你是工程造价清单草稿助手，严格从候选定额中选择并返回 JSON。' }, { role: 'user', content: prompt }], temperature: 0.1, stream: false }),
+  });
+  if (!response.ok) throw new Error(`请求失败：${response.status}`);
+  const data = await response.json();
+  const raw = data?.choices?.[0]?.message?.content;
+  if (typeof raw !== 'string') throw new Error('远端返回为空');
+  const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
+  const allowedIds = new Set(candidates.map(item => item.quotaId));
+  return { items: Array.isArray(parsed.items) ? parsed.items.filter(item => allowedIds.has(item?.quotaId)) : [] };
 }
 
 async function enhanceLibrarySuggestion(item, local, cfg) {

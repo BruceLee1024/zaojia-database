@@ -10,6 +10,7 @@ export const ICONS = Object.freeze({
     boqLibrary: 'format_list_bulleted',
     projects: 'folder_managed',
     boq: 'list_alt',
+    costEstimation: 'payments',
     indicators: 'analytics',
     experience: 'psychology_alt',
     settings: 'settings',
