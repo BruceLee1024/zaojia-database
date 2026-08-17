@@ -1,12 +1,12 @@
 // 视图：造价参考
-import { indicatorService } from '../services/indicatorService.js?v=6.15';
+import { aggregateReferenceProjects, indicatorService, projectRegionLabel } from '../services/indicatorService.js?v=6.15';
 import { dataEngineService } from '../services/dataEngineService.js?v=6.15';
 import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=6.15';
 import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=6.15';
 import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js?v=6.15';
 
 const state = {
-  tab: 'overview',
+  tab: 'cases',
   filters: { type: '', scale: '', process: '', structure: '', region: '', year: '' },
   keyword: '',
   selectedFamily: '单水造价',
@@ -16,6 +16,9 @@ const state = {
   sample: { projectId: '', sourceType: '', quality: '' },
   scope: 'formal',
   benchmarkQueueIds: [],
+  regionLevel: 'province',
+  businessDimension: 'type',
+  caseGroup: { dimension: '', value: '' },
 };
 
 let cache = { indicators: [], projects: [], archived: [], benchmark: null, queue: [], estimate: null, facts: [], candidates: [], reports: [], jobs: [] };
@@ -41,18 +44,14 @@ export async function render(workspace = document.getElementById('workspace')) {
   cache.benchmark = state.benchmarkProjectId ? await indicatorService.benchmarkProject(state.benchmarkProjectId) : null;
   cache.queue = (await Promise.all(state.benchmarkQueueIds.map(id => indicatorService.benchmarkProject(id)))).filter(Boolean);
   cache.estimate = await indicatorService.estimate(state.filters, state.estimate);
+  if (state.tab === 'overview') state.tab = 'cases';
 
   expose(workspace);
   workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-3">
       ${decisionHeader()}
-      ${trustExplainer()}
-      ${decisionFilters()}
-      ${decisionCanvas()}
-      ${estimateView()}
-      <section class="card p-0 overflow-hidden">
-        ${benchmarkQueue()}
-      </section>
+      ${referenceTabs()}
+      ${referencePanel()}
     </div>
   `;
   drawCharts(workspace);
@@ -87,6 +86,9 @@ function trustTile(title, desc, icon) {
 function expose(workspace) {
   window.__indicators = {
     tab: async tab => { state.tab = tab; await render(); },
+    aggregateBy: async (kind, value) => { state[kind === 'region' ? 'regionLevel' : 'businessDimension'] = value; await render(); },
+    openGroup: async (dimension, value) => { state.caseGroup = { dimension, value }; state.tab = 'cases'; await render(); },
+    clearCaseGroup: async () => { state.caseGroup = { dimension: '', value: '' }; await render(); },
     recompute: async () => { await indicatorService.recompute(scopeOptions()); toast('指标已重算', 'success'); await render(); },
     setScope: async value => { state.scope = value; await render(); },
     setDecisionScope: async value => {
@@ -146,6 +148,101 @@ function expose(workspace) {
   };
 }
 
+function referenceTabs() {
+  const formalCases = referenceCaseRows().length;
+  const tabs = [
+    ['cases', 'inventory_2', '项目案例', `${formalCases} 个`],
+    ['region', 'location_on', '地区聚合', `${aggregateReferenceProjects(cache.archived, cache.facts, state.regionLevel).length} 组`],
+    ['business', 'apartment', '业态聚合', `${aggregateReferenceProjects(cache.archived, cache.facts, state.businessDimension).length} 组`],
+    ['indicators', 'analytics', '指标分析', `${cache.indicators.length} 组`],
+    ['estimate', 'calculate', '快速估算', '区间测算'],
+    ['samples', 'database', '样本治理', `${cache.candidates.length} 待检查`],
+  ];
+  return `<nav class="rounded-lg border border-slate-200 bg-slate-50 p-1" aria-label="造价参考工作区"><div class="flex gap-1 overflow-x-auto" role="tablist">${tabs.map(([id, icon, label, note]) => {
+    const active = state.tab === id;
+    return `<button onclick="window.__indicators.tab('${id}')" role="tab" aria-selected="${active}" class="inline-flex min-w-[150px] flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 ${active ? 'border-teal-200 bg-white text-teal-800' : 'border-transparent text-slate-500 hover:bg-white hover:text-slate-800'}"><span class="material-symbols-outlined text-[18px]">${icon}</span><span class="text-sm font-medium">${label}</span><span class="text-[11px] tabular-nums ${active ? 'text-teal-700' : 'text-slate-400'}">${esc(note)}</span></button>`;
+  }).join('')}</div></nav>`;
+}
+
+function referencePanel() {
+  if (state.tab === 'region') return aggregationView('region');
+  if (state.tab === 'business') return aggregationView('business');
+  if (state.tab === 'indicators') return `<div role="tabpanel" aria-label="指标分析" class="space-y-3">${decisionFilters()}${decisionCanvas()}<section class="card p-0 overflow-hidden">${benchmarkQueue()}</section></div>`;
+  if (state.tab === 'estimate') return `<div role="tabpanel" aria-label="快速估算" class="space-y-3">${estimateFilterBar()}${estimateView()}</div>`;
+  if (state.tab === 'samples') return `<div role="tabpanel" aria-label="样本治理" class="space-y-3">${trustExplainer()}${samplesView()}</div>`;
+  return casesView();
+}
+
+function referenceCaseRows() {
+  const projectMap = new Map(cache.archived.map(project => [project.id, project]));
+  const latest = new Map();
+  cache.facts
+    .filter(fact => fact.status === 'formal' && fact.sourceType === 'archived_project' && fact.factType === 'project_cost' && projectMap.has(fact.projectId))
+    .sort((a, b) => String(a.updatedAt || a.createdAt || '').localeCompare(String(b.updatedAt || b.createdAt || '')))
+    .forEach(fact => latest.set(fact.projectId, fact));
+  const keyword = String(state.keyword || '').trim().toLowerCase();
+  return [...latest.entries()].map(([projectId, fact]) => {
+    const project = projectMap.get(projectId);
+    const totalCost = Number(fact.payload?.totalCost || 0);
+    const area = Number(project.area || project.buildingArea || 0);
+    const capacity = Number(project.dailyCapacity || 0);
+    return { project, fact, totalCost, areaCost: area ? totalCost / area : null, waterCost: capacity ? totalCost / (capacity * 10000) : null };
+  }).filter(row => row.totalCost > 0)
+    .filter(row => !keyword || [row.project.name, row.project.type, row.project.scale, row.project.structure, row.project.process, projectRegionLabel(row.project)].filter(Boolean).join(' ').toLowerCase().includes(keyword))
+    .filter(row => !state.caseGroup.value || referenceDimension(row.project, state.caseGroup.dimension) === state.caseGroup.value)
+    .sort((a, b) => b.totalCost - a.totalCost);
+}
+
+function casesView() {
+  const rows = referenceCaseRows();
+  const regions = new Set(rows.map(row => projectRegionLabel(row.project, 'province')).filter(value => value !== '未填写'));
+  const types = new Set(rows.map(row => row.project.type).filter(Boolean));
+  const medianCost = median(rows.map(row => row.totalCost));
+  return `<div role="tabpanel" aria-label="项目案例" class="space-y-3">
+    <section class="grid grid-cols-2 gap-3 lg:grid-cols-4">${summaryCard('可用案例', rows.length, '个')}${summaryCard('覆盖地区', regions.size, '个')}${summaryCard('覆盖业态', types.size, '类')}${summaryCard('案例总造价中位数', fmtMoney(medianCost), '')}</section>
+    <section class="card p-3"><div class="flex flex-col gap-2 lg:flex-row lg:items-center"><label class="relative block min-w-0 lg:w-80"><input value="${esc(state.keyword)}" onchange="window.__indicators.updateKeyword(this.value)" onkeydown="if(event.key==='Enter') window.__indicators.updateKeyword(this.value)" type="search" placeholder="搜索案例名称、地区、业态或工艺" class="h-9 w-full rounded border border-slate-300 bg-white pl-9 pr-3 text-sm"/><span class="material-symbols-outlined absolute left-3 top-2.5 text-[17px] text-slate-400">search</span></label>${state.caseGroup.value ? `<span class="inline-flex h-9 items-center gap-2 rounded border border-teal-200 bg-teal-50 px-3 text-xs text-teal-800">聚合筛选：${esc(state.caseGroup.value)}<button onclick="window.__indicators.clearCaseGroup()" title="清除聚合筛选"><span class="material-symbols-outlined text-[15px]">close</span></button></span>` : ''}<div class="flex-1"></div><button onclick="window.__app.go('projects')" class="h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700">管理项目案例</button></div></section>
+    <section class="card p-0 overflow-hidden"><div class="overflow-auto"><table class="w-full min-w-[1100px] text-sm"><thead class="bg-slate-50 text-left text-xs text-slate-500"><tr><th class="px-4 py-3">案例项目</th><th class="px-3">地区</th><th class="px-3">业态 / 规模</th><th class="px-3">结构 / 工艺</th><th class="px-3 text-right">总造价</th><th class="px-3 text-right">单方造价</th><th class="px-3 text-right">单水造价</th><th class="px-4 text-right">操作</th></tr></thead><tbody>${rows.length ? rows.map(caseRow).join('') : `<tr><td colspan="8" class="py-16 text-center"><div class="font-medium text-slate-600">当前没有可用案例</div><div class="mt-1 text-xs text-slate-400">只有已收录且形成正式造价事实的项目才会进入聚合分析。</div><button onclick="window.__app.go('projects')" class="mt-4 h-9 rounded border border-teal-300 bg-teal-50 px-3 text-sm text-teal-700">去收录项目案例</button></td></tr>`}</tbody></table></div></section>
+  </div>`;
+}
+
+function caseRow(row) {
+  const project = row.project;
+  return `<tr class="border-t border-slate-100 hover:bg-slate-50"><td class="px-4 py-3"><div class="font-medium text-slate-900">${esc(project.name || '未命名项目')}</div><div class="mt-1 text-xs text-slate-400">${esc(project.code || project.priceYear || '-')}</div></td><td class="px-3 py-3 text-slate-600">${esc(projectRegionLabel(project))}</td><td class="px-3 py-3"><div>${esc(project.type || '未填写')}</div><div class="mt-1 text-xs text-slate-400">${esc(project.scale || '未填写规模')}</div></td><td class="px-3 py-3"><div>${esc(project.structure || '未填写')}</div><div class="mt-1 text-xs text-slate-400">${esc(project.process || project.processType || '未填写工艺')}</div></td><td class="px-3 py-3 text-right font-medium tabular-nums">${fmtMoney(row.totalCost)}</td><td class="px-3 py-3 text-right tabular-nums">${Number.isFinite(row.areaCost) ? `${fmt(row.areaCost)} 元/㎡` : '-'}</td><td class="px-3 py-3 text-right tabular-nums">${Number.isFinite(row.waterCost) ? `${fmt(row.waterCost)} 元/(m³·d)` : '-'}</td><td class="px-4 py-3 text-right"><button onclick="window.__app.go('projects',{projectId:'${escAttr(project.id)}'})" class="text-xs text-teal-700 hover:underline">查看项目</button></td></tr>`;
+}
+
+function aggregationView(kind) {
+  const isRegion = kind === 'region';
+  const dimension = isRegion ? state.regionLevel : state.businessDimension;
+  const choices = isRegion ? [['province', '省份'], ['city', '城市'], ['district', '区县']] : [['type', '项目类型'], ['scale', '规模'], ['structure', '结构形式'], ['process', '工艺'], ['year', '年份']];
+  const groups = aggregateReferenceProjects(cache.archived, cache.facts, dimension);
+  const sampleCount = groups.reduce((sum, group) => sum + group.count, 0);
+  const maxCount = Math.max(1, ...groups.map(group => group.count));
+  return `<div role="tabpanel" aria-label="${isRegion ? '地区聚合' : '业态聚合'}" class="space-y-3">
+    <section class="card p-3"><div class="flex flex-col gap-3 lg:flex-row lg:items-center"><div><h2 class="font-semibold text-slate-900">${isRegion ? '地区造价聚合' : '业态造价聚合'}</h2><p class="mt-1 text-xs text-slate-500">基于已收录案例的正式造价事实，按${isRegion ? '行政区域' : '项目属性'}汇总。</p></div><div class="flex-1"></div><div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">${choices.map(([value, label]) => `<button onclick="window.__indicators.aggregateBy('${kind}','${value}')" class="h-8 rounded-md border px-3 text-xs ${dimension === value ? 'border-teal-200 bg-white text-teal-800' : 'border-transparent text-slate-500 hover:bg-white'}">${label}</button>`).join('')}</div></div></section>
+    <section class="grid grid-cols-3 gap-3">${summaryCard('聚合分组', groups.length, '组')}${summaryCard('纳入样本', sampleCount, '个')}${summaryCard('样本最多分组', groups[0]?.key || '-', groups[0] ? `${groups[0].count} 个` : '')}</section>
+    <section class="card p-0 overflow-hidden"><div class="overflow-auto"><table class="w-full min-w-[1120px] text-sm"><thead class="bg-slate-50 text-left text-xs text-slate-500"><tr><th class="px-4 py-3">${choices.find(item => item[0] === dimension)?.[1] || '分组'}</th><th class="w-44 px-3">样本构成</th><th class="px-3 text-right">总造价中位数</th><th class="px-3 text-right">P25—P75 区间</th><th class="px-3 text-right">单方造价中位数</th><th class="px-3 text-right">单水造价中位数</th><th class="px-3 text-right">指标覆盖</th><th class="px-4 text-right">操作</th></tr></thead><tbody>${groups.length ? groups.map(group => aggregationRow(group, maxCount, dimension)).join('') : `<tr><td colspan="8" class="py-16 text-center"><div class="font-medium text-slate-600">暂无可聚合数据</div><div class="mt-1 text-xs text-slate-400">请先收录包含${isRegion ? '省、市、区县信息' : '项目类型、规模或结构信息'}的案例。</div></td></tr>`}</tbody></table></div></section>
+  </div>`;
+}
+
+function aggregationRow(group, maxCount, dimension) {
+  const coverage = Math.max(group.areaCoverage, group.waterCoverage);
+  return `<tr class="border-t border-slate-100 hover:bg-slate-50"><td class="px-4 py-3"><div class="font-medium text-slate-900">${esc(group.key)}</div><div class="mt-1 text-xs text-slate-400">${group.count < 3 ? '样本不足，仅作参考' : '可用于区间比较'}</div></td><td class="px-3 py-3"><div class="flex items-center gap-2"><div class="h-2 flex-1 overflow-hidden rounded bg-slate-100"><div class="h-2 rounded bg-teal-500" style="width:${Math.max(6, group.count / maxCount * 100)}%"></div></div><span class="w-12 text-right text-xs tabular-nums text-slate-500">${group.count} 个</span></div></td><td class="px-3 py-3 text-right font-medium tabular-nums">${fmtMoney(group.total?.median || 0)}</td><td class="px-3 py-3 text-right text-xs tabular-nums text-slate-600">${fmtMoney(group.total?.p25 || 0)}—${fmtMoney(group.total?.p75 || 0)}</td><td class="px-3 py-3 text-right tabular-nums">${group.area ? `${fmt(group.area.median)} 元/㎡` : '-'}</td><td class="px-3 py-3 text-right tabular-nums">${group.water ? `${fmt(group.water.median)} 元/(m³·d)` : '-'}</td><td class="px-3 py-3 text-right"><span class="badge ${coverage >= .7 ? 'badge-green' : coverage ? 'badge-yellow' : 'badge-gray'}">${fmt(coverage * 100)}%</span></td><td class="px-4 py-3 text-right"><button onclick="window.__indicators.openGroup('${dimension}','${escAttr(group.key)}')" class="text-xs text-teal-700 hover:underline">查看案例</button></td></tr>`;
+}
+
+function estimateFilterBar() {
+  return `<section class="card p-3"><div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm"><span class="text-xs font-medium text-slate-500">估算口径</span>${chipGroup('项目类型', 'type', ['', ...uniqueValues('type').slice(0, 4)])}${chipGroup('结构', 'structure', ['', ...uniqueValues('structure').slice(0, 4)])}${chipGroup('地区', 'region', ['', ...uniqueValues('region').slice(0, 4)])}<button onclick="window.__indicators.recompute()" class="ml-auto h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700"><span class="material-symbols-outlined mr-1 align-[-3px] text-[16px]">refresh</span>重算指标</button></div></section>`;
+}
+
+function referenceDimension(project, dimension) {
+  if (['province', 'city', 'district'].includes(dimension)) return projectRegionLabel(project, dimension);
+  return indicatorService.projectDims(project)[dimension] || '未填写';
+}
+
+function median(values = []) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)] : 0;
+}
+
 function scopeOptions() {
   return {
     excludeOutliers: state.excludeOutliers,
@@ -161,12 +258,12 @@ function uniqueValues(key) {
 
 function decisionHeader() {
   const rows = filteredDecisionIndicators();
-  const sampleIds = new Set(rows.flatMap(({ it }) => it.sampleProjectIds || []));
+  const sampleIds = new Set(referenceCaseRows().map(row => row.project.id));
   const reference = rows.filter(({ it }) => it.confidence === '仅参考').length;
   return `<section class="flex flex-col 2xl:flex-row 2xl:items-end 2xl:justify-between gap-3">
     <div>
-      <h1 class="text-2xl font-semibold tracking-normal text-slate-950">指标决策台</h1>
-      <div class="mt-2 text-sm text-slate-500">先判断样本可信度，再引用造价区间。</div>
+      <h1 class="text-2xl font-semibold tracking-normal text-slate-950">造价参考库</h1>
+      <div class="mt-2 text-sm text-slate-500">从项目案例出发，按地区、业态和指标口径聚合比较。</div>
     </div>
     <div class="flex flex-wrap items-center gap-2">
       ${decisionStatusChip('groups', `${fmt(sampleIds.size)} 个可用样本`, 'teal')}

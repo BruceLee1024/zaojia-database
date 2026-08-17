@@ -4,8 +4,8 @@
 //   B] 工程量清单：序号/项目编码/项目名称/项目特征/计量单位/工程数量/综合单价/合价
 import { categoryGuess } from '../utils/stats.js?v=6.15';
 import { calculateAmount } from '../utils/costing.js?v=6.15';
-import { normalizeImportHeader } from '../services/importMappingService.js?v=6.15';
-import { detectImportRegions } from './importEngine.js?v=6.15';
+import { normalizeImportHeader } from '../services/importMappingService.js?v=6.15&build=20260814';
+import { detectImportRegions } from './importEngine.js?v=6.15&build=20260814';
 
 const HEADER_QUOTA  = ['清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'];
 const HEADER_BOQ    = ['序号', '项目编码', '项目名称', '项目特征', '计量单位', '工程数量', '综合单价', '合价'];
@@ -390,10 +390,29 @@ export function exportBOQExcel(project, boq) {
     [],
     HEADER_BOQ,
   ];
-  boq.forEach((b, i) => aoa.push([
-    i + 1, b.code || '', b.name, b.feature || '', b.unit || '',
-    Number(b.qty || 0), Number(b.unitPrice || 0), Number(b.amount || 0),
-  ]));
+  let activeSectionKey = '';
+  let activeSectionTotal = 0;
+  let sequence = 0;
+  const flushSectionSubtotal = () => {
+    if (!activeSectionKey) return;
+    aoa.push(['', '', '分部小计', '', '', '', '', activeSectionTotal]);
+    activeSectionTotal = 0;
+  };
+  boq.forEach(b => {
+    const sectionKey = [b.sourceUnitName, b.sourceSectionCode, b.sourceSectionName].filter(Boolean).join('|');
+    if (sectionKey !== activeSectionKey) {
+      flushSectionSubtotal();
+      activeSectionKey = sectionKey;
+      if (sectionKey) aoa.push(['', b.sourceSectionCode || '', b.sourceSectionName || b.sourceUnitName || '', '', '', '', '', '']);
+    }
+    sequence += 1;
+    aoa.push([
+      sequence, b.code || '', b.name, b.feature || '', b.unit || '',
+      Number(b.qty || 0), Number(b.unitPrice || 0), Number(b.amount || 0),
+    ]);
+    if (sectionKey) activeSectionTotal += Number(b.amount || 0);
+  });
+  flushSectionSubtotal();
   aoa.push([]);
   aoa.push(['', '', '', '', '', '合计', '', total]);
 
@@ -402,6 +421,77 @@ export function exportBOQExcel(project, boq) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '工程量清单');
   XLSX.writeFile(wb, `${project.name}-报价单-${Date.now()}.xlsx`);
+}
+
+export function exportCostEstimateExcel(project, lines, summary) {
+  const sourceLabels = {
+    manual: '手工测算', history: '历史项目', resource: '材料设备价', subcontract: '分包报价',
+    experience: '经验指标', quote_factor: '投标价折算',
+  };
+  const detail = [[
+    '序号', '项目编码', '项目名称', '项目特征', '单位', '工程量', '投标综合单价', '投标合价',
+    '内部成本单价', '内部成本合价', '成本/投标比例', '成本来源', '计入测算', '复核状态', '成本依据与风险备注',
+  ]];
+  lines.forEach((line, index) => detail.push([
+    index + 1, line.code || '', line.name || '', line.feature || '', line.unit || '', Number(line.qty || 0),
+    Number(line.unitPrice || 0), Number(line.amount || 0),
+    line.costUnitPrice === null || line.costUnitPrice === undefined || line.costUnitPrice === '' ? '' : Number(line.costUnitPrice),
+    line.costUnitPrice === null || line.costUnitPrice === undefined || line.costUnitPrice === '' ? '' : Number(line.costAmount || 0),
+    line.costUnitPrice === null || line.costUnitPrice === undefined || line.costUnitPrice === '' || Number(line.amount || 0) <= 0 ? '' : Number(line.costAmount || 0) / Number(line.amount),
+    sourceLabels[line.costSource] || '', line.costIncluded === false ? '否' : '是',
+    line.costReviewStatus === 'pending' ? '待复核' : (line.costUnitPrice === null || line.costUnitPrice === undefined || line.costUnitPrice === '' ? '未覆价' : '已覆价'),
+    line.costNote || '',
+  ]));
+
+  const settings = summary.settings || {};
+  const overview = [
+    ['项目成本测算', project.name || ''],
+    ['项目类型', project.type || ''],
+    ['计价地区', [project.pricingRegion?.province, project.pricingRegion?.city, project.pricingRegion?.district].filter(Boolean).join(' / ') || project.region || ''],
+    ['计价日期', project.pricingDate || ''],
+    [],
+    ['指标', '金额/比例'],
+    ['纳入测算投标价', Number(summary.bidTotal || 0)],
+    ['目标利润率', Number(settings.targetProfitRate || 0) / 100],
+    ['目标成本上限', Number(summary.targetCost || 0)],
+    ['直接成本', Number(summary.directCost || 0)],
+    [`措施及临设费（${Number(settings.measureRate || 0)}%）`, Number(summary.measureCost || 0)],
+    ['暂列及专业分包', Number(settings.provisionalAmount || 0)],
+    ['其他成本', Number(settings.otherAmount || 0)],
+    ['回收残值（扣减）', Number(settings.recoveryAmount || 0)],
+    [`税金（${Number(settings.taxRate || 0)}%）`, Number(summary.taxAmount || 0)],
+    ['预测总成本', Number(summary.totalCost || 0)],
+    ['预计利润', Number(summary.expectedProfit || 0)],
+    ['利润率', Number(summary.profitMargin || 0)],
+    ['目标成本余量', Number(summary.costHeadroom || 0)],
+    ['覆价条目完成率', Number(summary.coverage || 0)],
+    ['覆价金额覆盖率', Number(summary.valueCoverage || 0)],
+    ['未覆价条目', Number(summary.missingCount || 0)],
+    ['未覆价对应投标金额', Number(summary.missingBidAmount || 0)],
+    ['待复核条目', Number(summary.pendingCount || 0)],
+    ['待复核对应投标金额', Number(summary.pendingBidAmount || 0)],
+  ];
+
+  const detailSheet = XLSX.utils.aoa_to_sheet(detail);
+  for (let row = 2; row <= detail.length; row += 1) {
+    if (detailSheet[`K${row}`]) detailSheet[`K${row}`].z = '0.00%';
+  }
+  detailSheet['!cols'] = [
+    { wch: 6 }, { wch: 16 }, { wch: 30 }, { wch: 44 }, { wch: 9 }, { wch: 12 }, { wch: 14 },
+    { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 42 },
+  ];
+  const overviewSheet = XLSX.utils.aoa_to_sheet(overview);
+  overviewSheet['!cols'] = [{ wch: 28 }, { wch: 22 }];
+  ['B7', 'B9', 'B10', 'B11', 'B12', 'B13', 'B14', 'B15', 'B16', 'B17', 'B19', 'B23', 'B25'].forEach(address => {
+    if (overviewSheet[address]) overviewSheet[address].z = '#,##0.00';
+  });
+  ['B8', 'B18', 'B20', 'B21'].forEach(address => {
+    if (overviewSheet[address]) overviewSheet[address].z = '0.00%';
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, overviewSheet, '测算汇总');
+  XLSX.utils.book_append_sheet(wb, detailSheet, '清单覆价明细');
+  XLSX.writeFile(wb, `${project.name || '项目'}-成本测算-${Date.now()}.xlsx`);
 }
 
 /** 导出定额库模板 */

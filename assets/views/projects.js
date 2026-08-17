@@ -16,6 +16,7 @@ const TYPES = [
   '设备安装', '厂区配套', '车间', '其他'
 ];
 const SCALES = ['小型', '中型', '大型', '特大型'];
+const WATER_PROJECT_TYPES = new Set(['水厂', '污水处理厂', '再生水厂', '工业废水', '泵站', '管网', '调蓄池', '水池', '污泥处理']);
 const projectState = { status: '', type: '', risk: '', version: '', keyword: '', selectedId: '' };
 
 export async function render(workspace = document.getElementById('workspace')) {
@@ -59,7 +60,7 @@ export async function render(workspace = document.getElementById('workspace')) {
           ${summaryTile('可收录案例', portfolio.readyToArchive, '个')}
         </div>
         <div class="mt-4 flex items-center gap-2 text-sm">
-          <input id="pf_keyword_filter" value="${esc(projectState.keyword)}" class="h-9 w-64 rounded border border-slate-300 bg-white px-3" placeholder="搜索项目名称 / 工艺 / 结构..." />
+          <input id="pf_keyword_filter" value="${esc(projectState.keyword)}" class="h-9 w-64 rounded border border-slate-300 bg-white px-3" placeholder="搜索项目名称 / 类型 / 特征..." />
           <select id="pf_status_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
             <option value="">全部状态</option>
             <option value="doing" ${projectState.status === 'doing' ? 'selected' : ''}>进行中</option>
@@ -98,7 +99,7 @@ export async function render(workspace = document.getElementById('workspace')) {
       </section>
     </div>
   `;
-  document.getElementById('btnNew').onclick = () => editForm({ id: '', name: '', code: '', client: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing' });
+  document.getElementById('btnNew').onclick = () => editForm({ id: '', name: '', code: '', client: '', type: '', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing' });
   document.getElementById('pf_keyword_filter')?.addEventListener('input', e => {
     projectState.keyword = e.target.value;
     clearTimeout(window.__projectSearchTimer);
@@ -165,7 +166,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   });
   if (params.action === 'new') {
     window.__app.state.routeParams = {};
-    editForm({ id: '', name: '', code: '', client: '', type: '水厂', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing', currency: 'CNY' });
+    editForm({ id: '', name: '', code: '', client: '', type: '', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing', currency: 'CNY' });
   }
 }
 
@@ -270,6 +271,7 @@ function summaryTile(label, value, unit, cls = '') {
 
 function projectCard(summary) {
   const { project: p, lineCount, missing, versionCount, completion, unitCost, waterCost, next, eligibility } = summary;
+  const waterSpecific = isWaterProjectType(p.type) || Boolean(p.dailyCapacity);
   const archiveBlocked = p.status !== 'archived' && !eligibility.allowed;
   const blocker = eligibility.blockers[0] || null;
   return `<article class="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col min-h-[330px]">
@@ -300,10 +302,10 @@ function projectCard(summary) {
 
     <div class="p-4 flex-1 bg-slate-50/60">
       <div class="grid grid-cols-2 gap-2 text-sm">
-        ${miniMetric('日处理量', p.dailyCapacity ? `${esc(p.dailyCapacity)} 万m³/d` : '-')}
+        ${waterSpecific ? miniMetric('日处理量', p.dailyCapacity ? `${esc(p.dailyCapacity)} 万m³/d` : '-') : miniMetric('项目类型', p.type || '未分类')}
         ${miniMetric('建筑面积', p.area ? `${esc(p.area)} ㎡` : '-')}
         ${miniMetric('单方造价', p.area ? `${fmtMoney(unitCost, p.currency)}/㎡` : '-')}
-        ${miniMetric('单水造价', p.dailyCapacity ? `${fmtMoney(waterCost, p.currency)}/(m³·d)` : '-')}
+        ${waterSpecific ? miniMetric('单水造价', p.dailyCapacity ? `${fmtMoney(waterCost, p.currency)}/(m³·d)` : '-') : miniMetric('价格年份', p.priceYear || '-')}
         ${miniMetric('报价版本', `${versionCount} 个`)}
         ${miniMetric('缺价条目', `${missing} 条`)}
       </div>
@@ -318,7 +320,7 @@ function projectCard(summary) {
       </div>
       <div class="mt-4 flex items-center gap-2 text-xs text-slate-500">
         <span class="badge badge-gray">${esc(p.structure || '未填结构')}</span>
-        <span class="badge badge-gray">${esc(p.process || '未填工艺')}</span>
+        <span class="badge badge-gray">${esc(p.process || '未填专业特征')}</span>
         ${p.region ? `<span class="badge badge-gray">${esc(p.region)}</span>` : ''}
         ${p.stage ? `<span class="badge badge-gray">${esc(p.stage)}</span>` : ''}
       </div>
@@ -347,6 +349,11 @@ function miniMetric(label, value) {
   </div>`;
 }
 
+function isWaterProjectType(type = '') {
+  const value = String(type).trim();
+  return WATER_PROJECT_TYPES.has(value) || /水厂|污水|废水|再生水|污泥|泵站|水池|调蓄|管网/.test(value);
+}
+
 function statusBadge(s) {
   return s === 'archived' ? '<span class="badge badge-green">已收录案例</span>'
        : s === 'doing'    ? '<span class="badge badge-yellow">进行中</span>'
@@ -355,7 +362,8 @@ function statusBadge(s) {
 
 function editForm(p) {
   const isCustomType = Boolean(p.type && !TYPES.includes(p.type));
-  const selectedType = isCustomType ? '__custom__' : (p.type || '水厂');
+  const selectedType = isCustomType ? '__custom__' : (p.type || '');
+  const showWaterMetrics = isWaterProjectType(p.type);
   openModal((p.name ? '编辑' : '新建') + ' 项目', `
     <div class="space-y-4 text-sm text-slate-700">
       <section class="bg-white border border-slate-200 rounded-xl p-4">
@@ -371,17 +379,17 @@ function editForm(p) {
         </div>
         <div class="grid grid-cols-4 gap-3">
           <label class="col-span-4 block text-xs font-medium text-slate-500">项目名称 <span class="text-red-500">*</span>
-            <input id="pf_name" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-800" value="${esc(p.name)}" placeholder="例如：产品水池 / 预处理车间" />
+            <input id="pf_name" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-800" value="${esc(p.name)}" placeholder="请输入项目全称" />
           </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">项目编号
-            <input id="pf_code" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.code || '')}" placeholder="例如：WS-2026-001" />
+            <input id="pf_code" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.code || '')}" placeholder="请输入项目编号" />
           </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">建设单位 / 客户
             <input id="pf_client" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" value="${esc(p.client || '')}" placeholder="用于项目档案与成果封面" />
           </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">项目类型
-            <select id="pf_type" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm">${TYPES.map(t => `<option value="${esc(t)}" ${selectedType === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="__custom__" ${selectedType === '__custom__' ? 'selected' : ''}>自定义</option></select>
-            <input id="pf_type_custom" class="mt-2 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm ${isCustomType ? '' : 'hidden'}" value="${esc(isCustomType ? p.type : '')}" placeholder="请输入项目类型，例如：再生水厂 / 污泥处置中心" aria-label="自定义项目类型" />
+            <select id="pf_type" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm"><option value="" ${selectedType === '' ? 'selected' : ''}>请选择项目类型</option>${TYPES.map(t => `<option value="${esc(t)}" ${selectedType === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="__custom__" ${selectedType === '__custom__' ? 'selected' : ''}>自定义</option></select>
+            <input id="pf_type_custom" class="mt-2 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm ${isCustomType ? '' : 'hidden'}" value="${esc(isCustomType ? p.type : '')}" placeholder="请输入自定义项目类型" aria-label="自定义项目类型" />
           </label>
           <label class="col-span-2 block text-xs font-medium text-slate-500">状态
             <select id="pf_status" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm"><option value="doing" ${p.status === 'doing' ? 'selected' : ''}>进行中</option><option value="archived" ${p.status === 'archived' ? 'selected' : ''}>已收录案例</option></select>
@@ -392,13 +400,13 @@ function editForm(p) {
       <section class="bg-white border border-slate-200 rounded-xl p-4">
         <div class="mb-3">
           <div class="font-semibold text-slate-800">规模参数</div>
-          <div class="mt-1 text-xs text-slate-500">用于计算单方造价、单水造价和历史指标对标。</div>
+          <div class="mt-1 text-xs text-slate-500">用于计算单方造价和按适用口径进行历史指标对标。</div>
         </div>
         <div class="grid grid-cols-4 gap-3">
           <label class="block text-xs font-medium text-slate-500">规模等级
             <select id="pf_scale" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm"><option value="">不分规模</option>${SCALES.map(s => `<option ${p.scale === s ? 'selected' : ''}>${s}</option>`).join('')}</select>
           </label>
-          <label class="block text-xs font-medium text-slate-500">日处理量（万m³/d）
+          <label id="pf_daily_wrap" class="block text-xs font-medium text-slate-500 ${showWaterMetrics ? '' : 'hidden'}">日处理量（仅水处理项目，万m³/d）
             <input id="pf_daily" type="number" step="0.01" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-right tabular-nums" value="${esc(p.dailyCapacity || '')}" />
           </label>
           <label class="block text-xs font-medium text-slate-500">建筑面积（㎡）
@@ -419,8 +427,8 @@ function editForm(p) {
           <label class="block text-xs font-medium text-slate-500">结构形式
             <input id="pf_struct" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="钢筋砼 / 砖混 / 钢结构" value="${esc(p.structure || '')}" />
           </label>
-          <label class="block text-xs font-medium text-slate-500">工艺类型
-            <input id="pf_proc" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="AAO / MBR / SBR" value="${esc(p.process || '')}" />
+          <label class="block text-xs font-medium text-slate-500">专业 / 工艺特征
+            <input id="pf_proc" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="填写主要专业、工艺或建设内容" value="${esc(p.process || '')}" />
           </label>
           <label class="block text-xs font-medium text-slate-500">地区
             <input id="pf_region" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="例如：江苏·南京" value="${esc(p.region || '')}" />
@@ -456,13 +464,18 @@ function editForm(p) {
   `);
   const typeSelect = document.getElementById('pf_type');
   const customTypeInput = document.getElementById('pf_type_custom');
+  const dailyWrap = document.getElementById('pf_daily_wrap');
+  const selectedTypeValue = () => typeSelect.value === '__custom__' ? customTypeInput.value.trim() : typeSelect.value;
+  const syncSpecialtyFields = () => dailyWrap.classList.toggle('hidden', !isWaterProjectType(selectedTypeValue()));
   const syncCustomType = () => {
     const custom = typeSelect.value === '__custom__';
     customTypeInput.classList.toggle('hidden', !custom);
     customTypeInput.required = custom;
     if (custom) customTypeInput.focus();
+    syncSpecialtyFields();
   };
   typeSelect.addEventListener('change', syncCustomType);
+  customTypeInput.addEventListener('input', syncSpecialtyFields);
   document.getElementById('pf_ai').onclick = () => {
     const name = document.getElementById('pf_name').value.trim();
     if (!name) {
@@ -475,6 +488,7 @@ function editForm(p) {
       const el = document.getElementById(map[item.field]);
       if (el && item.suggestedValue) el.value = item.suggestedValue;
     });
+    syncSpecialtyFields();
     toast(result.summary || 'AI 已识别项目信息', 'success');
   };
   document.getElementById('pf_save').onclick = async () => {
@@ -506,8 +520,8 @@ function editForm(p) {
       return;
     }
     if (!obj.type) {
-      toast('请填写自定义项目类型', 'error');
-      customTypeInput.focus();
+      toast('请选择或填写项目类型', 'error');
+      (typeSelect.value === '__custom__' ? customTypeInput : typeSelect).focus();
       return;
     }
     try {

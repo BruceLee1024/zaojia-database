@@ -5,10 +5,10 @@ import { testResourceHealth } from './resourceHealth.mjs';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.15';
 import { formatCurrency, normalizeCurrency, sumByCurrency } from '../assets/utils/currency.js?v=6.15';
 import { decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
-import { buildHeaderTree, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.15';
+import { buildHeaderTree, classifyImportRow, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.15';
 import { applyMappingTemplate, buildImportColumnMapping, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.15';
 import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../assets/services/importSchemaService.js?v=6.15';
-import { analyzeImport, mergeCommitRows } from '../assets/services/importWorkflowService.js?v=6.15';
+import { analyzeImport, detectProjectBoqRegionKind, isImportFieldRequired, mergeCommitRows } from '../assets/services/importWorkflowService.js?v=6.15';
 import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js?v=6.15';
 import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.15';
 import { createHierarchicalRecognitionRequest, createRecognitionRequest, validateColumnRecognitionPayload, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.15';
@@ -26,6 +26,8 @@ import { testQuotaBoqIntegration } from './quotaBoqIntegration.mjs';
 import { testBoqQuotaRelations } from './boqQuotaRelations.mjs';
 import { testFinalFixes } from './finalFixes.mjs';
 import { testAiCopilot, testAiSessionPersistence } from './aiCopilot.mjs';
+import { testCostEstimationMath, testCostEstimationPersistence } from './costEstimation.mjs';
+import { testIndicatorAggregation } from './indicatorAggregation.mjs';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -349,6 +351,14 @@ function testMergedHeaderTreeAndRegions() {
   assert.equal(header.columns[5].displayName, '费用构成 / 材料费 / 单价');
   assert.notEqual(header.columns[3].id, header.columns[5].id);
 
+  const metadataHeader = buildHeaderTree({
+    sheetName: '其他项目费', regionId: 'other:1',
+    matrix: [['工程名称：土建工程', '', ''], ['序号', '项目名称', '金额(元)']],
+    merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }], headerStart: 0, headerEnd: 1,
+  });
+  assert.equal(metadataHeader.columns[0].displayName, '序号');
+  assert.equal(metadataHeader.columns[1].displayName, '项目名称');
+
   const regions = detectImportRegions({ sheets: [{ name: '清单', matrix, merges, hidden: false }] });
   assert.equal(regions.length >= 2, true);
   assert.equal(regions[0].columns.some(column => column.path.length >= 3), true);
@@ -381,6 +391,46 @@ function testMergedHeaderTreeAndRegions() {
   assert.equal(manualFallback.length, 1);
   assert.equal(manualFallback[0].confidence, 'low');
   assert.equal(manualFallback[0].manualRequired, true);
+
+  const standardBoqMatrix = [
+    ['E.1 分部分项工程量清单计价表', '', '', '', '', '', '', '', '', '', ''],
+    ['工程名称：土建工程', '', '', '', '', '', '', '', '', '', ''],
+    ['序号', '项目编码', '项目名称', '项目特征描述', '计量单位', '工程量', '金额（元）', '', '', '', ''],
+    ['', '', '', '', '', '', '综合单价', '合价', '其中', '', ''],
+    ['', '', '', '', '', '', '', '', '定额人工费', '定额机械费', '暂估价'],
+    ['', '0101', '土石方工程', '', '', '', '', '', '', '', ''],
+    ['1', '010101001001', '平整场地', '土壤类别：现场现状土', 'm2', '2700', '', '', '', '', ''],
+    ['', '', '分部小计', '', '', '', '', '', '', '', ''],
+    ['', '0102', '地基处理与边坡支护工程', '', '', '', '', '', '', '', ''],
+    ['2', '010202007001', '抗浮锚杆', '钻孔深度：6m', '根', '10', '', '', '', '', ''],
+  ];
+  const standardBoqMerges = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 10 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 10 } },
+    { s: { r: 2, c: 0 }, e: { r: 4, c: 0 } },
+    { s: { r: 2, c: 1 }, e: { r: 4, c: 1 } },
+    { s: { r: 2, c: 2 }, e: { r: 4, c: 2 } },
+    { s: { r: 2, c: 3 }, e: { r: 4, c: 3 } },
+    { s: { r: 2, c: 4 }, e: { r: 4, c: 4 } },
+    { s: { r: 2, c: 5 }, e: { r: 4, c: 5 } },
+    { s: { r: 2, c: 6 }, e: { r: 2, c: 10 } },
+    { s: { r: 3, c: 8 }, e: { r: 3, c: 10 } },
+    { s: { r: 5, c: 2 }, e: { r: 5, c: 3 } },
+    { s: { r: 7, c: 2 }, e: { r: 7, c: 3 } },
+    { s: { r: 8, c: 2 }, e: { r: 8, c: 3 } },
+  ];
+  const standardBoqRegions = detectImportRegions({ sheets: [{
+    name: 'E.1 清单', matrix: standardBoqMatrix, merges: standardBoqMerges, hidden: false,
+  }] }, { schema: getImportSchema('project_boq') });
+  assert.equal(standardBoqRegions.length, 1);
+  assert.equal(standardBoqRegions[0].headerStart <= 3, true);
+  assert.equal(standardBoqRegions[0].headerEnd, 4);
+  assert.equal(standardBoqRegions[0].columns[1].displayName, '项目编码');
+  assert.equal(standardBoqRegions[0].rows.length, 2);
+  assert.equal(standardBoqRegions[0].skippedRows.filter(row => row.kind === 'section').length, 2);
+  assert.equal(standardBoqRegions[0].skippedRows.filter(row => row.kind === 'subtotal').length, 1);
+  const standardBoqMapping = buildImportColumnMapping(standardBoqRegions[0].columns, standardBoqRegions[0].rows, 'project_boq');
+  assert.equal(Boolean(standardBoqMapping.mapping.feature), true);
 }
 
 function testUnifiedImportSchemaAndHierarchicalMapping() {
@@ -442,6 +492,60 @@ function testUnifiedImportAnalysis() {
   const inherited = analyzeImport([contextRegion], { targetType: 'project_boq', mappings: { context: { process: 'process', name: 'name', unit: 'unit', qty: 'qty' } } });
   assert.equal(inherited.rows[1].data.process, '土建专业');
   assert.equal(inherited.rows[1].data.name, '池底');
+
+  const hierarchyColumns = [
+    { id: 'code', columnIndex: 0, path: ['项目编码'], leaf: '项目编码', displayName: '项目编码' },
+    { id: 'name', columnIndex: 1, path: ['项目名称'], leaf: '项目名称', displayName: '项目名称' },
+    { id: 'unit', columnIndex: 2, path: ['计量单位'], leaf: '计量单位', displayName: '计量单位' },
+    { id: 'qty', columnIndex: 3, path: ['工程量'], leaf: '工程量', displayName: '工程量' },
+    { id: 'labor', columnIndex: 4, path: ['金额', '其中', '定额人工费'], leaf: '定额人工费', displayName: '金额 / 其中 / 定额人工费' },
+  ];
+  assert.equal(classifyImportRow(['0101', '土石方工程', '', '', ''], hierarchyColumns), 'section');
+  assert.equal(classifyImportRow(['', '分部小计', '', '', ''], hierarchyColumns), 'subtotal');
+  const hierarchyRegion = {
+    id: 'sheet:hierarchy', signature: 'hierarchy', sheetName: '土建清单', title: 'E.1 分部分项工程量清单计价表',
+    dataStart: 3, matrix: [['E.1 分部分项工程量清单计价表'], ['工程名称：土建工程'], []], columns: hierarchyColumns,
+    rows: [{ sourceRow: 4, sourceRowNumber: 5, kind: 'detail', raw: ['010101001001', '平整场地', 'm2', '2700', '120'], values: { code: '010101001001', name: '平整场地', unit: 'm2', qty: '2700', labor: '120' } }],
+    skippedRows: [
+      { sourceRow: 3, sourceRowNumber: 4, kind: 'section', raw: ['0101', '土石方工程'], values: { code: '0101', name: '土石方工程' } },
+      { sourceRow: 5, sourceRowNumber: 6, kind: 'subtotal', raw: ['', '分部小计'], values: { name: '分部小计' } },
+    ],
+  };
+  const hierarchy = analyzeImport([hierarchyRegion], { targetType: 'project_boq', mappings: { hierarchy: { code: 'code', name: 'name', unit: 'unit', qty: 'qty', laborAmount: 'labor' } } });
+  assert.equal(hierarchy.hierarchyRows.length, 2);
+  assert.equal(hierarchy.rows[0].data.sourceUnitName, '土建工程');
+  assert.equal(hierarchy.rows[0].data.sourceSectionCode, '0101');
+  assert.equal(hierarchy.rows[0].data.sourceSectionName, '土石方工程');
+  assert.equal(hierarchy.rows[0].data.laborAmount, 120);
+  assert.deepEqual(hierarchy.rows[0].data.sourceSectionPath, ['土建工程', '土石方工程']);
+
+  const otherChargeRegion = {
+    id: 'sheet:other', signature: 'other', sheetName: 'H.1 其他项目清单与计价汇总表',
+    title: '4 H.1 其他项目清单与计价汇总表', dataStart: 2,
+    matrix: [['4 H.1 其他项目清单与计价汇总表'], ['工程名称：土建工程']],
+    columns: [
+      { id: 'seq', columnIndex: 0, path: ['序号'], leaf: '序号', displayName: '序号' },
+      { id: 'name', columnIndex: 1, path: ['项目名称'], leaf: '项目名称', displayName: '项目名称' },
+      { id: 'amount', columnIndex: 2, path: ['金额(元)'], leaf: '金额(元)', displayName: '金额(元)' },
+    ],
+    rows: [{ sourceRow: 2, sourceRowNumber: 3, kind: 'detail', raw: [1, '暂列金额', 500000], values: { seq: 1, name: '暂列金额', amount: 500000 } }],
+    skippedRows: [],
+  };
+  assert.equal(detectProjectBoqRegionKind(otherChargeRegion, 'project_boq'), 'other_charge_summary');
+  assert.equal(isImportFieldRequired({ key: 'unit', required: true }, 'project_boq', otherChargeRegion), false);
+  assert.equal(isImportFieldRequired({ key: 'amount', required: false }, 'project_boq', otherChargeRegion), true);
+  const otherCharge = analyzeImport([otherChargeRegion], { targetType: 'project_boq', mappings: { other: { code: 'seq', name: 'name', amount: 'amount' } } });
+  assert.equal(otherCharge.counts.valid, 1);
+  assert.equal(otherCharge.rows[0].data.lineType, 'other_charge');
+  assert.equal(otherCharge.rows[0].data.chargeType, 'provisional_sum');
+  assert.equal(otherCharge.rows[0].data.unit, '项');
+  assert.equal(otherCharge.rows[0].data.qty, 1);
+  assert.equal(otherCharge.rows[0].data.unitPrice, 500000);
+  assert.equal(otherCharge.rows[0].data.amount, 500000);
+  assert.equal(otherCharge.rows[0].issues.length, 0);
+  const missingOtherCharge = analyzeImport([{ ...otherChargeRegion, rows: [{ ...otherChargeRegion.rows[0], values: { seq: 1, name: '暂列金额', amount: '' } }] }], { targetType: 'project_boq', mappings: { other: { code: 'seq', name: 'name', amount: 'amount' } } });
+  assert.equal(missingOtherCharge.counts.invalid, 1);
+  assert.equal(missingOtherCharge.rows[0].issues.some(issue => issue.code === 'missing_amount'), true);
 
   const reportRows = mergeCommitRows([
     { id: 'r1', importable: true, sheetName: '材料', sourceRowNumber: 2, issues: [] },
@@ -711,6 +815,8 @@ function notFound() {
 }
 
 testCosting();
+testCostEstimationMath();
+testIndicatorAggregation();
 testProjectCurrencies();
 testBackupSafeAIConfig();
 testAISystemPromptPresets();
@@ -746,6 +852,7 @@ await testAIAssistService();
 await testExperienceService();
 await testBoqLibraryService();
 await testBuiltinDemoData();
+await testCostEstimationPersistence();
 await testMaterialEquipmentDomain();
 await testResourceWorkbench();
 await testResourceAttachments();
@@ -1081,6 +1188,12 @@ async function testAIAssistService() {
   const lineSuggestion = await ai.suggestBoqLine(line);
   assert.equal(lineSuggestion.suggestions.some(s => s.field === 'unit'), true);
   assert.equal(lineSuggestion.suggestions.some(s => s.field === 'unitPrice' && Number(s.suggestedValue) > 0), true);
+
+  const draft = await ai.suggestBoqDraft({ name: '通用改造工程', type: '工业厂房' }, '包含钢筋混凝土和防水工程');
+  assert.equal(draft.source, 'local');
+  assert.equal(draft.suggestions.length > 0, true);
+  assert.equal(draft.suggestions.every(item => item.quotaId && item.name), true);
+  assert.equal(draft.suggestions.some(item => /混凝土|防水|钢筋/.test(item.name)), true);
 
   const missing = await ai.suggestMissingPrices([line]);
   assert.equal(missing.suggestions.length, 1);

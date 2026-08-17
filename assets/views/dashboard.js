@@ -13,6 +13,10 @@ const chartState = {
   composition: null,
 };
 
+const dashboardUiState = {
+  activeTab: 'overview',
+};
+
 export async function render(workspace = document.getElementById('workspace')) {
   const [quota, projects, boq, versions, engine, experience, resourceHealth] = await Promise.all([
     quotaRepo.all(),
@@ -28,31 +32,88 @@ export async function render(workspace = document.getElementById('workspace')) {
   workspace.innerHTML = `
     <div class="page-frame min-h-full flex flex-col gap-3">
       ${dashboardTitle(stats)}
-
-      ${personalStartCard(stats)}
-
-      ${executiveSummary(stats)}
-
-      ${resourceHealthSection(stats.resourceHealth)}
-
-      <section class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,.95fr)] gap-3">
-        ${trendPanel(stats)}
-        ${actionQueue(stats)}
-      </section>
-
-      <section class="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)_360px] gap-3">
-        ${projectCompositionPanel(stats)}
-        ${projectTablePanel(stats)}
-        ${healthRadarPanel(stats)}
-      </section>
-
-      <section class="grid grid-cols-1 xl:grid-cols-[minmax(0,.95fr)_minmax(0,1fr)] gap-3">
-        ${experienceAssetCard(stats)}
-        ${recentVersionAssetCard(stats)}
-      </section>
+      ${dashboardTabNav(stats, dashboardUiState.activeTab)}
+      <div id="dashboard-tab-content" class="min-h-0">
+        ${dashboardTabContent(stats, dashboardUiState.activeTab)}
+      </div>
     </div>
   `;
 
+  bindDashboardTabs(stats, workspace);
+  activateDashboardTab(stats, dashboardUiState.activeTab, workspace, { renderContent: false });
+}
+
+export function dashboardTabNav(stats, activeTab = 'overview') {
+  const tabs = [
+    { id: 'overview', label: '工作概览', icon: 'space_dashboard', meta: `${fmt(stats.nextActions.length)} 项待办` },
+    { id: 'projects', label: '项目分析', icon: 'monitoring', meta: `${fmt(stats.projects.length)} 个项目` },
+    { id: 'resources', label: '资源健康', icon: 'health_and_safety', meta: `${fmt(stats.resourceHealth.summary.total)} 项异常` },
+    { id: 'assets', label: '版本与复盘', icon: 'history_edu', meta: `${fmt(stats.recentVersions.length)} 个版本` },
+  ];
+  return `<nav class="card p-1.5" aria-label="概览分类">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-1" role="tablist" aria-label="我的造价概览">
+      ${tabs.map(tab => {
+        const selected = tab.id === activeTab;
+        return `<button type="button" role="tab" data-dashboard-tab="${tab.id}" aria-selected="${selected}" aria-controls="dashboard-tab-content" class="min-h-11 rounded-md border px-3 py-2 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600 ${selected ? 'border-teal-200 bg-teal-50 text-teal-800 shadow-sm' : 'border-transparent bg-white text-slate-600 hover:border-slate-200 hover:bg-slate-50'}">
+          <span class="flex items-center gap-2.5">
+            <span class="material-symbols-outlined text-[18px]" aria-hidden="true">${tab.icon}</span>
+            <span class="min-w-0">
+              <span class="block text-sm font-semibold truncate">${tab.label}</span>
+              <span class="block mt-0.5 text-[11px] ${selected ? 'text-teal-700' : 'text-slate-400'} truncate">${tab.meta}</span>
+            </span>
+          </span>
+        </button>`;
+      }).join('')}
+    </div>
+  </nav>`;
+}
+
+export function dashboardTabContent(stats, activeTab = 'overview') {
+  if (activeTab === 'projects') return `<div class="space-y-3" data-dashboard-panel="projects" role="tabpanel">
+    <section class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,.95fr)] gap-3">
+      ${trendPanel(stats)}
+      ${projectCompositionPanel(stats)}
+    </section>
+    ${projectTablePanel(stats)}
+  </div>`;
+
+  if (activeTab === 'resources') return `<div class="space-y-3" data-dashboard-panel="resources" role="tabpanel">
+    ${resourceHealthSection(stats.resourceHealth)}
+    ${healthRadarPanel(stats)}
+  </div>`;
+
+  if (activeTab === 'assets') return `<div class="space-y-3" data-dashboard-panel="assets" role="tabpanel">
+    <section class="grid grid-cols-1 xl:grid-cols-[minmax(0,.95fr)_minmax(0,1fr)] gap-3">
+      ${experienceAssetCard(stats)}
+      ${recentVersionAssetCard(stats)}
+    </section>
+  </div>`;
+
+  return `<div class="space-y-3" data-dashboard-panel="overview" role="tabpanel">
+    ${personalStartCard(stats)}
+    ${executiveSummary(stats)}
+    ${actionQueue(stats)}
+  </div>`;
+}
+
+function bindDashboardTabs(stats, workspace) {
+  workspace.querySelectorAll('[data-dashboard-tab]').forEach(button => {
+    button.onclick = () => activateDashboardTab(stats, button.dataset.dashboardTab, workspace);
+  });
+}
+
+function activateDashboardTab(stats, tabId, workspace, { renderContent = true } = {}) {
+  const validTabs = new Set(['overview', 'projects', 'resources', 'assets']);
+  dashboardUiState.activeTab = validTabs.has(tabId) ? tabId : 'overview';
+  workspace.querySelectorAll('[data-dashboard-tab]').forEach(button => {
+    const selected = button.dataset.dashboardTab === dashboardUiState.activeTab;
+    button.setAttribute('aria-selected', String(selected));
+    button.className = `min-h-11 rounded-md border px-3 py-2 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-600 ${selected ? 'border-teal-200 bg-teal-50 text-teal-800 shadow-sm' : 'border-transparent bg-white text-slate-600 hover:border-slate-200 hover:bg-slate-50'}`;
+    const meta = button.querySelector('.text-\\[11px\\]');
+    if (meta) meta.className = `block mt-0.5 text-[11px] ${selected ? 'text-teal-700' : 'text-slate-400'} truncate`;
+  });
+  const content = workspace.querySelector('#dashboard-tab-content');
+  if (renderContent && content) content.innerHTML = dashboardTabContent(stats, dashboardUiState.activeTab);
   bindResourceHealthActions(stats.resourceHealth, workspace);
   drawCharts(stats, workspace);
 }

@@ -209,7 +209,7 @@ export const boqService = {
         warnings.push(`第 ${index + 1} 行缺少项目名称`);
         return;
       }
-      const hit = pickBestQuota(quotaItems, `${row.name} ${row.feature || ''}`);
+      const hit = row.lineType === 'other_charge' ? null : pickBestQuota(quotaItems, `${row.name} ${row.feature || ''}`);
       imported.push({
         ...row,
         id: uid(),
@@ -339,7 +339,7 @@ export const boqService = {
       missingPrice: lines.filter(line => hasMissingPrice(line.unitPrice)),
       zeroQty: lines.filter(line => !(Number(line.qty) > 0)),
       factorRisk: lines.filter(line => Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8),
-      unmatchedQuota: lines.filter(line => !line.quotaItemId && !(relationsByLine.get(line.id) || []).some(row => row.quotaItemId)),
+      unmatchedQuota: lines.filter(line => line.lineType !== 'other_charge' && !line.quotaItemId && !(relationsByLine.get(line.id) || []).some(row => row.quotaItemId)),
       invalidQuotaReference: lines.filter(line => line.quotaReferenceStatus === 'missing' || (line.quotaItemId && !quotaIds.has(line.quotaItemId)) || (relationsByLine.get(line.id) || []).some(row => row.referenceStatus === 'missing' || (row.quotaItemId && !quotaIds.has(row.quotaItemId)))),
       duplicate: lines.filter(line => duplicateMap.get([line.name, line.feature, line.unit].map(v => String(v || '').trim()).join('|')) > 1),
       invalidResourceReference: lines.filter(line => hasInvalidResourceReference(line, resourceIds)),

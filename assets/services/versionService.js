@@ -9,6 +9,10 @@ import { assertProjectEditableById } from './projectLockService.js?v=6.15';
 
 const LINE_FIELDS = [
   'quotaItemId', 'code', 'name', 'feature', 'unit', 'qty', 'factor', 'unitPrice', 'amount', 'priceMissing', 'structureGroup',
+  'laborAmount', 'machineAmount', 'provisionalAmount',
+  'lineType', 'sourceTableKind', 'chargeType', 'sourceAmountProvided',
+  'sourceSheetName', 'sourceDocumentTitle', 'sourceUnitName', 'sourceSectionCode', 'sourceSectionName', 'sourceSectionPath',
+  'sourceSectionRowNumber', 'sourceRowNumber',
   'resourceItemId', 'resourcePriceId', 'resourceSnapshot', 'resourcePriceSnapshot', 'resourceReferenceStatus', 'resourceReferenceNote',
   'linkedResourceItemId', 'linkedResourceSnapshot', 'linkedEquipmentLineId', 'linkedResourceReferenceStatus', 'linkedResourceReferenceNote',
   'installationResourceItemId', 'manualInstallationResourceId',
