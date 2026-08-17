@@ -1,6 +1,6 @@
 // 统一表格导入向导：五类目标共用文件、数据区、层级映射、预览和写入流程。
 import { parseImportFile } from '../data/excel.js?v=6.15&build=20260814';
-import { buildHeaderTree, classifyImportRow, detectImportRegions } from '../data/importEngine.js?v=6.15&build=20260814';
+import { buildHeaderTree, buildImportRows, detectImportRegions } from '../data/importEngine.js?v=6.15&build=20260814';
 import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.15&build=20260814';
 import { getImportSchema } from '../services/importSchemaService.js?v=6.15&build=20260814';
 import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.15';
@@ -187,8 +187,13 @@ function previewRowsHtml(rows) {
     const child = bundle && row.data.rowKind === 'quota';
     const badge = bundle ? `<span class="badge ${child ? 'badge-yellow' : 'badge-blue'}">${child ? '定额' : '清单'}</span>` : '';
     const section = state.targetType === 'project_boq' && row.data.sourceSectionName ? `<div class="mt-1 text-[11px] font-normal text-slate-500">${esc([row.data.sourceSectionCode, row.data.sourceSectionName].filter(Boolean).join(' '))}</div>` : '';
-    return `<tr class="border-t ${row.importable ? child ? 'bg-amber-50/30' : '' : 'bg-red-50/50'}"><td class="p-2 text-slate-500">${esc(row.sheetName)}:${row.sourceRowNumber}</td><td class="p-2 font-medium text-slate-800"><div class="flex items-center gap-2 ${child ? 'pl-5' : ''}">${child ? '<span class="text-slate-300">└</span>' : ''}${badge}<span>${esc(row.data.code || '')}${row.data.code ? ' · ' : ''}${esc(row.data.name || '-')}${section}</span></div></td><td class="p-2">${esc(row.data.unit || '-')}</td><td class="p-2 text-right">${esc(row.data.qty ?? row.data.defaultQty ?? '-')}</td><td class="p-2 text-right ${Number(row.data.unitPrice ?? row.data.priceTotal ?? 0) < 0 ? 'text-amber-700 font-semibold' : ''}">${esc(row.data.unitPrice ?? row.data.priceTotal ?? '-')}</td><td class="p-2 ${row.issues.some(issue => issue.severity === 'error') ? 'text-red-700' : row.issues.length ? 'text-amber-700' : 'text-teal-700'}">${esc(row.issues.map(issue => issue.message).join('；') || (child ? '关联上方最近清单' : '检查通过'))}</td></tr>`;
+    return `<tr class="border-t ${row.importable ? child ? 'bg-amber-50/30' : '' : 'bg-red-50/50'}"><td class="p-2 text-slate-500">${esc(row.sheetName)}:${sourceRowLabel(row)}</td><td class="p-2 font-medium text-slate-800"><div class="flex items-center gap-2 ${child ? 'pl-5' : ''}">${child ? '<span class="text-slate-300">└</span>' : ''}${badge}<span>${esc(row.data.code || '')}${row.data.code ? ' · ' : ''}${esc(row.data.name || '-')}${section}</span></div></td><td class="p-2">${esc(row.data.unit || '-')}</td><td class="p-2 text-right">${esc(row.data.qty ?? row.data.defaultQty ?? '-')}</td><td class="p-2 text-right ${Number(row.data.unitPrice ?? row.data.priceTotal ?? 0) < 0 ? 'text-amber-700 font-semibold' : ''}">${esc(row.data.unitPrice ?? row.data.priceTotal ?? '-')}</td><td class="p-2 ${row.issues.some(issue => issue.severity === 'error') ? 'text-red-700' : row.issues.length ? 'text-amber-700' : 'text-teal-700'}">${esc(row.issues.map(issue => issue.message).join('；') || (child ? '关联上方最近清单' : '检查通过'))}</td></tr>`;
   }).join('');
+}
+
+function sourceRowLabel(row = {}) {
+  const rowNumbers = [...new Set((row.sourceRowNumbers || [row.sourceRowNumber]).filter(Number.isFinite))];
+  return rowNumbers.length > 1 ? rowNumbers.join('、') : String(rowNumbers[0] || '-');
 }
 
 function resultPanel() {
@@ -228,15 +233,8 @@ function adjustRegion(workspace, id) {
   const end = Math.min(current.matrix.length - 1, Math.max(start, Number(document.getElementById(`regionEnd-${safeId(id)}`)?.value || start + 1) - 1));
   if (end - start + 1 > 6) return toast('表头最多选择 6 行', 'error');
   const header = buildHeaderTree({ sheetName: current.sheetName, regionId: current.id, matrix: current.matrix, merges: current.merges, headerStart: start, headerEnd: end });
-  const rows = [];
-  const skippedRows = [];
-  for (let rowIndex = end + 1; rowIndex <= current.dataEnd; rowIndex += 1) {
-    const raw = current.matrix[rowIndex] || [];
-    const kind = classifyImportRow(raw, header.columns);
-    const row = { sourceRow: rowIndex, sourceRowNumber: rowIndex + 1, kind, raw, values: Object.fromEntries(header.columns.map(column => [column.id, raw[column.columnIndex] ?? ''])) };
-    (kind === 'detail' ? rows : skippedRows).push(row);
-  }
-  state.regions[index] = { ...current, headerStart: start, headerEnd: end, dataStart: end + 1, columns: header.columns, rows, skippedRows, title: header.title, warnings: header.warnings, signature: header.columns.map(column => column.normalizedPath.join('>')).join('|'), confidence: 'manual', manualRequired: false };
+  const classified = buildImportRows(current.matrix, header.columns, end + 1, current.dataEnd);
+  state.regions[index] = { ...current, headerStart: start, headerEnd: end, dataStart: end + 1, columns: header.columns, rows: classified.rows, skippedRows: classified.skippedRows, title: header.title, warnings: header.warnings, signature: header.columns.map(column => column.normalizedPath.join('>')).join('|'), confidence: 'manual', manualRequired: false };
   state.selectedRegionIds.add(current.id);
   toast('已按手动表头范围重新识别', 'success');
   paint(workspace);

@@ -124,7 +124,7 @@ export function detectImportRegions(workbook = {}, { maxHeaderDepth = MAX_HEADER
         sheetName: sheet.name || '', regionId, matrix, merges: sheet.merges || [],
         headerStart: candidate.headerStart, headerEnd: candidate.headerEnd,
       });
-      const classified = classifyRegionRows(matrix, header.columns, dataStart, dataEnd);
+      const classified = buildImportRows(matrix, header.columns, dataStart, dataEnd);
       if (!classified.rows.length && !classified.skippedRows.length) return;
       regions.push({
         id: regionId,
@@ -238,7 +238,7 @@ function scoreHeaderCandidate(matrix, header, dataStart, merges, schemaTerms = [
   );
 }
 
-function classifyRegionRows(matrix, columns, start, end) {
+export function buildImportRows(matrix, columns, start, end) {
   const rows = [];
   const skippedRows = [];
   for (let sourceRow = start; sourceRow <= end; sourceRow += 1) {
@@ -246,10 +246,90 @@ function classifyRegionRows(matrix, columns, start, end) {
     const kind = classifyImportRow(raw, columns);
     const values = Object.fromEntries(columns.map(column => [column.id, raw[column.columnIndex] ?? '']));
     const item = { sourceRow, sourceRowNumber: sourceRow + 1, kind, raw, values };
-    if (kind === 'detail') rows.push(item);
-    else skippedRows.push(item);
+    const previous = rows[rows.length - 1];
+    // 很多计价表会把“项目特征”或被纵向合并单元格遮住的数量、单价放到下一物理行。
+    // 这不是一条新清单；在字段映射前先折叠为同一条逻辑明细，避免导入时误拆或漏掉特征。
+    if (previous && isContinuationRow(item, columns)) {
+      appendContinuationRow(previous, item, columns);
+    } else if (previous && isComplementRow(item, columns, previous)) {
+      appendComplementRow(previous, item);
+    } else if (kind === 'detail') {
+      rows.push(item);
+    } else {
+      skippedRows.push(item);
+    }
   }
   return { rows, skippedRows };
+}
+
+function isContinuationRow(item, columns) {
+  if (item.kind !== 'section') return false;
+  const populated = populatedColumns(item, columns);
+  if (!populated.length || populated.some(({ column }) => isMeasureColumn(column))) return false;
+  const text = populated.map(({ value }) => String(value).trim()).join(' ');
+  if (!text || /(?:分部|分项|单位工程|章节|工程$|安装工程$|土建工程$)/.test(text)) return false;
+  const hasFeatureColumn = populated.some(({ column }) => isFeatureColumn(column));
+  const listLike = /^(?:[（(]?\d+[.)、】【、]|[-—•])\s*/.test(text);
+  // 只吸收有明确特征列的单元格，或呈现为“1、……/（1）……”的续写说明。
+  return hasFeatureColumn || listLike;
+}
+
+function isComplementRow(item, columns, previous) {
+  if (item.kind !== 'detail') return false;
+  const populated = populatedColumns(item, columns);
+  if (!populated.length || populated.some(({ column }) => isNameColumn(column))) return false;
+  // 仅处理由纵向合并/拆行产生的“无名称补充行”：该行必须只含单位或数值字段，
+  // 且能补齐上一行的空字段。这样正常的短行不会被错误合并。
+  if (!populated.every(({ column }) => isMeasureColumn(column) || isSerialColumn(column))) return false;
+  return populated.some(({ column }) => isBlank(previous.values[column.id]));
+}
+
+function appendContinuationRow(previous, continuation, columns) {
+  const populated = populatedColumns(continuation, columns);
+  const destination = populated.find(({ column }) => isFeatureColumn(column))?.column
+    || columns.find(isFeatureColumn)
+    || populated[0]?.column;
+  if (!destination) return;
+  const text = populated.map(({ value }) => String(value).trim()).filter(Boolean).join('\n');
+  if (!text) return;
+  const original = String(previous.values[destination.id] ?? '').trim();
+  previous.values[destination.id] = original ? `${original}\n${text}` : text;
+  previous.continuationRows ||= [];
+  previous.continuationRows.push(continuation.sourceRowNumber);
+}
+
+function appendComplementRow(previous, complement) {
+  Object.entries(complement.values).forEach(([key, value]) => {
+    if (isBlank(previous.values[key]) && !isBlank(value)) previous.values[key] = value;
+  });
+  previous.continuationRows ||= [];
+  previous.continuationRows.push(complement.sourceRowNumber);
+}
+
+function populatedColumns(item, columns) {
+  return columns
+    .map(column => ({ column, value: item.values[column.id] }))
+    .filter(({ value }) => !isBlank(value));
+}
+
+function columnText(column = {}) {
+  return normalizeHeaderText([...(column.path || []), column.leaf || ''].join(' '));
+}
+
+function isFeatureColumn(column) {
+  return /(?:项目特征|特征|规格|型号|工作内容|描述|备注|说明)/.test(columnText(column));
+}
+
+function isNameColumn(column) {
+  return /(?:项目名称|清单名称|材料名称|设备名称|名称)/.test(columnText(column)) && !isFeatureColumn(column);
+}
+
+function isMeasureColumn(column) {
+  return /(?:工程量|工程数量|数量|单价|合价|金额|人工费|材料费|机械费|税率|计量单位|单位)/.test(columnText(column));
+}
+
+function isSerialColumn(column) {
+  return /^(?:序号|编号)$/.test(columnText(column));
 }
 
 function detectTitleRows(grid, merges, start, end, columnCount) {
@@ -327,7 +407,7 @@ function createManualFallbackRegion(sheet) {
   const header = buildHeaderTree({
     sheetName: sheet.name || '', regionId, matrix, merges: sheet.merges || [], headerStart, headerEnd: headerStart,
   });
-  const classified = classifyRegionRows(matrix, header.columns, headerStart + 1, matrix.length - 1);
+  const classified = buildImportRows(matrix, header.columns, headerStart + 1, matrix.length - 1);
   return {
     id: regionId,
     sheetName: sheet.name || '',
@@ -356,7 +436,10 @@ function isNumeric(value) {
 }
 
 function isBlank(value) {
-  return value === undefined || value === null || String(value).trim() === '';
+  if (value === undefined || value === null) return true;
+  // 导出表常用横线、斜线或“无”填充空单元格；把它们当作内容会让补充行
+  // 误判为新明细，也会降低表头和字段映射的置信度。
+  return /^(?:|--?|—|－|\/?|无|n\/?a)$/i.test(String(value).trim());
 }
 
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {

@@ -101,13 +101,17 @@ export function analyzeImport(regions = [], {
         sheetName: region.sheetName,
         sourceRow: sourceRow.sourceRow,
         sourceRowNumber: sourceRow.sourceRowNumber,
+        sourceRowNumbers: [sourceRow.sourceRowNumber, ...(sourceRow.continuationRows || [])],
         source: sourceRow,
         data: normalized,
         issues: rowIssues,
         importable: !rowIssues.some(issue => issue.severity === 'error'),
       };
       outputRows.push(record);
-      issues.push(...rowIssues.map(issue => ({ ...issue, rowId: record.id, sheetName: region.sheetName, sourceRowNumber: sourceRow.sourceRowNumber })));
+      issues.push(...rowIssues.map(issue => ({
+        ...issue, rowId: record.id, sheetName: region.sheetName,
+        sourceRowNumber: sourceRow.sourceRowNumber, sourceRowNumbers: record.sourceRowNumbers,
+      })));
     });
     skippedRows.push(...region.skippedRows.map(row => ({ ...row, regionId: region.id, sheetName: region.sheetName })));
     analyzedRegions.push({ ...region, mapping, fieldState, regionKind });
@@ -135,7 +139,9 @@ export function analyzeImport(regions = [], {
 
 export async function commitImport(preview, options = {}) {
   if (!preview?.targetType || !Array.isArray(preview.rows)) throw new Error('导入预览无效');
-  const validRows = preview.rows.filter(row => row.importable).map(row => ({ ...row.data, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber }));
+  const validRows = preview.rows.filter(row => row.importable).map(row => ({
+    ...row.data, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers,
+  }));
   if (!validRows.length) throw new Error('没有可导入的有效数据');
   const sourceName = String(options.sourceName || '表格导入');
   let domainResult;
@@ -194,15 +200,16 @@ export function mergeCommitRows(previewRows = [], domainResult = {}, targetType 
   let domainIndex = 0;
   const resourceRows = new Map((domainResult.rows || []).map(row => [Number(row.index), row]));
   return previewRows.map(row => {
-    if (!row.importable) return { id: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, status: 'invalid', issues: row.issues };
+    if (!row.importable) return { id: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers, status: 'invalid', issues: row.issues };
     if (targetType !== 'material' && targetType !== 'equipment') {
-      return { id: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, status: 'committed', issues: row.issues };
+      return { id: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers, status: 'committed', issues: row.issues };
     }
     const result = resourceRows.get(domainIndex++);
     return {
       id: row.id,
       sheetName: row.sheetName,
       sourceRowNumber: row.sourceRowNumber,
+      sourceRowNumbers: row.sourceRowNumbers,
       status: result?.status || 'uncertain',
       priceStatus: result?.priceStatus || 'none',
       issues: [...(row.issues || []), ...(result?.errors || []).map(message => ({ severity: result?.priceStatus === 'pending' ? 'warning' : 'error', message }))],

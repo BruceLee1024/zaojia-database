@@ -56,6 +56,46 @@ export const boqService = {
     return await this.addFromQuota(projectId, hit.id, qty);
   },
 
+  /**
+   * 复制已经核定的清单项。多定额组成、资源快照与计价方式一并复制，
+   * 让相同构件/设备的编制从“复用已审定依据”开始，而不是重新手填。
+   */
+  async duplicateLine(lineId) {
+    const [lines, relations] = await Promise.all([boqRepo.all(), projectBoqQuotaRelationRepo.all()]);
+    const source = lines.find(line => line.id === lineId);
+    if (!source) throw new Error('清单不存在');
+    await assertProjectEditableById(source.projectId);
+    const newId = uid();
+    const copiedAt = new Date().toISOString();
+    const copy = {
+      ...cloneSnapshot(source),
+      id: newId,
+      copiedFromBoqLineId: source.id,
+      copiedAt,
+    };
+    const copiedRelations = relations
+      .filter(relation => relation.projectBoqLineId === source.id)
+      .map(relation => ({
+        ...cloneSnapshot(relation), id: uid(), projectBoqLineId: newId, createdAt: copiedAt, updatedAt: copiedAt,
+      }));
+    const originalProjects = await projectRepo.all();
+    try {
+      await Promise.all([
+        boqRepo.replaceAll([...lines, copy]),
+        projectBoqQuotaRelationRepo.replaceAll([...relations, ...copiedRelations]),
+      ]);
+      await recomputeProjectCost(source.projectId);
+      return copy;
+    } catch (cause) {
+      await Promise.allSettled([
+        boqRepo.replaceAll(lines),
+        projectBoqQuotaRelationRepo.replaceAll(relations),
+        projectRepo.replaceAll(originalProjects),
+      ]);
+      throw Object.assign(new Error('复制清单失败，已恢复复制前数据'), { code: 'BOQ_DUPLICATE_ROLLED_BACK', cause });
+    }
+  },
+
   async addEquipmentPackage(projectId, resourceId, priceId, qty, { installQuotaId } = {}) {
     return equipmentPackageCoordinator.run('project_boq', async () => {
       const [project, resource, price, installQuota] = await Promise.all([
@@ -346,6 +386,13 @@ export const boqService = {
       expiredResourcePrice: lines.filter(line => isExpiredResourcePrice(line, resourcePriceMap, today)),
       missingResourcePriceBasis: lines.filter(line => hasResourcePrice(line) && !resourcePriceForLine(line, resourcePriceMap)?.priceBasis),
       duplicateEquipmentInstallation: duplicateEquipmentInstallationLines(lines, resourcePriceMap),
+      missingFeature: lines.filter(line => line.lineType !== 'other_charge' && !String(line.feature || '').trim()),
+      unitMismatch: lines.filter(line => {
+        const quota = quotas.find(item => item.id === line.quotaItemId);
+        return quota?.unit && line.unit && quota.unit !== line.unit;
+      }),
+      unconfirmedQuotaQuantity: lines.filter(line => (relationsByLine.get(line.id) || []).some(row => row.quantityStatus === 'needs_review')),
+      priceDeviation: lines.filter(line => isMaterialPriceDeviation(line, quotas)),
       noVersion: versions.length ? [] : [project].filter(Boolean),
     };
     const score = Math.max(0, 100
@@ -359,6 +406,10 @@ export const boqService = {
       - issues.expiredResourcePrice.length * 5
       - issues.missingResourcePriceBasis.length * 5
       - issues.duplicateEquipmentInstallation.length * 8
+      - issues.missingFeature.length * 2
+      - issues.unitMismatch.length * 6
+      - issues.unconfirmedQuotaQuantity.length * 4
+      - issues.priceDeviation.length * 3
       - (versions.length ? 0 : 10));
     return {
       project,
@@ -448,4 +499,12 @@ function duplicateEquipmentInstallationLines(lines, resourcePriceMap) {
     duplicateLineIds.add(installationLine.id);
   });
   return lines.filter(line => duplicateLineIds.has(line.id));
+}
+
+function isMaterialPriceDeviation(line, quotas) {
+  if (line.lineType === 'other_charge' || line.resourceItemId || line.pricingMode === 'composition') return false;
+  const quota = quotas.find(item => item.id === line.quotaItemId);
+  const benchmark = Number(quota?.priceTotal || 0);
+  const actual = Number(line.unitPrice || 0);
+  return benchmark > 0 && actual > 0 && Math.abs(actual - benchmark) / benchmark >= 0.3;
 }

@@ -16,6 +16,7 @@ import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqRes
 import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.15';
 
 const BOQ_PAGE_SIZE = 500;
+const BOQ_AUDIT_LINE_KEYS = ['missingFeature', 'unitMismatch', 'unconfirmedQuotaQuantity', 'priceDeviation'];
 const boqState = {
   keyword: '',
   priceStatus: '',
@@ -70,7 +71,10 @@ export async function render(workspace = document.getElementById('workspace')) {
   ]);
   const priceMap = new Map(resourcePrices.map(price => [price.id, price]));
   const displayLines = allProjectBoq.filter(line => line.projectId === proj.id).map(line => withBoqResourcePriceMetadata(line, priceMap));
-  const boq = annotateBoqResourceAuditIssues(displayLines, serviceAudit);
+  const boq = annotateBoqResourceAuditIssues(displayLines, serviceAudit).map(line => ({
+    ...line,
+    boqAuditIssueKeys: BOQ_AUDIT_LINE_KEYS.filter(key => (serviceAudit.issues?.[key] || []).some(issue => issue.id === line.id)),
+  }));
   if (boqState.treeGroup && !structureGroups(boq, proj).some(group => group.id === boqState.treeGroup)) {
     boqState.treeGroup = '';
   }
@@ -700,6 +704,10 @@ function boqToolbar(selectedCount) {
         <option value="expiredResourcePrice" ${boqState.riskStatus === 'expiredResourcePrice' ? 'selected' : ''}>资源价格过期</option>
         <option value="missingResourcePriceBasis" ${boqState.riskStatus === 'missingResourcePriceBasis' ? 'selected' : ''}>缺价格口径</option>
         <option value="duplicateEquipmentInstallation" ${boqState.riskStatus === 'duplicateEquipmentInstallation' ? 'selected' : ''}>设备安装重复计取</option>
+        <option value="missingFeature" ${boqState.riskStatus === 'missingFeature' ? 'selected' : ''}>缺项目特征</option>
+        <option value="unitMismatch" ${boqState.riskStatus === 'unitMismatch' ? 'selected' : ''}>定额单位不一致</option>
+        <option value="unconfirmedQuotaQuantity" ${boqState.riskStatus === 'unconfirmedQuotaQuantity' ? 'selected' : ''}>定额用量待确认</option>
+        <option value="priceDeviation" ${boqState.riskStatus === 'priceDeviation' ? 'selected' : ''}>单价偏离定额</option>
       </select>
       ${toolbarGroup('数据', [
         ['btnAdd', 'add', '添加清单', 'primary'],
@@ -889,6 +897,16 @@ function lineRisks(line) {
   if (Number(line.factor || 1) > 1.2 || Number(line.factor || 1) < 0.8) risks.push({ id: 'factorRisk', label: '系数异常', cls: 'badge-red' });
   if (line.lineType !== 'other_charge' && !line.quotaItemId) risks.push({ id: 'unmatchedQuota', label: '未匹配', cls: 'badge-gray' });
   if (line.quotaReferenceStatus === 'missing') risks.push({ id: 'invalidQuotaReference', label: '定额已删除', cls: 'badge-red' });
+  const auditLabels = {
+    missingFeature: ['缺项目特征', 'badge-yellow'],
+    unitMismatch: ['单位不一致', 'badge-red'],
+    unconfirmedQuotaQuantity: ['用量待确认', 'badge-yellow'],
+    priceDeviation: ['单价偏离', 'badge-yellow'],
+  };
+  (line.boqAuditIssueKeys || []).forEach(key => {
+    const [label, cls] = auditLabels[key] || [];
+    if (label) risks.push({ id: key, label, cls });
+  });
   const resourceView = buildBoqResourceViewModel(line);
   resourceView.badges.forEach(label => risks.push({
     id: label === '引用失效' ? 'invalidResourceReference'
@@ -1024,7 +1042,7 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
         </section>
       </div>
     </div>
-    <div class="flex items-center justify-between gap-2 border-t border-slate-200 bg-white p-3"><button id="detailDelete" type="button" class="h-9 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">删除</button><button id="detailSave" type="button" class="inline-flex h-9 items-center gap-1 rounded brand-bg px-3 text-sm text-white"><span class="material-symbols-outlined text-[17px]">save</span>保存明细</button></div>
+    <div class="flex items-center justify-between gap-2 border-t border-slate-200 bg-white p-3"><div class="flex gap-2"><button id="detailDelete" type="button" class="h-9 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">删除</button><button id="detailDuplicate" type="button" class="inline-flex h-9 items-center gap-1 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><span class="material-symbols-outlined text-[17px]">content_copy</span>复制</button></div><button id="detailSave" type="button" class="inline-flex h-9 items-center gap-1 rounded brand-bg px-3 text-sm text-white"><span class="material-symbols-outlined text-[17px]">save</span>保存明细</button></div>
   </div>`;
 }
 
@@ -1073,6 +1091,15 @@ function bindDetailActions(line, project) {
     boqState.activeId = '';
     toast('已删除清单项', 'success');
     render();
+  });
+  document.getElementById('detailDuplicate')?.addEventListener('click', async () => {
+    if (!line) return;
+    try {
+      const copy = await boqService.duplicateLine(line.id);
+      boqState.activeId = copy.id;
+      toast('已复制清单及其计价依据，请修改工程量或项目特征', 'success');
+      render();
+    } catch (error) { toast(error.message || '复制清单失败', 'error'); }
   });
 }
 

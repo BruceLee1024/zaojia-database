@@ -431,6 +431,20 @@ function testMergedHeaderTreeAndRegions() {
   assert.equal(standardBoqRegions[0].skippedRows.filter(row => row.kind === 'subtotal').length, 1);
   const standardBoqMapping = buildImportColumnMapping(standardBoqRegions[0].columns, standardBoqRegions[0].rows, 'project_boq');
   assert.equal(Boolean(standardBoqMapping.mapping.feature), true);
+
+  const raggedRegions = detectImportRegions({ sheets: [{
+    name: '拆行清单', hidden: false, merges: [], matrix: [
+      ['序号', '项目名称', '项目特征', '单位', '工程量', '综合单价'],
+      [1, '池壁混凝土', 'C30', 'm3', '', ''],
+      ['', '', '1、抗渗等级 P8', '', '', ''],
+      ['', '', '', '', 12.5, 680],
+    ],
+  }] }, { schema: getImportSchema('project_boq') });
+  assert.equal(raggedRegions.length, 1);
+  assert.equal(raggedRegions[0].rows.length, 1, '拆开的特征和计价字段应合并为一条逻辑明细');
+  assert.equal(raggedRegions[0].rows[0].values[raggedRegions[0].columns[2].id].includes('抗渗等级 P8'), true);
+  assert.equal(raggedRegions[0].rows[0].values[raggedRegions[0].columns[4].id], 12.5);
+  assert.deepEqual(raggedRegions[0].rows[0].continuationRows, [3, 4]);
 }
 
 function testUnifiedImportSchemaAndHierarchicalMapping() {
@@ -969,6 +983,17 @@ async function testVersions() {
   await boqService.updateStructureGroup(replaced.id, 'custom:安装清单');
   const grouped = (await repo.boqRepo.byProject('p1'))[0];
   assert.equal(grouped.structureGroup, 'custom:安装清单');
+  await repo.projectBoqQuotaRelationRepo.replaceAll([{
+    id: 'relation-original', projectId: 'p1', projectBoqLineId: grouped.id, quotaItemId: 'q2',
+    quantityBasis: 'per_unit', quantityValue: 1, quotaSnapshot: { id: 'q2', name: '钢筋', unit: 't', priceTotal: 3000 },
+  }]);
+  const duplicate = await boqService.duplicateLine(grouped.id);
+  assert.notEqual(duplicate.id, grouped.id);
+  assert.equal(duplicate.copiedFromBoqLineId, grouped.id);
+  assert.equal((await repo.boqRepo.byProject('p1')).length, 2);
+  const duplicatedRelations = await repo.projectBoqQuotaRelationRepo.byBoqLine(duplicate.id);
+  assert.equal(duplicatedRelations.length, 1);
+  assert.notEqual(duplicatedRelations[0].id, 'relation-original');
   await repo.boqRepo.replaceAll([
     { id: 'risk1', projectId: 'p1', quotaItemId: '', name: '缺价项', unit: 'm²', qty: 0, factor: 1.3, unitPrice: 0, amount: 0 },
   ]);
