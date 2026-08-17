@@ -33,7 +33,8 @@ export function nextResourceViewState(current = {}, route = 'materials', params 
     keyword: changedType ? '' : String(current.keyword || ''),
     category: changedType ? '' : String(current.category || ''),
     status: changedType ? '' : String(current.status || ''),
-    selectedId: changedType ? '' : String(current.selectedId || ''),
+    // 默认停留在列表视图；只有路由明确传入 selectedId 时才打开详情。
+    selectedId: '',
     page: changedType ? 1 : Math.max(1, Number(current.page) || 1),
   };
   for (const key of ['keyword', 'category', 'status', 'selectedId']) {
@@ -79,7 +80,6 @@ export function createAtomicResourceRefresh({ list, currentPrices, currentPrice,
     if (snapshot.resourceIds.length) rows = rows.filter(item => snapshot.resourceIds.includes(item.id));
     let selectedId = snapshot.selectedId;
     if (selectedId && !rows.some(item => item.id === selectedId)) selectedId = '';
-    if (!selectedId && rows.length) selectedId = rows[0].id;
     const prices = currentPrices
       ? await currentPrices(rows)
       : new Map(await Promise.all(rows.map(async item => [item.id, await currentPrice(item)])));
@@ -164,9 +164,9 @@ function paint(workspace = document.getElementById('workspace')) {
         ${resourceMetric('已有参考价', [...state.prices.values()].filter(Boolean).length, '条', 'paid', 'icon-surface-blue')}
         ${resourceMetric('启用中', state.rows.filter(item => item.status !== 'inactive').length, '条', 'check_circle', 'icon-surface-slate')}
       </section>
-      <div class="library-split">
+      <div class="library-split ${selected ? 'library-split--detail' : 'library-split--list-only'}">
         ${resourceTable(meta)}
-        ${selected ? detailPanel(selected, meta, generation) : emptyDetail(meta)}
+        ${selected ? detailPanel(selected, meta, generation) : ''}
       </div>
       </div>`;
   bindResourceIdActions(workspace);

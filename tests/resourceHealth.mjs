@@ -147,7 +147,7 @@ export async function testResourceHealth() {
   assert.equal(normalNavigation.keyword, '保留关键词');
   assert.equal(normalNavigation.category, '管材');
   assert.equal(normalNavigation.status, 'active');
-  assert.equal(normalNavigation.selectedId, 'm-no-price');
+  assert.equal(normalNavigation.selectedId, '');
   assert.deepEqual(normalNavigation.resourceIds, []);
   assert.equal(normalNavigation.healthLabel, '');
   assert.deepEqual(healthResourceRouteParams('missingCurrentPrice', health.missingCurrentPrice, 'material'), { resourceIds: ['m-no-price', 'm-expired'], healthLabel: '缺参考价' });

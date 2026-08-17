@@ -506,6 +506,29 @@ export function exportQuotaTemplate() {
   XLSX.writeFile(wb, '定额库模板.xlsx');
 }
 
+export function buildQuotaExportRows(items = []) {
+  const header = ['分类', '定额编码', '清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '价格状态', '关键词', '综合单价组成'];
+  return [header, ...items.map(item => {
+    const breakdown = Object.entries(item.breakdown || {})
+      .map(([key, value]) => `${key}：${Number(value || 0)}`)
+      .join('；');
+    const priceMissing = item.priceMissing === true || !(Number(item.priceTotal) > 0);
+    return [
+      item.category || '', item.code || '', item.name || '', item.feature || '', item.work || '', item.rule || '', item.unit || '',
+      priceMissing ? '' : Number(item.priceTotal || 0), priceMissing ? '缺单价' : '已有单价',
+      Array.isArray(item.tags) ? item.tags.filter(Boolean).join('、') : String(item.tags || ''), breakdown,
+    ];
+  })];
+}
+
+export function exportQuotaExcel(items = []) {
+  const ws = XLSX.utils.aoa_to_sheet(buildQuotaExportRows(items));
+  ws['!cols'] = [16, 16, 30, 50, 30, 30, 10, 14, 12, 24, 36].map(wch => ({ wch }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '定额库');
+  XLSX.writeFile(wb, `定额库导出-${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
 /** 导出独立清单库 Excel 模板 */
 export function exportBoqLibraryTemplate() {
   const data = [

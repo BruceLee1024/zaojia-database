@@ -11,6 +11,7 @@ let items = [];
 
 export async function render(workspace = document.getElementById('workspace')) {
   const route = window.__app && window.__app.state ? window.__app.state.routeParams || {} : {};
+  if (!route.selectedId) state.selectedId = '';
   if (route.keyword != null) state.keyword = route.keyword;
   if (route.selectedId) state.selectedId = route.selectedId;
   window.__boqLibrary = { select: id => select(workspace, id), create, edit, apply, remove, importExcel };
@@ -20,7 +21,7 @@ export async function render(workspace = document.getElementById('workspace')) {
         <div class="library-filter-row"><div class="relative"><input id="libKeyword" value="${esc(state.keyword)}" placeholder="搜索清单编码 / 名称 / 项目特征" class="h-10 w-full border px-3 text-sm" /></div><div class="library-filter-controls"><button id="libTemplate" class="h-10 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button id="libImport" class="h-10 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__boqLibrary.create()" class="h-10 px-4 brand-bg text-white text-sm">新建清单</button></div></div>
       </section>
       <div id="libraryMetrics" class="library-summary-grid library-summary-grid--4"></div>
-      <div class="library-split"><section class="library-list-pane overflow-auto"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50"><tr><th class="p-3 text-left">清单编码</th><th class="p-3 text-left">清单名称</th><th class="p-3 text-left">项目特征</th><th class="p-3 text-left">单位</th><th class="p-3 text-right">默认工程量</th><th class="p-3 text-center">关联定额</th></tr></thead><tbody id="libraryRows"></tbody></table></section><aside id="libraryDetail" class="library-detail-pane"></aside></div>
+      <div id="librarySplit" class="library-split ${state.selectedId ? 'library-split--detail' : 'library-split--list-only'}"><section class="library-list-pane overflow-auto"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50"><tr><th class="p-3 text-left">清单编码</th><th class="p-3 text-left">清单名称</th><th class="p-3 text-left">项目特征</th><th class="p-3 text-left">单位</th><th class="p-3 text-right">默认工程量</th><th class="p-3 text-center">关联定额</th></tr></thead><tbody id="libraryRows"></tbody></table></section><aside id="libraryDetail" class="library-detail-pane"></aside></div>
     </div>`;
   const document = scopedDom(workspace);
   document.getElementById('libImport').onclick = importExcel;
@@ -32,7 +33,7 @@ export async function render(workspace = document.getElementById('workspace')) {
 async function renderRows(workspace = document.getElementById('workspace')) {
   const document = scopedDom(workspace);
   items = await boqLibraryService.list({ keyword: state.keyword });
-  if (!items.some(function (item) { return item.id === state.selectedId; })) state.selectedId = items[0] ? items[0].id : '';
+  if (state.selectedId && !items.some(function (item) { return item.id === state.selectedId; })) state.selectedId = '';
   const all = await boqLibraryService.list({});
   const refs = all.reduce(function (sum, item) { return sum + (Number(item.referenceCount) || 0); }, 0);
   const water = all.filter(function (item) { return /水处理|污水/.test((item.major || '') + (item.scope || '')); }).length;
@@ -41,6 +42,9 @@ async function renderRows(workspace = document.getElementById('workspace')) {
   document.getElementById('libraryRows').innerHTML = items.length ? items.map(function (item) { return `<tr data-library-id="${item.id}" class="border-t cursor-pointer hover:bg-teal-50 ${item.id === state.selectedId ? 'bg-teal-50' : ''}"><td class="p-3 text-teal-700">${esc(item.code || '-')}</td><td class="p-3 font-medium">${esc(item.name)}</td><td class="p-3 text-slate-500">${esc(item.feature || '-')}</td><td class="p-3">${esc(item.unit)}</td><td class="p-3 text-right">${item.defaultQty || 0}</td><td class="p-3 text-center"><span class="badge ${item.quotaCount ? 'badge-green' : 'badge-gray'}">${item.quotaCount || 0} 条</span></td></tr>`; }).join('') : '<tr><td colspan="6" class="p-12 text-center text-slate-400">暂无清单，可新建或导入 Excel。</td></tr>';
   document.querySelectorAll('[data-library-id]').forEach(function (row) { row.onclick = function () { select(workspace, row.dataset.libraryId); }; });
   renderDetail(workspace, items.find(function (item) { return item.id === state.selectedId; }));
+  const split = document.getElementById('librarySplit');
+  split?.classList.toggle('library-split--detail', Boolean(state.selectedId));
+  split?.classList.toggle('library-split--list-only', !state.selectedId);
 }
 
 const METRIC_TONES = {

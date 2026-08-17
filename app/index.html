@@ -138,6 +138,8 @@
   .library-summary-grid.library-summary-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .library-metric-card { min-height: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: none; }
   .library-split { display: grid; min-height: 0; flex: 1 1 auto; gap: 16px; grid-template-columns: minmax(0, 1fr) 400px; }
+  .library-split--list-only { grid-template-columns: minmax(0, 1fr); }
+  .library-split--list-only .library-detail-pane { display: none; }
   .library-list-pane, .library-detail-pane { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
   .library-list-pane { min-width: 0; }
   .library-detail-pane { min-width: 0; min-height: 0; }

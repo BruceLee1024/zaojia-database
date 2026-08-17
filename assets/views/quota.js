@@ -2,7 +2,7 @@
 import { quotaService } from '../services/quotaService.js?v=6.15';
 import { boqService } from '../services/boqService.js?v=6.15';
 import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
-import { exportQuotaTemplate } from '../data/excel.js?v=6.15';
+import { exportQuotaExcel, exportQuotaTemplate } from '../data/excel.js?v=6.15';
 import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.15';
 import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.15';
 import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.15';
@@ -59,11 +59,13 @@ function exposeQuotaActions() {
       filterState.priceStatus = 'missing';
       render();
     },
+    exportExcel: () => exportQuotaExcel(lastRows),
   };
 }
 
 export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
+  if (!params.selectedId && !(Array.isArray(params.quotaItemIds) && params.quotaItemIds[0])) editorState.selectedId = '';
   if (params.keyword != null) filterState.keyword = params.keyword;
   if (params.priceStatus != null) filterState.priceStatus = params.priceStatus;
   if (params.selectedId) editorState.selectedId = params.selectedId;
@@ -100,13 +102,13 @@ export async function render(workspace = document.getElementById('workspace')) {
             <option value="priced" ${filterState.priceStatus === 'priced' ? 'selected' : ''}>已有单价</option>
             <option value="missing" ${filterState.priceStatus === 'missing' ? 'selected' : ''}>缺单价</option>
           </select>
-          <button onclick="window.__quota.clearFilters()" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button id="btnTpl" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">下载模板</button><button id="btnImport" class="h-10 px-3 text-sm border border-teal-300 bg-white text-teal-700">导入 Excel</button><button onclick="window.__quota.newItem()" class="h-10 px-4 text-sm brand-bg text-white">新增定额</button></div>
+          <button onclick="window.__quota.clearFilters()" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button id="btnTpl" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">下载模板</button><button id="btnExport" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">导出 Excel</button><button id="btnImport" class="h-10 px-3 text-sm border border-teal-300 bg-white text-teal-700">导入 Excel</button><button onclick="window.__quota.newItem()" class="h-10 px-4 text-sm brand-bg text-white">新增定额</button></div>
         </div>
       </section>
 
       <div id="quotaKpis" class="library-summary-grid shrink-0">${kpiStrip(allRows)}</div>
 
-      <div class="library-split">
+      <div id="quotaSplit" class="library-split ${editorState.selectedId ? 'library-split--detail' : 'library-split--list-only'}">
         <section class="library-list-pane flex flex-col">
           <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between shrink-0">
             <div>
@@ -147,6 +149,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   $('#qPrice', workspace).onchange = e => { filterState.priceStatus = e.target.value; renderList(workspace); };
   $('#btnImport', workspace).onclick = importExcel;
   $('#btnTpl', workspace).onclick = exportQuotaTemplate;
+  $('#btnExport', workspace).onclick = () => exportQuotaExcel(lastRows);
   await renderList(workspace);
 }
 
@@ -160,9 +163,7 @@ async function renderList(workspace = document.getElementById('workspace')) {
   const document = scopedDom(workspace);
   const [rows, allRows] = await Promise.all([quotaService.list(filterState), quotaService.list()]);
   lastRows = rows;
-  if (!rows.some(row => row.id === editorState.selectedId)) {
-    editorState.selectedId = rows[0]?.id || '';
-  }
+  if (editorState.selectedId && !rows.some(row => row.id === editorState.selectedId)) editorState.selectedId = '';
 
   document.getElementById('quotaKpis').innerHTML = kpiStrip(allRows);
   document.getElementById('qCount').textContent = `显示 ${rows.length} / ${allRows.length} 条，最多展示前 500 条`;
@@ -170,6 +171,9 @@ async function renderList(workspace = document.getElementById('workspace')) {
   document.getElementById('qMobileList').innerHTML = quotaMobileCards(rows);
   document.getElementById('qPager').innerHTML = pager(rows);
   document.getElementById('quotaInspector').innerHTML = inspector(selectedItem());
+  const split = document.getElementById('quotaSplit');
+  split?.classList.toggle('library-split--detail', Boolean(editorState.selectedId));
+  split?.classList.toggle('library-split--list-only', !editorState.selectedId);
   document.getElementById('quotaBottom').innerHTML = bottomPanels(allRows);
   document.querySelectorAll('[data-mobile-quota]').forEach(button => button.onclick = () => selectQuota(button.dataset.mobileQuota));
 }
@@ -448,6 +452,9 @@ function selectedItem() {
 
 async function selectQuota(id) {
   editorState.selectedId = id;
+  const split = document.getElementById('quotaSplit');
+  split?.classList.add('library-split--detail');
+  split?.classList.remove('library-split--list-only');
   document.getElementById('qList').innerHTML = quotaRows(lastRows);
   document.getElementById('qMobileList').innerHTML = quotaMobileCards(lastRows);
   document.getElementById('quotaInspector').innerHTML = inspector(selectedItem());

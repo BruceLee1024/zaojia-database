@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { testResourceHealth } from './resourceHealth.mjs';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.15';
 import { formatCurrency, normalizeCurrency, sumByCurrency } from '../assets/utils/currency.js?v=6.15';
-import { decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
+import { buildQuotaExportRows, decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
 import { buildHeaderTree, classifyImportRow, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.15';
 import { applyMappingTemplate, buildImportColumnMapping, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.15';
 import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../assets/services/importSchemaService.js?v=6.15';
@@ -151,6 +151,18 @@ function testExcelRows() {
   assert.equal(nameColumnBoq.name, '截桩');
   assert.equal(nameColumnBoq.feature.includes('桩类型'), true);
   assert.equal(nameColumnBoq.unit, '根');
+}
+
+function testQuotaExportRows() {
+  const rows = buildQuotaExportRows([{
+    code: 'Q-001', category: '土石方与支护', name: '人工挖一般土方', feature: '三类土', work: '人工开挖', rule: '按体积计算', unit: 'm³',
+    priceTotal: 20, priceMissing: false, tags: ['土方', '人工'], breakdown: { 人工: 12, 机械: 0, 材料: 0 }, useBreakdown: true,
+  }, {
+    name: '待补价项', unit: '项', priceTotal: 0, priceMissing: true,
+  }]);
+  assert.deepEqual(rows[0], ['分类', '定额编码', '清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '价格状态', '关键词', '综合单价组成']);
+  assert.deepEqual(rows[1], ['土石方与支护', 'Q-001', '人工挖一般土方', '三类土', '人工开挖', '按体积计算', 'm³', 20, '已有单价', '土方、人工', '人工：12；机械：0；材料：0']);
+  assert.equal(rows[2][8], '缺单价');
 }
 
 function testImportMapping() {
@@ -823,6 +835,7 @@ testAISystemPromptPresets();
 testLegacyDefaultSystemPromptMigration();
 testSystemPromptGenerationContract();
 testExcelRows();
+testQuotaExportRows();
 testImportMapping();
 testMappingTemplates();
 testImportPricingRules();

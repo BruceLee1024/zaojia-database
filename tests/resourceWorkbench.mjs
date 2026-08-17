@@ -138,7 +138,7 @@ function testCurrentPriceBatchIndex() {
 
 function testResourceRouteStateIsolation() {
   const material = nextResourceViewState({ resourceType: 'material', keyword: '钢管', category: '管材', status: 'inactive', selectedId: 'm1' }, 'materials', {});
-  assert.deepEqual(material, { resourceType: 'material', keyword: '钢管', category: '管材', status: 'inactive', selectedId: 'm1', page: 1 });
+  assert.deepEqual(material, { resourceType: 'material', keyword: '钢管', category: '管材', status: 'inactive', selectedId: '', page: 1 });
   const equipment = nextResourceViewState(material, 'equipment', { keyword: '泵', selectedId: 'e1' });
   assert.deepEqual(equipment, { resourceType: 'equipment', keyword: '泵', category: '', status: '', selectedId: 'e1', page: 1 });
   const back = nextResourceViewState(equipment, 'materials', { category: '阀门', status: 'active' });
