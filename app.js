@@ -75,6 +75,9 @@ const routeCoordinator = createLatestWorkspaceCoordinator({
 const searchCoordinator = createLatestCoordinator();
 const NAV_GROUP_STATE_KEY = 'cost-workbench-nav-groups';
 const navGroupState = loadNavGroupState();
+const TRIAL_CODE = 'C90C-01C6-54A7-34D7';
+const TRIAL_UNLOCK_KEY = 'cost-workbench-trial-unlocked';
+let trialGateActive = false;
 
 function renderNav() {
   const groups = [...new Set(VIEWS.map(v => v.group))];
@@ -339,6 +342,62 @@ function showSearchResults(keyword, results) {
   document.querySelectorAll('[data-search-result]').forEach(btn => btn.onclick = () => openSearchResult(btn.dataset.searchResult));
 }
 
+function trialIsUnlocked() {
+  try { return localStorage.getItem(TRIAL_UNLOCK_KEY) === 'true'; } catch { return false; }
+}
+
+function showTrialCodePrompt() {
+  trialGateActive = true;
+  openModal('获取试用码', `
+    <div class="mx-auto max-w-md text-center">
+      <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-teal-50 text-teal-700">
+        <span class="material-symbols-outlined text-2xl" aria-hidden="true">key</span>
+      </div>
+      <h2 class="mt-4 text-lg font-semibold text-slate-950">添加作者微信，获取试用码</h2>
+      <p class="mt-2 text-sm leading-6 text-slate-600">扫码添加作者「Bruce」，备注“造价数据库”，即可获取试用码并了解后续服务。</p>
+      <div class="mx-auto mt-4 w-52 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <img src="../landing-assets/wechat-cybertumu.jpg" alt="Bruce 微信二维码" class="block h-full w-full object-contain" />
+      </div>
+      <p class="mt-3 text-xs text-slate-500">微信：Bruce</p>
+      <p class="mt-2 text-xs font-medium text-teal-700">本系统永久免费使用，不收取任何费用。</p>
+      <label class="mx-auto mt-5 block max-w-xs text-left">
+        <span class="text-xs font-medium text-slate-600">试用码</span>
+        <input id="trialCodeInput" autocomplete="one-time-code" placeholder="XXXX-XXXX-XXXX-XXXX" class="mt-1 h-11 w-full border border-slate-300 bg-white px-3 text-center font-data tracking-[0.12em] uppercase outline-none focus:border-teal-600" />
+      </label>
+      <p id="trialCodeError" class="mt-2 min-h-5 text-xs text-red-600" role="alert"></p>
+    </div>
+  `, '<button id="verifyTrialCode" type="button" class="h-9 px-4 brand-bg text-sm text-white">验证并进入系统</button>');
+  const modal = document.getElementById('modal');
+  modal.dataset.locked = 'true';
+  const closeButton = document.querySelector('#modalPanel > div:first-child button');
+  if (closeButton) { closeButton.hidden = true; closeButton.disabled = true; }
+  window.__modalClose = () => { if (!trialGateActive) closeModal(); };
+  document.getElementById('verifyTrialCode').onclick = verifyTrialCode;
+  document.getElementById('trialCodeInput').addEventListener('keydown', event => {
+    if (event.key === 'Enter') verifyTrialCode();
+  });
+}
+
+async function verifyTrialCode() {
+  const input = document.getElementById('trialCodeInput');
+  const error = document.getElementById('trialCodeError');
+  const value = String(input?.value || '').trim().toUpperCase();
+  if (value !== TRIAL_CODE) {
+    if (error) error.textContent = '试用码无效，请添加作者微信获取正确试用码。';
+    input?.focus();
+    return;
+  }
+  try { localStorage.setItem(TRIAL_UNLOCK_KEY, 'true'); } catch { /* 本次会话仍可继续使用 */ }
+  trialGateActive = false;
+  const modal = document.getElementById('modal');
+  delete modal.dataset.locked;
+  const closeButton = document.querySelector('#modalPanel > div:first-child button');
+  if (closeButton) { closeButton.hidden = false; closeButton.disabled = false; }
+  window.__modalClose = closeModal;
+  closeModal();
+  await renderWorkspace(++routeGeneration);
+}
+
 // 全局对象：内嵌 onclick / 模块间共享
 window.__app = {
   state,
@@ -359,6 +418,13 @@ window.__app = {
   openMobileSearch,
 };
 
+document.addEventListener('keydown', event => {
+  if (trialGateActive && event.key === 'Escape') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}, true);
+
 window.addEventListener('DOMContentLoaded', async () => {
   // 首次使用保持正式资料库为空；演示资料只能由用户在「备份与恢复」中主动加载。
   renderNav();
@@ -368,7 +434,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('workspace').innerHTML = '<div class="min-h-full flex items-center justify-center p-8 text-sm text-slate-500">正在读取本机资料…</div>';
   ai.close();
   renderStorageBadge();
-  await renderWorkspace(++routeGeneration);
+  if (trialIsUnlocked()) await renderWorkspace(++routeGeneration);
+  else showTrialCodePrompt();
 
   document.getElementById('aiInput').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) {
