@@ -14,6 +14,7 @@ import { categoryGuess } from '../utils/stats.js?v=6.15';
 import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.15';
 import { annotateBoqResourceAuditIssues, buildBoqResourceViewModel, renderBoqResourceReference, withBoqResourcePriceMetadata } from './boqResourceReference.js?v=6.15';
 import { loadQuoteAuditViewModel, renderQuoteAuditViewModel } from './boqAuditViewModel.js?v=6.15';
+import { BUILTIN_SPECIALTIES, effectiveSpecialty, specialtyMatchLabel, specialtyRank } from '../utils/specialty.js?v=6.15';
 
 const BOQ_PAGE_SIZE = 500;
 const BOQ_AUDIT_LINE_KEYS = ['missingFeature', 'unitMismatch', 'unconfirmedQuotaQuantity', 'priceDeviation'];
@@ -146,7 +147,7 @@ export async function render(workspace = document.getElementById('workspace')) {
           </section>
         </div>
         <aside id="boqDetail" class="boq-detail-inspector card min-h-0 overflow-hidden">
-          ${detailPanel(activeLine, activeRecommendations, librarySource, activeQuotaRelations)}
+          ${detailPanel(activeLine, activeRecommendations, librarySource, activeQuotaRelations, proj)}
         </aside>
       </div>` : boqWorkspacePanel(workbench, versions)}
     </div>
@@ -282,7 +283,7 @@ export async function render(workspace = document.getElementById('workspace')) {
     boqState.activeId = button.dataset.mobileBoqOpen;
     const line = boq.find(item => item.id === boqState.activeId);
     if (line) {
-      openModal('清单详情', detailPanel(line, [], null));
+      openModal('清单详情', detailPanel(line, [], null, [], proj));
       bindDetailActions(line, proj);
     }
   });
@@ -942,7 +943,7 @@ function boqMetric(label, value, suffix = '', cls = '') {
   </div>`;
 }
 
-function detailPanel(line, recommendations = [], librarySource = null, quotaRelations = []) {
+function detailPanel(line, recommendations = [], librarySource = null, quotaRelations = [], project = null) {
   const collapsed = false;
   const activeTab = ['content', 'pricing', 'relation'].includes(boqState.detailTab) ? boqState.detailTab : 'content';
   const tabClass = key => `detail-tab inline-flex h-9 min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold ${activeTab === key ? 'bg-white text-teal-800 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'}`;
@@ -991,11 +992,16 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
             <span class="material-symbols-outlined text-slate-400" aria-hidden="true">tune</span>
           </div>
           <div class="grid grid-cols-2 gap-3">
+            <datalist id="boqSpecialties">${BUILTIN_SPECIALTIES.map(value => `<option value="${esc(value)}"></option>`).join('')}</datalist>
             <label class="block text-xs font-medium text-slate-500">项目编码
               <input id="detailCode" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(line.code || '')}" />
             </label>
             <label class="block text-xs font-medium text-slate-500">单位
               <input id="detailUnit" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(line.unit || '')}" />
+            </label>
+            <label class="col-span-2 block text-xs font-medium text-slate-500">清单专业覆盖
+              <input id="detailSpecialty" list="boqSpecialties" class="mt-1 h-9 w-full rounded border border-slate-300 px-2 text-sm" value="${esc(line.specialty || '')}" placeholder="留空则使用项目默认专业：${esc(project?.specialty || '未设置')}" />
+              <span class="mt-1 block text-[11px] font-normal text-slate-400">修改专业不会自动替换当前定额或价格。</span>
             </label>
             ${librarySource ? `<div class="col-span-2 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800"><div class="font-medium">来自清单库</div><div class="mt-1 truncate" title="${esc(librarySource.name || '')}">${esc(librarySource.code || '未编码')} · ${esc(librarySource.name || '')}</div></div>` : ''}
             ${line.sourceSectionName ? `<div class="col-span-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><div class="font-medium text-slate-800">原始清单层级</div><div class="mt-1">${esc([line.sourceUnitName, [line.sourceSectionCode, line.sourceSectionName].filter(Boolean).join(' ')].filter(Boolean).join(' / '))}</div><div class="mt-1 text-slate-400">${esc(line.sourceSheetName || 'Excel')} · 原始第 ${Number(line.sourceRowNumber || 0) || '-'} 行</div></div>` : ''}
@@ -1038,7 +1044,7 @@ function detailPanel(line, recommendations = [], librarySource = null, quotaRela
           </div>
         </section>
         <section data-detail-pane="relation" class="detail-pane ${activeTab === 'relation' ? '' : 'hidden'} bg-white border border-slate-200 rounded-xl p-4">
-          ${line.lineType === 'other_charge' ? `<div class="rounded border border-teal-200 bg-teal-50 px-3 py-3 text-sm text-teal-800"><div class="font-medium">其他项目费无需匹配定额</div><div class="mt-1 text-xs">该行以 Excel 汇总金额为报价依据，内部成本可在“成本测算”中单独复核。</div></div>` : `<div class="mb-3 flex items-center justify-between"><div><div class="font-medium text-slate-800">定额与资源关联</div><div class="mt-1 text-xs text-slate-500">项目内保存独立用量和价格快照，不随定额库自动变价。</div></div>${quotaRelations.length || line.quotaItemId ? `<span class="badge badge-green">${quotaRelations.length || 1} 条定额</span>` : '<span class="badge badge-yellow">未匹配</span>'}</div>${projectQuotaRelationsHtml(quotaRelations)}${renderBoqResourceReference(buildBoqResourceViewModel(line))}<div class="mt-3 grid grid-cols-1 gap-2">${recommendations.length ? recommendations.map(item => `<button data-replace-quota="${item.id}" class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50"><div class="truncate font-medium text-slate-800">${esc(item.name || '')}</div><div class="mt-1 flex justify-between text-xs text-slate-500"><span>${esc(item.unit || '-')} · 匹配 ${Number(item.score || 0).toFixed(1)}</span><span>${hasMissingPrice(item.priceTotal) ? '缺单价' : money(item.priceTotal)}</span></div></button>`).join('') : '<div class="rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}</div>`}
+          ${line.lineType === 'other_charge' ? `<div class="rounded border border-teal-200 bg-teal-50 px-3 py-3 text-sm text-teal-800"><div class="font-medium">其他项目费无需匹配定额</div><div class="mt-1 text-xs">该行以 Excel 汇总金额为报价依据，内部成本可在“成本测算”中单独复核。</div></div>` : `<div class="mb-3 flex items-center justify-between"><div><div class="font-medium text-slate-800">定额与资源关联</div><div class="mt-1 text-xs text-slate-500">项目内保存独立用量和价格快照，不随定额库自动变价。</div></div>${quotaRelations.length || line.quotaItemId ? `<span class="badge badge-green">${quotaRelations.length || 1} 条定额</span>` : '<span class="badge badge-yellow">未匹配</span>'}</div>${projectQuotaRelationsHtml(quotaRelations)}${renderBoqResourceReference(buildBoqResourceViewModel(line))}<div class="mt-3 grid grid-cols-1 gap-2">${recommendations.length ? recommendations.map(item => `<button data-replace-quota="${item.id}" data-cross-specialty="${item.specialtyMatch === 'cross' ? 'true' : ''}" class="rounded border ${item.specialtyMatch === 'cross' ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'} px-3 py-2 text-left hover:border-teal-200 hover:bg-teal-50"><div class="truncate font-medium text-slate-800">${esc(item.name || '')}</div><div class="mt-1 flex justify-between text-xs text-slate-500"><span>${esc(item.unit || '-')} · ${esc(specialtyMatchLabel(item, item.requestedSpecialty))} · 匹配 ${Number(item.score || 0).toFixed(1)}</span><span>${hasMissingPrice(item.priceTotal) ? '缺单价' : money(item.priceTotal)}</span></div></button>`).join('') : '<div class="rounded border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400">暂无相似定额</div>'}</div>`}
         </section>
       </div>
     </div>
@@ -1079,7 +1085,8 @@ function bindDetailActions(line, project) {
   document.getElementById('detailSave')?.addEventListener('click', () => saveDetail(line?.id));
   document.getElementById('detailAiFill')?.addEventListener('click', () => showAiLineAssist(line, project));
   document.querySelectorAll('[data-replace-quota]').forEach(btn => btn.onclick = async () => {
-    if (!line || !confirm('用该定额替换当前清单的名称、特征、单位和综合单价？工程量和系数会保留。')) return;
+    const crossNotice = btn.dataset.crossSpecialty === 'true' ? '该候选为跨专业定额，建议核对计价口径。\n\n' : '';
+    if (!line || !confirm(`${crossNotice}用该定额替换当前清单的名称、特征、单位和综合单价？工程量和系数会保留。`)) return;
     await boqService.replaceQuota(line.id, btn.dataset.replaceQuota);
     toast('已替换关联定额', 'success');
     render();
@@ -1138,6 +1145,7 @@ async function saveDetail(id) {
     name: document.getElementById('detailName').value,
     feature: document.getElementById('detailFeature').value,
     unit: document.getElementById('detailUnit').value,
+    specialty: document.getElementById('detailSpecialty').value.trim(),
     structureGroup: document.getElementById('detailStructureGroup').value,
     qty: parseFloat(document.getElementById('detailQty').value) || 0,
     unitPrice: parseFloat(document.getElementById('detailUnitPrice').value) || 0,
@@ -1335,13 +1343,15 @@ async function showAiMissingPrices(projectId) {
 }
 
 async function pickQuota() {
-  const items = await quotaRepo.all();
+  const [items, project] = await Promise.all([quotaRepo.all(), projectRepo.findById(window.__app.state.currentProjectId)]);
+  const activeLine = boqState.activeId ? await boqRepo.findById(boqState.activeId) : null;
+  const requestedSpecialty = effectiveSpecialty(activeLine, project);
   openModal('选择定额条目', `
     <input id="pickKw" placeholder="搜索清单名称…" class="w-full border rounded px-3 py-2 mb-3" />
     <div class="max-h-[60vh] overflow-auto scroll-thin border rounded">
       <table class="w-full text-sm">
         <thead class="bg-gray-50 sticky top-0"><tr class="text-left text-gray-500">
-          <th class="py-2 px-2">分类</th><th class="px-2">清单名称</th><th class="px-2">项目特征</th><th class="px-2 w-14">单位</th><th class="px-2 w-24 text-right">综合单价</th><th class="px-2 w-12"></th>
+          <th class="py-2 px-2">专业</th><th class="px-2">分类</th><th class="px-2">清单名称</th><th class="px-2">项目特征</th><th class="px-2 w-14">单位</th><th class="px-2 w-24 text-right">综合单价</th><th class="px-2 w-12"></th>
         </tr></thead>
         <tbody id="pickBody"></tbody>
       </table>
@@ -1351,10 +1361,11 @@ async function pickQuota() {
   const renderChoices = (kw = '') => {
     const rows = items.filter(it => {
       if (!kw) return true;
-      return (`${it.name} ${it.feature} ${(it.tags || []).join(' ')}`).toLowerCase().includes(kw.toLowerCase());
-    }).slice(0, 300);
+      return (`${it.specialty || ''} ${it.name} ${it.feature} ${(it.tags || []).join(' ')}`).toLowerCase().includes(kw.toLowerCase());
+    }).sort((a, b) => specialtyRank(b, requestedSpecialty) - specialtyRank(a, requestedSpecialty)).slice(0, 300);
     document.getElementById('pickBody').innerHTML = rows.map(it => `
       <tr class="border-b hover:bg-gray-50">
+        <td class="py-1.5 px-2 text-xs"><span class="badge ${specialtyRank(it, requestedSpecialty) === 0 && requestedSpecialty ? 'badge-yellow' : 'badge-gray'}">${esc(it.specialty || '通用')}</span></td>
         <td class="py-1.5 px-2"><span class="badge badge-gray">${esc(it.category || '')}</span></td>
         <td class="px-2">${esc(it.name)}</td>
         <td class="px-2 text-gray-500 truncate" title="${esc(it.feature || '')}">${esc((it.feature || '').slice(0, 40))}</td>
@@ -1364,12 +1375,13 @@ async function pickQuota() {
             ? '<span class="badge badge-yellow" title="选择后该清单合价会按 0 计">缺单价</span>'
             : money(it.priceTotal)}
         </td>
-        <td class="px-2 text-right"><button class="text-teal-700 hover:underline text-xs" data-pick="${it.id}">选</button></td>
+        <td class="px-2 text-right"><button class="text-teal-700 hover:underline text-xs" title="${esc(specialtyMatchLabel(it, requestedSpecialty))}" data-pick="${it.id}">选</button></td>
       </tr>
-    `).join('') || `<tr><td colspan="6" class="py-6 text-center text-gray-400">无匹配</td></tr>`;
+    `).join('') || `<tr><td colspan="7" class="py-6 text-center text-gray-400">无匹配</td></tr>`;
     document.querySelectorAll('[data-pick]').forEach(b => b.onclick = async () => {
       const chosen = items.find(it => it.id === b.dataset.pick);
       if (chosen && hasMissingPrice(chosen.priceTotal) && !confirm('该定额综合单价为空或为 0，加入清单后合价会按 0 计。仍然添加？')) return;
+      if (chosen && specialtyRank(chosen, requestedSpecialty) === 0 && requestedSpecialty && !confirm(`「${chosen.specialty}」是跨专业候选，当前专业为「${requestedSpecialty}」。请确认计价口径后继续。`)) return;
       await boqService.addFromQuota(window.__app.state.currentProjectId, b.dataset.pick, 0);
       closeModal();
       render();

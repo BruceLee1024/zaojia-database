@@ -3,7 +3,7 @@ import { resourcePriceService } from '../services/resourcePriceService.js?v=6.15
 import { isPriceEffective } from '../services/resourcePriceService.js?v=6.15';
 import { resourceService } from '../services/resourceService.js?v=6.15';
 import { projectRepo, quotaRepo } from '../data/repository.js?v=6.15';
-import { exportResourceTemplate } from '../data/excel.js?v=6.15';
+import { exportResourceLibraryExcel, exportResourceTemplate } from '../data/excel.js?v=6.15&build=20260818l';
 import { closeModal, esc, fmtMoney, openModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
 import { attachmentPanelShell, loadAttachmentPanel } from './resourceAttachments.js?v=6.15';
 
@@ -20,7 +20,9 @@ export async function render(workspace = document.getElementById('workspace')) {
   const generation = ++resourceRenderGeneration;
   const route = window.__app?.state?.currentView;
   const params = window.__app?.state?.routeParams || {};
-  Object.assign(state, nextResourceViewState(state, route, params));
+  const nextState = nextResourceViewState(state, route, params);
+  if (!Object.prototype.hasOwnProperty.call(params, 'selectedId')) nextState.selectedId = '';
+  Object.assign(state, nextState);
   exposeActions(workspace, generation);
   await refresh(workspace, generation);
 }
@@ -79,7 +81,6 @@ export function createAtomicResourceRefresh({ list, currentPrices, currentPrice,
     if (snapshot.resourceIds.length) rows = rows.filter(item => snapshot.resourceIds.includes(item.id));
     let selectedId = snapshot.selectedId;
     if (selectedId && !rows.some(item => item.id === selectedId)) selectedId = '';
-    if (!selectedId && rows.length) selectedId = rows[0].id;
     const prices = currentPrices
       ? await currentPrices(rows)
       : new Map(await Promise.all(rows.map(async item => [item.id, await currentPrice(item)])));
@@ -156,7 +157,7 @@ function paint(workspace = document.getElementById('workspace')) {
         ${state.resourceIds.length ? `<div role="status" class="mt-3 flex flex-wrap items-center justify-between gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><span>已按仪表盘“${esc(state.healthLabel || '资源健康')}”筛选，共 ${state.resourceIds.length} 条。</span><button onclick="window.__resources.clearHealthFilter()" class="font-medium underline">查看全部${meta.singular}</button></div>` : ''}
         <div class="library-filter-row">
           <label class="relative"><span class="sr-only">搜索${meta.singular}</span><input value="${esc(state.keyword)}" oninput="window.__resources.filter('keyword',this.value)" type="search" placeholder="搜索编码、名称、规格、品牌…" class="h-9 w-full border border-slate-300 bg-white pl-9 pr-3 text-sm"><span class="material-symbols-outlined absolute left-3 top-2.5 text-[17px] text-slate-400">search</span></label>
-          <div class="library-filter-controls"><select onchange="window.__resources.filter('category',this.value)" class="h-9 min-w-[150px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部分类</option>${categories.map(value => `<option ${value === state.category ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select><select onchange="window.__resources.filter('status',this.value)" class="h-9 min-w-[120px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部状态</option><option value="active" ${state.status === 'active' ? 'selected' : ''}>启用</option><option value="inactive" ${state.status === 'inactive' ? 'selected' : ''}>停用</option></select><button onclick="window.__resources.clearFilters()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-600">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button onclick="window.__resources.downloadTemplate()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button onclick="window.__resources.importExcel()" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__resources.edit()" class="h-9 px-4 brand-bg text-white text-sm">新增${meta.singular}</button></div>
+          <div class="library-filter-controls"><select onchange="window.__resources.filter('category',this.value)" class="h-9 min-w-[150px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部分类</option>${categories.map(value => `<option ${value === state.category ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select><select onchange="window.__resources.filter('status',this.value)" class="h-9 min-w-[120px] border border-slate-300 bg-white px-2 text-sm"><option value="">全部状态</option><option value="active" ${state.status === 'active' ? 'selected' : ''}>启用</option><option value="inactive" ${state.status === 'inactive' ? 'selected' : ''}>停用</option></select><button onclick="window.__resources.clearFilters()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-600">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button onclick="window.__resources.downloadTemplate()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button onclick="window.__resources.exportLibrary()" class="h-9 px-3 border border-slate-300 bg-white text-sm text-slate-700">导出${meta.plural}</button><button onclick="window.__resources.importExcel()" class="h-9 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__resources.edit()" class="h-9 px-4 brand-bg text-white text-sm">新增${meta.singular}</button></div>
         </div>
       </section>
       <section class="library-summary-grid" aria-label="${meta.plural}概览">
@@ -164,9 +165,9 @@ function paint(workspace = document.getElementById('workspace')) {
         ${resourceMetric('已有参考价', [...state.prices.values()].filter(Boolean).length, '条', 'paid', 'icon-surface-blue')}
         ${resourceMetric('启用中', state.rows.filter(item => item.status !== 'inactive').length, '条', 'check_circle', 'icon-surface-slate')}
       </section>
-      <div class="library-split">
+      <div class="library-split ${selected ? '' : 'library-split--list-only'}">
         ${resourceTable(meta)}
-        ${selected ? detailPanel(selected, meta, generation) : emptyDetail(meta)}
+        ${selected ? detailPanel(selected, meta, generation) : ''}
       </div>
       </div>`;
   bindResourceIdActions(workspace);
@@ -251,6 +252,14 @@ function exposeActions(workspace, generation) {
     addToProject: id => showAddToProject(id, context),
     importExcel: () => window.__app.go('ai-import', { targetType: state.resourceType }),
     downloadTemplate: () => exportResourceTemplate(state.resourceType),
+    exportLibrary: async () => {
+      try {
+        const rows = await resourceService.list({ resourceType: state.resourceType });
+        const prices = await resourcePriceService.getCurrentPriceMap(rows);
+        exportResourceLibraryExcel(state.resourceType, rows, prices);
+        toast(`已导出 ${rows.length} 条${LABELS[state.resourceType].singular}及当前有效价格`, 'success');
+      } catch (error) { toast(error?.message || '导出失败', 'error'); }
+    },
   };
 }
 

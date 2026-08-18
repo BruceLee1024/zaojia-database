@@ -8,6 +8,7 @@ import { openReview } from './experience.js?v=6.15';
 import { archiveEligibility, archiveBlockerText } from '../services/projectWorkflow.js?v=6.15';
 import { suggestProjectInfo } from '../services/aiAssistService.js?v=6.15';
 import { CURRENCY_OPTIONS, currencyLabel, normalizeCurrency } from '../utils/currency.js?v=6.15';
+import { BUILTIN_SPECIALTIES } from '../utils/specialty.js?v=6.15';
 
 const TYPES = [
   '水厂', '污水处理厂', '再生水厂', '工业废水', '泵站', '管网', '调蓄池', '水池', '污泥处理',
@@ -37,29 +38,29 @@ export async function render(workspace = document.getElementById('workspace')) {
     if (projectState.version === 'has' && !s.versionCount) return false;
     if (projectState.version === 'none' && s.versionCount) return false;
     return true;
-  });
+  }).sort(projectAttentionOrder);
   const portfolio = portfolioStats(summaries);
   workspace.innerHTML = `
-    <div class="page-frame min-h-full flex flex-col gap-4">
-      <section class="rounded-lg border border-slate-200 bg-white p-4">
-        <div class="flex items-start gap-4">
-          <div>
-            <h1 class="text-xl font-semibold text-slate-950">我的项目</h1>
-            <div class="mt-1 text-xs text-slate-500">从项目状态判断下一步：补价、保存版本、收录案例或查看造价参考。</div>
+    <div class="page-frame min-h-full flex flex-col gap-3">
+      <section class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div class="flex items-start gap-4 border-b border-slate-100 px-5 py-4">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2"><h1 class="text-xl font-semibold tracking-tight text-slate-950">我的项目</h1>${portfolio.missingProjects ? `<span class="badge badge-yellow">${portfolio.missingProjects} 个待补价</span>` : ''}</div>
+            <div class="mt-1 text-xs text-slate-500">优先处理缺价与待保存版本项目，再将完整项目沉淀为可复用案例。</div>
           </div>
           <div class="flex-1"></div>
           <button id="btnNew" class="h-10 px-4 text-sm brand-bg text-white flex items-center gap-1.5">
             <span class="material-symbols-outlined text-[18px]">add</span>新建项目
           </button>
         </div>
-        <div class="mt-4 grid grid-cols-5 gap-3">
+        <div class="grid grid-cols-5 divide-x divide-slate-100 bg-slate-50/70">
           ${summaryTile('项目总数', portfolio.totalProjects, '个')}
           ${summaryTile('报价中', portfolio.doingProjects, '个')}
           ${summaryTile('缺单价项目', portfolio.missingProjects, '个', portfolio.missingProjects ? 'text-amber-700' : '')}
           ${summaryTile('未保存版本', portfolio.noVersionProjects, '个', portfolio.noVersionProjects ? 'text-amber-700' : '')}
           ${summaryTile('可收录案例', portfolio.readyToArchive, '个')}
         </div>
-        <div class="mt-4 flex items-center gap-2 text-sm">
+        <div class="flex items-center gap-2 border-t border-slate-100 px-5 py-3 text-sm">
           <input id="pf_keyword_filter" value="${esc(projectState.keyword)}" class="h-9 w-64 rounded border border-slate-300 bg-white px-3" placeholder="搜索项目名称 / 类型 / 特征..." />
           <select id="pf_status_filter" class="h-9 rounded border border-slate-300 bg-white px-2">
             <option value="">全部状态</option>
@@ -86,15 +87,15 @@ export async function render(workspace = document.getElementById('workspace')) {
       </section>
 
       ${portfolio.missingProjects || portfolio.noVersionProjects ? `
-        <section class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3 text-sm text-amber-800">
+        <section class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3 text-sm text-amber-800">
           <span class="material-symbols-outlined text-[20px]">priority_high</span>
-          <div class="font-medium">当前项目组合还有 ${portfolio.missingProjects} 个缺价项目、${portfolio.noVersionProjects} 个未保存版本项目。</div>
+          <div><div class="font-semibold">优先处理 ${portfolio.missingProjects + portfolio.noVersionProjects} 个待办项目</div><div class="mt-0.5 text-xs text-amber-700">缺单价会影响报价完整度；保存版本后才可收录为案例。</div></div>
           <div class="flex-1"></div>
           <button onclick="window.__app.go('boq')" class="h-8 px-3 rounded border border-amber-300 bg-white text-amber-800">进入清单处理</button>
         </section>
       ` : ''}
 
-      <section class="grid grid-cols-3 gap-3">
+      <section class="grid grid-cols-1 gap-3 xl:grid-cols-3">
         ${visibleProjects.length ? visibleProjects.map(projectCard).join('') : `<div class="col-span-3 rounded-lg border border-slate-200 bg-white p-10 text-center text-slate-400">${projects.length ? '没有符合筛选条件的项目。' : '还没有项目，点右上角「新建项目」开始建立项目资料。'}</div>`}
       </section>
     </div>
@@ -205,6 +206,11 @@ function portfolioStats(summaries) {
   };
 }
 
+function projectAttentionOrder(left, right) {
+  const score = summary => (summary.missing ? 30 : 0) + (!summary.versionCount && summary.lineCount ? 20 : 0) + (summary.project.status === 'archived' ? 0 : 10);
+  return score(right) - score(left) || String(right.project.updatedAt || '').localeCompare(String(left.project.updatedAt || ''));
+}
+
 function projectNextAction(project, { lines, versions, missing }) {
   if (missing) return {
     title: `下一步：补齐 ${missing} 条缺单价`,
@@ -274,8 +280,8 @@ function projectCard(summary) {
   const waterSpecific = isWaterProjectType(p.type) || Boolean(p.dailyCapacity);
   const archiveBlocked = p.status !== 'archived' && !eligibility.allowed;
   const blocker = eligibility.blockers[0] || null;
-  return `<article class="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col min-h-[330px]">
-    <div class="p-4 border-b border-slate-200 bg-white">
+  return `<article class="rounded-xl border ${missing ? 'border-amber-200' : 'border-slate-200'} bg-white overflow-hidden flex flex-col min-h-[318px] shadow-sm shadow-slate-100/60">
+    <div class="p-4 border-b border-slate-100 bg-white">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="font-semibold leading-5 text-slate-900 truncate" title="${esc(p.name)}">${esc(p.name)}</div>
@@ -292,22 +298,21 @@ function projectCard(summary) {
           <div class="text-xs text-slate-500">项目总造价</div>
           <div class="mt-1 text-2xl font-semibold tabular-nums text-teal-700">${fmtMoney(p.totalCost || 0, p.currency)}</div>
         </div>
-        <div class="text-right text-xs text-slate-500">
-          <div>${lineCount} 条清单</div>
-          <div>${versionCount} 个版本</div>
-          <div class="${missing ? 'text-amber-700' : 'text-slate-500'}">${missing ? `缺单价 ${missing}` : '价格完整'}</div>
+        <div class="text-right text-xs leading-5 text-slate-500">
+          <div>${lineCount} 条清单 · ${versionCount} 个版本</div>
+          <div class="font-medium ${missing ? 'text-amber-700' : 'text-emerald-700'}">${missing ? `缺单价 ${missing}` : '价格完整'}</div>
         </div>
       </div>
     </div>
 
-    <div class="p-4 flex-1 bg-slate-50/60">
+    <div class="p-4 flex-1 bg-slate-50/40">
       <div class="grid grid-cols-2 gap-2 text-sm">
         ${waterSpecific ? miniMetric('日处理量', p.dailyCapacity ? `${esc(p.dailyCapacity)} 万m³/d` : '-') : miniMetric('项目类型', p.type || '未分类')}
         ${miniMetric('建筑面积', p.area ? `${esc(p.area)} ㎡` : '-')}
         ${miniMetric('单方造价', p.area ? `${fmtMoney(unitCost, p.currency)}/㎡` : '-')}
         ${waterSpecific ? miniMetric('单水造价', p.dailyCapacity ? `${fmtMoney(waterCost, p.currency)}/(m³·d)` : '-') : miniMetric('价格年份', p.priceYear || '-')}
-        ${miniMetric('报价版本', `${versionCount} 个`)}
-        ${miniMetric('缺价条目', `${missing} 条`)}
+        ${miniMetric('项目阶段', p.stage || '-')}
+        ${miniMetric('价格年份', p.priceYear || '-')}
       </div>
       <div class="mt-4">
         <div class="mb-1 flex items-center justify-between text-xs">
@@ -318,19 +323,19 @@ function projectCard(summary) {
           <div class="h-2 rounded ${missing ? 'bg-amber-500' : 'bg-teal-600'}" style="width:${completion}%"></div>
         </div>
       </div>
-      <div class="mt-4 flex items-center gap-2 text-xs text-slate-500">
+      <div class="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
         <span class="badge badge-gray">${esc(p.structure || '未填结构')}</span>
-        <span class="badge badge-gray">${esc(p.process || '未填专业特征')}</span>
+        <span class="badge badge-gray">${esc(p.specialty || p.process || '未填专业特征')}</span>
         ${p.region ? `<span class="badge badge-gray">${esc(p.region)}</span>` : ''}
         ${p.stage ? `<span class="badge badge-gray">${esc(p.stage)}</span>` : ''}
       </div>
-      <button data-open="${p.id}" ${next.priceStatus ? `data-price-status="${next.priceStatus}"` : ''} ${next.riskStatus ? `data-risk-status="${next.riskStatus}"` : ''} class="mt-4 w-full rounded border ${nextToneClass(next.tone)} px-3 py-2 text-left text-xs hover:bg-white">
-        <div class="font-medium">${esc(next.title)}</div>
+      <button data-open="${p.id}" ${next.priceStatus ? `data-price-status="${next.priceStatus}"` : ''} ${next.riskStatus ? `data-risk-status="${next.riskStatus}"` : ''} class="mt-3 w-full rounded-lg border ${nextToneClass(next.tone)} px-3 py-2 text-left text-xs hover:bg-white">
+        <div class="flex items-center justify-between gap-2"><span class="font-semibold">${esc(next.title)}</span><span class="material-symbols-outlined text-[16px]">arrow_forward</span></div>
         <div class="mt-1 opacity-80">${esc(next.desc)}</div>
       </button>
     </div>
 
-    <div class="px-4 py-3 border-t border-slate-200 bg-white flex items-center gap-2">
+    <div class="px-4 py-3 border-t border-slate-100 bg-white flex items-center gap-2">
       ${primaryButton(summary)}
       <button data-edit="${p.id}" class="px-2.5 py-1.5 text-xs rounded border border-slate-300 hover:bg-slate-50">编辑</button>
       ${archiveBlocked
@@ -366,6 +371,7 @@ function editForm(p) {
   const showWaterMetrics = isWaterProjectType(p.type);
   openModal((p.name ? '编辑' : '新建') + ' 项目', `
     <div class="space-y-4 text-sm text-slate-700">
+      <datalist id="projectSpecialties">${BUILTIN_SPECIALTIES.map(value => `<option value="${esc(value)}"></option>`).join('')}</datalist>
       <section class="bg-white border border-slate-200 rounded-xl p-4">
         <div class="mb-3 flex items-center justify-between">
           <div>
@@ -429,6 +435,10 @@ function editForm(p) {
           </label>
           <label class="block text-xs font-medium text-slate-500">专业 / 工艺特征
             <input id="pf_proc" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="填写主要专业、工艺或建设内容" value="${esc(p.process || '')}" />
+          </label>
+          <label class="block text-xs font-medium text-slate-500">默认专业
+            <input id="pf_specialty" list="projectSpecialties" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="例如：土建建筑（可自定义）" value="${esc(p.specialty || '')}" />
+            <span class="mt-1 block text-[11px] leading-4 text-slate-400">清单未指定专业时，按此专业匹配定额。</span>
           </label>
           <label class="block text-xs font-medium text-slate-500">地区
             <input id="pf_region" class="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm" placeholder="例如：江苏·南京" value="${esc(p.region || '')}" />
@@ -503,6 +513,7 @@ function editForm(p) {
       area: document.getElementById('pf_area').value,
       structure: document.getElementById('pf_struct').value,
       process: document.getElementById('pf_proc').value,
+      specialty: document.getElementById('pf_specialty').value.trim(),
       region: document.getElementById('pf_region').value.trim(),
       pricingRegion: {
         province: document.getElementById('pf_price_province').value.trim(),

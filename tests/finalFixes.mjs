@@ -166,14 +166,14 @@ async function testAtomicResourceRefreshRace() {
   const fastEquipment = refresh({ resourceType: 'equipment', keyword: '', category: '', status: '', selectedId: '', resourceIds: [], context: { invalidated: false } });
   assert.equal(await fastEquipment, true);
   assert.equal(shared.resourceType, 'equipment');
-  assert.equal(shared.selectedId, 'eq-1');
+  assert.equal(shared.selectedId, '');
   assert.equal(shared.prices.get('eq-1').resourceId, 'eq-1');
-  assert.equal(shared.usage.resourceId, 'eq-1');
+  assert.equal(shared.usage, null);
   releaseMaterials();
   assert.equal(await slowMaterials, false);
   assert.equal(shared.resourceType, 'equipment');
   assert.deepEqual(shared.rows.map(item => item.id), ['eq-1']);
-  const clicked = shared.rows.find(item => item.id === shared.selectedId);
+  const clicked = shared.rows[0];
   assert.equal(clicked?.resourceType, 'equipment');
   const select = createLatestResourceSelection({
     setSelectedId: id => { shared.selectedId = id; },

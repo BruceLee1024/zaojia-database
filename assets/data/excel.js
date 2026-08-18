@@ -9,6 +9,11 @@ import { detectImportRegions } from './importEngine.js?v=6.15&build=20260814';
 
 const HEADER_QUOTA  = ['清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'];
 const HEADER_BOQ    = ['序号', '项目编码', '项目名称', '项目特征', '计量单位', '工程数量', '综合单价', '合价'];
+const QUOTA_BREAKDOWN_HEADERS = ['人工', '材料', '设备', '机械', '管理费', '利润', '风险'];
+export const QUOTA_EXPORT_HEADERS = [
+  '专业', '分类', '定额编码', '清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价',
+  '启用人材机拆分', ...QUOTA_BREAKDOWN_HEADERS, '关键词标签',
+];
 
 function firstValue(row, keys) {
   for (const key of keys) {
@@ -330,9 +335,11 @@ export function rowToQuotaItem(row) {
   const rawPrice = row['综合单价'];
   const priceTotal = parseFloat(rawPrice) || 0;
   const { name, feature } = splitNameFeature(row);
+  const breakdown = Object.fromEntries(QUOTA_BREAKDOWN_HEADERS.map(key => [key, parseFloat(row[key]) || 0]));
   return {
     code: firstValue(row, ['定额编码', '编码', '项目编码']) || '',
-    category: categoryGuess(name),
+    specialty: firstValue(row, ['专业', '适用专业']),
+    category: firstValue(row, ['分类']) || categoryGuess(name),
     name,
     feature,
     work:     row['工作内容'] || '',
@@ -340,6 +347,9 @@ export function rowToQuotaItem(row) {
     unit:     firstValue(row, ['单位', '计量单位']),
     priceTotal,
     priceMissing: !(priceTotal > 0),
+    useBreakdown: ['是', 'true', '1', '启用'].includes(String(row['启用人材机拆分'] || '').trim().toLowerCase()),
+    breakdown,
+    tags: String(row['关键词标签'] || '').split(/[,，]/).map(item => item.trim()).filter(Boolean),
   };
 }
 
@@ -497,13 +507,38 @@ export function exportCostEstimateExcel(project, lines, summary) {
 /** 导出定额库模板 */
 export function exportQuotaTemplate() {
   const data = [
-    ['分类', '清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'],
-    ['土石方与支护', '机械挖一般土方', '土壤类别：综合；开挖深度：按实际', '挖土、弃土、清理机下余土', '按开挖前天然密实体积计算', 'm³', 5, '人工+机械+管理+利润+风险'],
+    ['专业', '分类', '清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'],
+    ['土建建筑', '土石方与支护', '机械挖一般土方', '土壤类别：综合；开挖深度：按实际', '挖土、弃土、清理机下余土', '按开挖前天然密实体积计算', 'm³', 5, '人工+机械+管理+利润+风险'],
   ];
   const ws = XLSX.utils.aoa_to_sheet(data);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '定额库模板');
   XLSX.writeFile(wb, '定额库模板.xlsx');
+}
+
+/** 导出完整定额库，字段可直接再次导入，保留专业与人材机拆分。 */
+export function quotaExportRows(items = []) {
+  return items.map(item => {
+    const breakdown = item.breakdown || {};
+    return [
+      item.specialty || '', item.category || '', item.code || '', item.name || '', item.feature || '', item.work || '', item.rule || '', item.unit || '', Number(item.priceTotal || 0),
+      item.useBreakdown ? '是' : '否',
+      ...QUOTA_BREAKDOWN_HEADERS.map(key => Number(breakdown[key] || 0)),
+      (item.tags || []).join('，'),
+    ];
+  });
+}
+
+export function exportQuotaLibraryExcel(items = [], { fileName } = {}) {
+  if (!globalThis.XLSX?.utils?.aoa_to_sheet) throw new Error('Excel 导出组件未加载');
+  const rows = quotaExportRows(items);
+  if (!rows.length) throw new Error('当前定额库没有可导出的条目');
+  const ws = XLSX.utils.aoa_to_sheet([QUOTA_EXPORT_HEADERS, ...rows]);
+  ws['!cols'] = [14, 16, 16, 28, 48, 36, 36, 10, 14, 14, ...QUOTA_BREAKDOWN_HEADERS.map(() => 12), 24].map(wch => ({ wch }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '定额库');
+  const stamp = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, fileName || `定额库-${stamp}.xlsx`);
 }
 
 /** 导出独立清单库 Excel 模板 */
@@ -517,6 +552,28 @@ export function exportBoqLibraryTemplate() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '清单库模板');
   XLSX.writeFile(wb, '清单库模板.xlsx');
+}
+
+export const BOQ_LIBRARY_EXPORT_HEADERS = ['专业', '清单编码', '清单名称', '项目特征', '单位', '默认工程量', '适用范围', '结构分组', '关联定额编码', '参考组成价', ...QUOTA_BREAKDOWN_HEADERS, '来源', '版本', '备注'];
+
+export function boqLibraryExportRows(items = []) {
+  return items.map(item => [
+    item.major || '', item.code || '', item.name || '', item.feature || '', item.unit || '', Number(item.defaultQty || 0), item.scope || '', item.structureGroup || '',
+    (item.quotaRelations || []).map(relation => relation.quotaSnapshot?.code || relation.quotaItemId || '').filter(Boolean).join('，'),
+    Number(item.referenceUnitPrice || 0), ...QUOTA_BREAKDOWN_HEADERS.map(key => Number(item.referenceBreakdown?.[key] || 0)),
+    item.source || '', item.version || '', item.note || '',
+  ]);
+}
+
+export function exportBoqLibraryExcel(items = [], { fileName } = {}) {
+  if (!globalThis.XLSX?.utils?.aoa_to_sheet) throw new Error('Excel 导出组件未加载');
+  const rows = boqLibraryExportRows(items);
+  if (!rows.length) throw new Error('当前清单库没有可导出的条目');
+  const ws = XLSX.utils.aoa_to_sheet([BOQ_LIBRARY_EXPORT_HEADERS, ...rows]);
+  ws['!cols'] = [14, 18, 26, 48, 10, 14, 24, 16, 26, 14, ...QUOTA_BREAKDOWN_HEADERS.map(() => 12), 16, 10, 30].map(wch => ({ wch }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '清单库');
+  XLSX.writeFile(wb, fileName || `清单库-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 export function getResourceTemplateData(resourceType) {
@@ -543,6 +600,31 @@ export function exportResourceTemplate(resourceType) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, template.sheetName);
   XLSX.writeFile(wb, template.fileName);
+}
+
+export function resourceExportRows(resourceType, resources = [], prices = new Map()) {
+  const equipment = resourceType === 'equipment';
+  return resources.map(item => {
+    const price = prices.get(item.id) || {};
+    const components = price.components || {};
+    return [
+      item.code || '', item.category || '', item.name || '', item.specModel || '', item.unit || '', item.brand || '', item.manufacturer || '', item.standard || '', item.processStage || '', (item.tags || []).join('，'), item.status || 'active', item.note || '',
+      Number(price.unitPrice || 0), price.priceDate || '', price.validFrom || '', price.validTo || '', price.region?.province || '', price.region?.city || '', price.region?.district || '', price.sourceType || '', price.priceBasis || '', price.taxIncluded ? '是' : '否', Number(price.taxRate || 0) * 100, price.supplier || '', price.installationScope || '', Number(components.base || 0), Number(components.freight || 0), Number(components.installation || 0), Number(components.commissioning || 0), price.note || '',
+    ];
+  });
+}
+
+export function exportResourceLibraryExcel(resourceType, resources = [], prices = new Map(), { fileName } = {}) {
+  if (!globalThis.XLSX?.utils?.aoa_to_sheet) throw new Error('Excel 导出组件未加载');
+  const template = getResourceTemplateData(resourceType);
+  const rows = resourceExportRows(resourceType, resources, prices);
+  if (!rows.length) throw new Error(`当前${resourceType === 'equipment' ? '设备' : '材料'}库没有可导出的条目`);
+  const ws = XLSX.utils.aoa_to_sheet([template.rows[0], ...rows]);
+  ws['!cols'] = template.rows[0].map((header, index) => ({ wch: index === 2 ? 24 : Math.max(10, String(header).length * 2 + 2) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, resourceType === 'equipment' ? '设备库' : '材料库');
+  const label = resourceType === 'equipment' ? '设备库' : '材料库';
+  XLSX.writeFile(wb, fileName || `${label}-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 export const exportMaterialTemplate = () => exportResourceTemplate('material');

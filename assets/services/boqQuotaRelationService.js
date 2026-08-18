@@ -6,6 +6,7 @@ import {
 } from '../data/repository.js?v=6.15';
 import { uid } from '../utils/dom.js?v=6.15';
 import { quotaPriceStatus, roundMoney } from '../utils/costing.js?v=6.15';
+import { normalizeQuotaBreakdown, QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=6.15';
 
 const now = () => new Date().toISOString();
 
@@ -66,10 +67,18 @@ export function calculateQuotaRelations(relations = [], boqQty = 0) {
     const totalQty = relation.quantityBasis === 'total' ? value : parentQty * value;
     const amount = roundMoney(totalQty * price * factor);
     const contributionUnitPrice = parentQty ? amount / parentQty : 0;
-    return { ...relation, totalQty, effectivePrice: price, amount, contributionUnitPrice };
+    const contributionBreakdown = Object.fromEntries(QUOTA_BREAKDOWN_KEYS.map(key => [
+      key,
+      parentQty ? (Number(relation.quotaSnapshot?.breakdown?.[key] || 0) * totalQty * factor) / parentQty : 0,
+    ]));
+    return { ...relation, totalQty, effectivePrice: price, amount, contributionUnitPrice, contributionBreakdown };
   });
   const rawUnitPrice = rows.reduce((sum, row) => sum + row.contributionUnitPrice, 0);
-  return { rows, unitPrice: parentQty ? roundMoney(rawUnitPrice) : 0, amount: rows.reduce((sum, row) => sum + row.amount, 0), calculable: parentQty > 0 };
+  const breakdown = normalizeQuotaBreakdown(rows.reduce((sum, row) => {
+    QUOTA_BREAKDOWN_KEYS.forEach(key => { sum[key] = Number(sum[key] || 0) + Number(row.contributionBreakdown?.[key] || 0); });
+    return sum;
+  }, {}));
+  return { rows, unitPrice: parentQty ? roundMoney(rawUnitPrice) : 0, amount: rows.reduce((sum, row) => sum + row.amount, 0), breakdown, calculable: parentQty > 0 };
 }
 
 export const boqQuotaRelationService = {

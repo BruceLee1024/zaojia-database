@@ -11,6 +11,7 @@ import { assertPriceUsableForCosting } from './resourcePriceService.js?v=6.15';
 import { assertProjectEditable, assertProjectEditableById } from './projectLockService.js?v=6.15';
 import { calculateQuotaRelations } from './boqQuotaRelationService.js?v=6.15';
 import { normalizeCurrency } from '../utils/currency.js?v=6.15';
+import { effectiveSpecialty, normalizeSpecialty, specialtyRank } from '../utils/specialty.js?v=6.15';
 
 const equipmentPackageCoordinator = createSerializedKeyCoordinator();
 
@@ -32,6 +33,7 @@ export const boqService = {
       id: uid(),
       projectId,
       quotaItemId,
+      specialty: normalizeSpecialty(project?.specialty) || normalizeSpecialty(it.specialty),
       code: '',
       name: it.name,
       feature: it.feature || '',
@@ -50,8 +52,9 @@ export const boqService = {
 
   /** 自然语言添加清单（用 AI 路由前的本地匹配） */
   async addByText(projectId, quotaHint, qty) {
-    const items = await quotaRepo.all();
-    const hit = pickBestQuota(items, quotaHint);
+    const [items, project] = await Promise.all([quotaRepo.all(), projectRepo.findById(projectId)]);
+    const specialty = normalizeSpecialty(project?.specialty);
+    const hit = pickBestQuota([...items].sort((a, b) => specialtyRank(b, specialty) - specialtyRank(a, specialty)), quotaHint);
     if (!hit) throw new Error(`没找到「${quotaHint}」相关定额`);
     return await this.addFromQuota(projectId, hit.id, qty);
   },
@@ -316,7 +319,8 @@ export const boqService = {
   },
 
   async recommendQuota(line, limit = 5) {
-    const items = await quotaRepo.all();
+    const [items, project] = await Promise.all([quotaRepo.all(), line?.projectId ? projectRepo.findById(line.projectId) : null]);
+    const specialty = effectiveSpecialty(line, project);
     const source = `${line?.name || ''} ${line?.feature || ''}`.trim();
     const words = source.toLowerCase().split(/[\s,，;；、/]+/).filter(w => w.length > 1);
     return items
@@ -326,12 +330,13 @@ export const boqService = {
         const wordScore = words.reduce((sum, word) => sum + (blob.includes(word) ? 1 : 0), 0);
         const unitScore = item.unit && line?.unit && item.unit === line.unit ? 1.5 : 0;
         const categoryScore = groupForQuota(item) === groupForLine(line || {}) ? 1 : 0;
-        return { item, score: exact + wordScore + unitScore + categoryScore };
+        const specialtyScore = specialtyRank(item, specialty);
+        return { item, score: exact + wordScore + unitScore + categoryScore, specialtyScore };
       })
       .filter(x => x.score > 0)
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.specialtyScore - a.specialtyScore || b.score - a.score)
       .slice(0, limit)
-      .map(x => ({ ...x.item, score: x.score }));
+      .map(x => ({ ...x.item, score: x.score, specialtyMatch: x.specialtyScore === 2 ? 'matched' : x.specialtyScore === 1 ? 'generic' : 'cross', requestedSpecialty: specialty }));
   },
 
   async replaceQuota(lineId, quotaItemId) {
@@ -351,6 +356,8 @@ export const boqService = {
       unit: quota.unit || line.unit || '',
       unitPrice,
       structureGroup: groupForQuota(quota),
+      quotaSpecialty: normalizeSpecialty(quota.specialty),
+      quotaSpecialtyMatch: specialtyRank(quota, effectiveSpecialty(line, project)) === 0 ? 'cross' : '',
     });
   },
 

@@ -90,13 +90,13 @@ function result(type, id, title, subtitle, targetView, params, score = 1, excerp
 }
 
 function quotaResults(rows, kw) {
-  return rows.filter(item => includes(item, kw, ['name', 'feature', 'category', 'unit', 'tags']))
+  return rows.filter(item => includes(item, kw, ['name', 'feature', 'specialty', 'category', 'unit', 'tags']))
     .slice(0, 8)
     .map(item => result(
       'quota',
       item.id,
       item.name || '未命名定额',
-      `${item.category || '未分类'} · ${item.unit || '-'} · ${hasMissingPrice(item.priceTotal) ? '缺单价' : fmtMoney(item.priceTotal)}`,
+      `${item.specialty || '通用'} · ${item.category || '未分类'} · ${item.unit || '-'} · ${hasMissingPrice(item.priceTotal) ? '缺单价' : fmtMoney(item.priceTotal)}`,
       'quota',
       { keyword: item.name || kw, selectedId: item.id, priceStatus: hasMissingPrice(item.priceTotal) ? 'missing' : '' },
       scoreText(item.name, kw) + 20,

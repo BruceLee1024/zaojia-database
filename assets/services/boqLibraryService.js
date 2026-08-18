@@ -52,7 +52,7 @@ export const boqLibraryService = {
       const relationIds = quotaRelations.map(relation => relation.quotaItemId).filter(Boolean);
       const quotaItemIds = relationIds.length ? [...new Set(relationIds)] : (item.quotaItemIds || []);
       const composition = calculateQuotaRelations(quotaRelations, item.defaultQty);
-      return { ...item, quotaItemIds, quotaRelations, quotaCount: quotaRelations.length || quotaItemIds.length, referenceUnitPrice: composition.unitPrice };
+      return { ...item, quotaItemIds, quotaRelations, quotaCount: quotaRelations.length || quotaItemIds.length, referenceUnitPrice: composition.unitPrice, referenceBreakdown: composition.breakdown };
     }).filter(item => {
       if (major && item.major !== major) return false;
       if (code && !clean(item.code).includes(code)) return false;
@@ -66,7 +66,8 @@ export const boqLibraryService = {
     const item = await boqLibraryRepo.findById(id);
     if (!item) return null;
     const quotaRelations = await boqQuotaRelationService.libraryRelations(id);
-    return { ...item, quotaRelations, quotaItemIds: [...new Set(quotaRelations.map(row => row.quotaItemId).filter(Boolean))], quotaCount: quotaRelations.length, referenceUnitPrice: calculateQuotaRelations(quotaRelations, item.defaultQty).unitPrice };
+    const composition = calculateQuotaRelations(quotaRelations, item.defaultQty);
+    return { ...item, quotaRelations, quotaItemIds: [...new Set(quotaRelations.map(row => row.quotaItemId).filter(Boolean))], quotaCount: quotaRelations.length, referenceUnitPrice: composition.unitPrice, referenceBreakdown: composition.breakdown };
   },
   async options(field) {
     return [...new Set((await boqLibraryRepo.all()).map(item => clean(item[field])).filter(Boolean))].sort();

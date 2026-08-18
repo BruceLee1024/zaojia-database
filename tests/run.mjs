@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { testResourceHealth } from './resourceHealth.mjs';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.15';
 import { formatCurrency, normalizeCurrency, sumByCurrency } from '../assets/utils/currency.js?v=6.15';
-import { decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
+import { decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, QUOTA_EXPORT_HEADERS, quotaExportRows, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
 import { buildHeaderTree, classifyImportRow, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.15';
 import { applyMappingTemplate, buildImportColumnMapping, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.15';
 import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../assets/services/importSchemaService.js?v=6.15';
@@ -28,6 +28,7 @@ import { testFinalFixes } from './finalFixes.mjs';
 import { testAiCopilot, testAiSessionPersistence } from './aiCopilot.mjs';
 import { testCostEstimationMath, testCostEstimationPersistence } from './costEstimation.mjs';
 import { testIndicatorAggregation } from './indicatorAggregation.mjs';
+import { effectiveSpecialty, specialtyMatchLabel, specialtyRank } from '../assets/utils/specialty.js?v=6.15';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -36,6 +37,16 @@ function testCosting() {
   assert.equal(hasMissingPrice(0), true);
   assert.equal(hasMissingPrice(''), true);
   assert.equal(hasMissingPrice(1), false);
+}
+
+function testSpecialtyMatching() {
+  const project = { specialty: '装饰装修' };
+  assert.equal(effectiveSpecialty({}, project), '装饰装修');
+  assert.equal(effectiveSpecialty({ specialty: '土建建筑' }, project), '土建建筑');
+  assert.equal(specialtyRank({ specialty: '装饰装修' }, '装饰装修'), 2);
+  assert.equal(specialtyRank({}, '装饰装修'), 1, '旧数据应作为通用定额保留');
+  assert.equal(specialtyRank({ specialty: '土建建筑' }, '装饰装修'), 0);
+  assert.match(specialtyMatchLabel({ specialty: '土建建筑' }, '装饰装修'), /跨专业候选/);
 }
 
 function testProjectCurrencies() {
@@ -101,6 +112,7 @@ function testSystemPromptGenerationContract() {
 
 function testExcelRows() {
   const quotaRow = {
+    专业: '土建建筑',
     清单名称: 'C30 满堂基础',
     项目特征: '混凝土强度等级：C30',
     单位: 'm³',
@@ -111,6 +123,16 @@ function testExcelRows() {
   assert.equal(quota.name, 'C30 满堂基础');
   assert.equal(quota.priceTotal, 520.5);
   assert.equal(quota.priceMissing, false);
+  assert.equal(quota.specialty, '土建建筑');
+  assert.equal(quota.category, '混凝土与钢筋');
+
+  const exportRows = quotaExportRows([{
+    specialty: '装饰装修', category: '油漆', code: 'Q-01', name: '油漆施工', feature: '墙面', unit: 'm²', priceTotal: 36,
+    useBreakdown: true, breakdown: { 人工: 20, 材料: 16 }, tags: ['油漆', '内墙'],
+  }]);
+  assert.equal(QUOTA_EXPORT_HEADERS.includes('专业'), true);
+  assert.equal(exportRows[0][0], '装饰装修');
+  assert.equal(exportRows[0][9], '是');
 
   const missingPriceQuota = rowToQuotaItem({ 清单名称: '缺价项', 单位: 'm²', 综合单价: '' });
   assert.equal(missingPriceQuota.priceMissing, true);
@@ -829,6 +851,7 @@ function notFound() {
 }
 
 testCosting();
+testSpecialtyMatching();
 testCostEstimationMath();
 testIndicatorAggregation();
 testProjectCurrencies();

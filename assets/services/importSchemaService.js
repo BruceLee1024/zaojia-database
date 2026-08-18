@@ -46,6 +46,7 @@ const SCHEMAS = {
     field('source', '来源', ['来源'], 'text'), field('version', '版本', ['版本'], 'text'), field('note', '备注', ['备注', '说明'], 'text'),
   ]),
   quota: schema('quota', '常用定额', [
+    field('specialty', '专业', ['专业', '适用专业'], 'text', false, { inheritContext: true }),
     field('name', '清单名称', COMMON_NAME, 'text', true),
     field('feature', '项目特征', ['项目特征', '特征描述', '特征'], 'text'),
     field('work', '工作内容', ['工作内容', '工作内容描述'], 'text'),

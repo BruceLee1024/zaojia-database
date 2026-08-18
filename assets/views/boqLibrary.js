@@ -2,25 +2,27 @@
 import { boqLibraryService } from '../services/boqLibraryService.js?v=6.15';
 import { suggestLibraryItem } from '../services/aiAssistService.js?v=6.15';
 import { projectRepo, quotaRepo } from '../data/repository.js?v=6.15';
-import { exportBoqLibraryTemplate } from '../data/excel.js?v=6.15';
+import { exportBoqLibraryExcel, exportBoqLibraryTemplate } from '../data/excel.js?v=6.15&build=20260818l';
 import { esc, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
 import { ICONS } from '../utils/icons.js?v=6.15';
+import { QUOTA_BREAKDOWN_KEYS } from '../utils/quotaBreakdown.js?v=6.15';
 
 const state = { keyword: '', selectedId: '' };
 let items = [];
 
-export async function render(workspace = document.getElementById('workspace')) {
+export async function render(workspace = document.getElementById('workspace'), { preserveSelection = false } = {}) {
   const route = window.__app && window.__app.state ? window.__app.state.routeParams || {} : {};
   if (route.keyword != null) state.keyword = route.keyword;
   if (route.selectedId) state.selectedId = route.selectedId;
-  window.__boqLibrary = { select: id => select(workspace, id), create, edit, apply, remove, importExcel };
+  else if (!preserveSelection) state.selectedId = '';
+  window.__boqLibrary = { select: id => select(workspace, id), create, edit, apply, remove, importExcel, exportLibrary };
   workspace.innerHTML = `
     <div class="page-frame library-workbench h-full flex flex-col">
       <section class="library-toolbar library-toolbar--compact">
-        <div class="library-filter-row"><div class="relative"><input id="libKeyword" value="${esc(state.keyword)}" placeholder="搜索清单编码 / 名称 / 项目特征" class="h-10 w-full border px-3 text-sm" /></div><div class="library-filter-controls"><button id="libTemplate" class="h-10 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button id="libImport" class="h-10 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__boqLibrary.create()" class="h-10 px-4 brand-bg text-white text-sm">新建清单</button></div></div>
+        <div class="library-filter-row"><div class="relative"><input id="libKeyword" value="${esc(state.keyword)}" placeholder="搜索清单编码 / 名称 / 项目特征" class="h-10 w-full border px-3 text-sm" /></div><div class="library-filter-controls"><button id="libTemplate" class="h-10 px-3 border border-slate-300 bg-white text-sm text-slate-700">下载模板</button><button onclick="window.__boqLibrary.exportLibrary()" class="h-10 px-3 border border-slate-300 bg-white text-sm text-slate-700">导出清单库</button><button id="libImport" class="h-10 px-3 border border-teal-300 bg-white text-sm text-teal-700">导入 Excel</button><button onclick="window.__boqLibrary.create()" class="h-10 px-4 brand-bg text-white text-sm">新建清单</button></div></div>
       </section>
       <div id="libraryMetrics" class="library-summary-grid library-summary-grid--4"></div>
-      <div class="library-split"><section class="library-list-pane overflow-auto"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50"><tr><th class="p-3 text-left">清单编码</th><th class="p-3 text-left">清单名称</th><th class="p-3 text-left">项目特征</th><th class="p-3 text-left">单位</th><th class="p-3 text-right">默认工程量</th><th class="p-3 text-center">关联定额</th></tr></thead><tbody id="libraryRows"></tbody></table></section><aside id="libraryDetail" class="library-detail-pane"></aside></div>
+      <div class="library-split ${state.selectedId ? '' : 'library-split--list-only'}"><section class="library-list-pane overflow-auto"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50"><tr><th class="p-3 text-left">清单编码</th><th class="p-3 text-left">清单名称</th><th class="p-3 text-left">项目特征</th><th class="p-3 text-left">单位</th><th class="p-3 text-right">默认工程量</th><th class="p-3 text-left">人材机组成</th><th class="p-3 text-center">关联定额</th></tr></thead><tbody id="libraryRows"></tbody></table></section>${state.selectedId ? '<aside id="libraryDetail" class="library-detail-pane"></aside>' : ''}</div>
     </div>`;
   const document = scopedDom(workspace);
   document.getElementById('libImport').onclick = importExcel;
@@ -32,13 +34,13 @@ export async function render(workspace = document.getElementById('workspace')) {
 async function renderRows(workspace = document.getElementById('workspace')) {
   const document = scopedDom(workspace);
   items = await boqLibraryService.list({ keyword: state.keyword });
-  if (!items.some(function (item) { return item.id === state.selectedId; })) state.selectedId = items[0] ? items[0].id : '';
+  if (!items.some(function (item) { return item.id === state.selectedId; })) state.selectedId = '';
   const all = await boqLibraryService.list({});
   const refs = all.reduce(function (sum, item) { return sum + (Number(item.referenceCount) || 0); }, 0);
   const water = all.filter(function (item) { return /水处理|污水/.test((item.major || '') + (item.scope || '')); }).length;
   const added = all.filter(function (item) { return (item.createdAt || '').slice(0, 7) === new Date().toISOString().slice(0, 7); }).length;
   document.getElementById('libraryMetrics').innerHTML = buildLibraryMetricCards({ total: all.length, water, added, references: refs }).map(metric).join('');
-  document.getElementById('libraryRows').innerHTML = items.length ? items.map(function (item) { return `<tr data-library-id="${item.id}" class="border-t cursor-pointer hover:bg-teal-50 ${item.id === state.selectedId ? 'bg-teal-50' : ''}"><td class="p-3 text-teal-700">${esc(item.code || '-')}</td><td class="p-3 font-medium">${esc(item.name)}</td><td class="p-3 text-slate-500">${esc(item.feature || '-')}</td><td class="p-3">${esc(item.unit)}</td><td class="p-3 text-right">${item.defaultQty || 0}</td><td class="p-3 text-center"><span class="badge ${item.quotaCount ? 'badge-green' : 'badge-gray'}">${item.quotaCount || 0} 条</span></td></tr>`; }).join('') : '<tr><td colspan="6" class="p-12 text-center text-slate-400">暂无清单，可新建或导入 Excel。</td></tr>';
+  document.getElementById('libraryRows').innerHTML = items.length ? items.map(function (item) { return `<tr data-library-id="${item.id}" class="border-t cursor-pointer hover:bg-teal-50 ${item.id === state.selectedId ? 'bg-teal-50' : ''}"><td class="p-3 text-teal-700">${esc(item.code || '-')}</td><td class="p-3 font-medium">${esc(item.name)}</td><td class="p-3 text-slate-500">${esc(item.feature || '-')}</td><td class="p-3">${esc(item.unit)}</td><td class="p-3 text-right">${item.defaultQty || 0}</td><td class="p-3">${breakdownSummary(item.referenceBreakdown)}</td><td class="p-3 text-center"><span class="badge ${item.quotaCount ? 'badge-green' : 'badge-gray'}">${item.quotaCount || 0} 条</span></td></tr>`; }).join('') : '<tr><td colspan="7" class="p-12 text-center text-slate-400">暂无清单，可新建或导入 Excel。</td></tr>';
   document.querySelectorAll('[data-library-id]').forEach(function (row) { row.onclick = function () { select(workspace, row.dataset.libraryId); }; });
   renderDetail(workspace, items.find(function (item) { return item.id === state.selectedId; }));
 }
@@ -65,7 +67,14 @@ function metric(card) {
   const tone = METRIC_TONES[card.tone] || METRIC_TONES.blue;
   return `<div class="library-metric-card px-4 py-3"><div class="kpi-content-top flex h-full gap-3"><div class="icon-surface ${tone.surface}"><span class="material-symbols-outlined icon-kpi">${card.icon}</span></div><div class="min-w-0"><div class="text-xs font-medium text-slate-500">${esc(card.label)}</div><div class="mt-1 flex items-baseline gap-2"><span class="text-2xl font-semibold leading-tight tabular-nums text-slate-950">${esc(card.value)}</span><span class="text-xs text-slate-500">${esc(card.unit)}</span></div><div class="mt-1 text-xs font-medium ${tone.note}">${esc(card.note)}</div></div></div></div>`;
 }
-function select(workspace, id) { state.selectedId = id; renderRows(workspace); }
+function select(workspace, id) { state.selectedId = id; render(workspace, { preserveSelection: true }); }
+async function exportLibrary() {
+  try {
+    const rows = await boqLibraryService.list({});
+    exportBoqLibraryExcel(rows);
+    toast(`已导出 ${rows.length} 条清单及关联定额信息`, 'success');
+  } catch (error) { toast(error?.message || '清单库导出失败', 'error'); }
+}
 export function getLibraryDetailSummary(item = {}) {
   const source = String(item.source || '').trim();
   const version = String(item.version || '').trim();
@@ -107,12 +116,24 @@ export function applyLibraryAISuggestions(fields = {}, selectedQuotaIds = [], re
 
 function renderDetail(workspace, item) {
   const target = workspace.querySelector('#libraryDetail');
+  if (!target) return;
   if (!item) {
     target.innerHTML = `<div class="h-full flex items-center justify-center p-8 text-center"><div><div class="icon-surface icon-surface-slate mx-auto mb-3"><span class="material-symbols-outlined icon-empty">${ICONS.resource.boq}</span></div><div class="font-semibold text-slate-700">选择清单查看详情</div><div class="mt-1 text-sm text-slate-500">从左侧列表选择一条标准清单。</div></div></div>`;
     return;
   }
   const detail = getLibraryDetailSummary(item);
-  target.innerHTML = `<div class="h-full flex flex-col"><div class="shrink-0 border-b border-slate-200 px-4 py-4"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-xs font-semibold text-teal-700">${esc(detail.code)}</div><h2 class="mt-2 text-xl font-semibold leading-7 text-slate-950">${esc(item.name || '未命名清单')}</h2><div class="mt-2 flex flex-wrap gap-2"><span class="badge badge-blue">${esc(detail.sourceLabel)}</span><span class="rounded border px-2 py-0.5 text-xs ${item.status === 'inactive' ? 'border-slate-200 bg-slate-50 text-slate-500' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}">${esc(detail.statusLabel)}</span></div></div><span class="material-symbols-outlined icon-page text-slate-300">article</span></div></div><div class="flex-1 min-h-0 overflow-auto scroll-thin p-4 space-y-5"><div class="grid grid-cols-3 divide-x divide-slate-200 rounded-lg border border-slate-200 bg-slate-50">${detailMetric('单位', item.unit || '-')}${detailMetric('参考组成价', item.quotaCount ? Number(item.referenceUnitPrice || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-')}${detailMetric('套用定额', `${detail.quotaCount} 项`)}</div>${detailSection('项目特征', item.feature || '未填写项目特征。', 'whitespace-pre-line')}${quotaRelationsSection(item)}${detailSection('适用信息', `<div class="grid grid-cols-2 gap-3"><div><div class="text-xs text-slate-500">专业</div><div class="mt-1 text-sm text-slate-700">${esc(item.major || '未设置')}</div></div><div><div class="text-xs text-slate-500">适用范围</div><div class="mt-1 text-sm text-slate-700">${esc(item.scope || '未设置')}</div></div><div><div class="text-xs text-slate-500">结构分组</div><div class="mt-1 text-sm text-slate-700">${esc(item.structureGroup || '未设置')}</div></div><div><div class="text-xs text-slate-500">版本</div><div class="mt-1 text-sm text-slate-700">${esc(item.version || '未设置')}</div></div></div>`, 'raw')}${detailSection('引用记录', `<div class="flex items-center justify-between gap-4"><div><div class="text-xs text-slate-500">累计被引用</div><div class="mt-1 text-lg font-semibold tabular-nums text-slate-900">${esc(detail.referenceLabel)}</div></div><div class="min-w-0 text-right"><div class="text-xs text-slate-500">最近引用</div><div class="mt-1 truncate text-sm text-slate-700" title="${esc(detail.lastReference)}">${esc(detail.lastReference)}</div></div></div>`, 'raw')}${item.note ? detailSection('备注', item.note, 'whitespace-pre-line') : ''}</div><div class="shrink-0 border-t border-slate-200 bg-white p-4"><button onclick="window.__boqLibrary.edit()" class="mb-2 h-10 w-full border border-teal-700 text-sm text-teal-700 flex items-center justify-center gap-1.5"><span class="material-symbols-outlined icon-action">${ICONS.action.edit}</span>编辑清单</button><button onclick="window.__boqLibrary.apply()" class="h-10 w-full text-sm brand-bg text-white flex items-center justify-center gap-1.5"><span class="material-symbols-outlined icon-action">${ICONS.action.apply}</span>加入项目清单</button><div class="mt-2 text-center text-xs text-slate-500">套用时会复制当前定额关系和价格快照，项目内可独立调整。</div></div></div>`;
+  target.innerHTML = `<div class="h-full flex flex-col"><div class="shrink-0 border-b border-slate-200 px-4 py-4"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-xs font-semibold text-teal-700">${esc(detail.code)}</div><h2 class="mt-2 text-xl font-semibold leading-7 text-slate-950">${esc(item.name || '未命名清单')}</h2><div class="mt-2 flex flex-wrap gap-2"><span class="badge badge-blue">${esc(detail.sourceLabel)}</span><span class="rounded border px-2 py-0.5 text-xs ${item.status === 'inactive' ? 'border-slate-200 bg-slate-50 text-slate-500' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}">${esc(detail.statusLabel)}</span></div></div><span class="material-symbols-outlined icon-page text-slate-300">article</span></div></div><div class="flex-1 min-h-0 overflow-auto scroll-thin p-4 space-y-5"><div class="grid grid-cols-3 divide-x divide-slate-200 rounded-lg border border-slate-200 bg-slate-50">${detailMetric('单位', item.unit || '-')}${detailMetric('参考组成价', item.quotaCount ? Number(item.referenceUnitPrice || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-')}${detailMetric('套用定额', `${detail.quotaCount} 项`)}</div>${breakdownSection(item.referenceBreakdown, detail.quotaCount)}${detailSection('项目特征', item.feature || '未填写项目特征。', 'whitespace-pre-line')}${quotaRelationsSection(item)}${detailSection('适用信息', `<div class="grid grid-cols-2 gap-3"><div><div class="text-xs text-slate-500">专业</div><div class="mt-1 text-sm text-slate-700">${esc(item.major || '未设置')}</div></div><div><div class="text-xs text-slate-500">适用范围</div><div class="mt-1 text-sm text-slate-700">${esc(item.scope || '未设置')}</div></div><div><div class="text-xs text-slate-500">结构分组</div><div class="mt-1 text-sm text-slate-700">${esc(item.structureGroup || '未设置')}</div></div><div><div class="text-xs text-slate-500">版本</div><div class="mt-1 text-sm text-slate-700">${esc(item.version || '未设置')}</div></div></div>`, 'raw')}${detailSection('引用记录', `<div class="flex items-center justify-between gap-4"><div><div class="text-xs text-slate-500">累计被引用</div><div class="mt-1 text-lg font-semibold tabular-nums text-slate-900">${esc(detail.referenceLabel)}</div></div><div class="min-w-0 text-right"><div class="text-xs text-slate-500">最近引用</div><div class="mt-1 truncate text-sm text-slate-700" title="${esc(detail.lastReference)}">${esc(detail.lastReference)}</div></div></div>`, 'raw')}${item.note ? detailSection('备注', item.note, 'whitespace-pre-line') : ''}</div><div class="shrink-0 border-t border-slate-200 bg-white p-4"><button onclick="window.__boqLibrary.edit()" class="mb-2 h-10 w-full border border-teal-700 text-sm text-teal-700 flex items-center justify-center gap-1.5"><span class="material-symbols-outlined icon-action">${ICONS.action.edit}</span>编辑清单</button><button onclick="window.__boqLibrary.apply()" class="h-10 w-full text-sm brand-bg text-white flex items-center justify-center gap-1.5"><span class="material-symbols-outlined icon-action">${ICONS.action.apply}</span>加入项目清单</button><div class="mt-2 text-center text-xs text-slate-500">套用时会复制当前定额关系和价格快照，项目内可独立调整。</div></div></div>`;
+}
+
+function breakdownSummary(breakdown = {}) {
+  const labels = { 人工: '人', 材料: '材', 设备: '设', 机械: '机' };
+  const values = Object.entries(labels).filter(([key]) => Number(breakdown[key] || 0)).map(([key, label]) => `${label}${Number(breakdown[key]).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`);
+  return values.length ? `<span class="text-xs text-slate-600">${esc(values.join(' · '))}</span>` : '<span class="text-xs text-slate-400">-</span>';
+}
+
+function breakdownSection(breakdown = {}, quotaCount = 0) {
+  if (!quotaCount) return `<section><div class="mb-2 text-sm font-semibold text-slate-800">人材机组成</div><div class="rounded border border-dashed border-slate-200 py-4 text-center text-sm text-slate-400">关联定额后自动汇总人、材、机价格组成</div></section>`;
+  return `<section><div class="mb-2 flex items-center justify-between"><div class="text-sm font-semibold text-slate-800">人材机组成</div><div class="text-xs text-slate-500">按每计量单位汇总</div></div><div class="grid grid-cols-4 gap-2">${QUOTA_BREAKDOWN_KEYS.map(key => `<div class="rounded border border-slate-200 bg-slate-50 px-2 py-2"><div class="text-xs text-slate-500">${esc(key)}</div><div class="mt-1 text-sm font-semibold tabular-nums text-slate-900">${Number(breakdown[key] || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}</div></div>`).join('')}</div></section>`;
 }
 
 function quotaRelationsSection(item) {

@@ -5,10 +5,11 @@ import { uid } from '../utils/dom.js?v=6.15';
 import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.15';
 import { parseQuotaUnit } from './boqQuotaRelationService.js?v=6.15';
 import { normalizeQuotaBreakdown } from '../utils/quotaBreakdown.js?v=6.15';
+import { normalizeSpecialty } from '../utils/specialty.js?v=6.15';
 
 export const quotaService = {
   /** 列出所有定额，支持分类/关键字过滤 */
-  async list({ keyword = '', category = '', unit = '', priceStatus = '' } = {}) {
+  async list({ keyword = '', category = '', specialty = '', unit = '', priceStatus = '' } = {}) {
     const [items, libraryRelations, projectRelations] = await Promise.all([quotaRepo.all(), boqLibraryQuotaRelationRepo.all(), projectBoqQuotaRelationRepo.all()]);
     const kw = keyword.toLowerCase();
     return items.map(it => ({
@@ -18,11 +19,12 @@ export const quotaService = {
       projectUsageCount: projectRelations.filter(row => row.quotaItemId === it.id).length,
     })).filter(it => {
       if (category && (it.category || '未分类') !== category) return false;
+      if (specialty && normalizeSpecialty(it.specialty) !== specialty) return false;
       if (unit && (it.unit || '') !== unit) return false;
       if (priceStatus === 'missing' && !hasMissingPrice(it.priceTotal)) return false;
       if (priceStatus === 'priced' && hasMissingPrice(it.priceTotal)) return false;
       if (!kw) return true;
-      const blob = `${it.code || ''} ${it.name} ${it.feature} ${(it.tags || []).join(' ')}`.toLowerCase();
+      const blob = `${it.code || ''} ${it.specialty || ''} ${it.name} ${it.feature} ${(it.tags || []).join(' ')}`.toLowerCase();
       return blob.includes(kw);
     });
   },
@@ -31,6 +33,11 @@ export const quotaService = {
   async categories() {
     const items = await quotaRepo.all();
     return [...new Set(items.map(i => i.category || '未分类'))].sort();
+  },
+
+  async specialties() {
+    const items = await quotaRepo.all();
+    return [...new Set(items.map(i => normalizeSpecialty(i.specialty)).filter(Boolean))].sort();
   },
 
   async units() {
@@ -146,10 +153,12 @@ export const quotaService = {
         return;
       }
       if (hasMissingPrice(item.priceTotal)) result.missingPrice++;
-      const k = item.name + '|' + (item.feature || '').slice(0, 30);
-      const exist = items.find(x => (x.name + '|' + (x.feature || '').slice(0, 30)) === k);
+      const specialty = normalizeSpecialty(item.specialty);
+      const k = specialty + '|' + item.name + '|' + (item.feature || '').slice(0, 30);
+      const exist = items.find(x => `${normalizeSpecialty(x.specialty)}|${x.name}|${(x.feature || '').slice(0, 30)}` === k);
       const obj = {
         ...item,
+        specialty,
         id: exist?.id || uid(),
         category: exist?.category || item.category,
         breakdown: normalizeQuotaBreakdown(exist?.breakdown),
