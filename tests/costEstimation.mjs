@@ -74,11 +74,13 @@ export function testCostEstimationMath() {
   assert.equal(controlPriceReference.priceBasis, '含税控制价');
   assert.equal(controlPriceReference.unitPrice, 90);
   assert.deepEqual(normalizeCostSettings({ taxRate: '', measureRate: '', provisionalAmount: '' }), {
-    taxRate: 9, measureRate: 2, targetProfitRate: 8, provisionalAmount: 0, otherAmount: 0, recoveryAmount: 0,
+    taxRate: 9, measureRate: 2, targetProfitRate: 8, riskCostRatio: 90, quoteFactorRate: 85, provisionalAmount: 0, otherAmount: 0, recoveryAmount: 0,
   });
   assert.throws(() => normalizeCostSettings({ taxRate: 101 }), /费率/);
   assert.throws(() => normalizeCostSettings({ recoveryAmount: -1 }), /不能为负数/);
   assert.throws(() => normalizeCostSettings({ targetProfitRate: 100 }), /目标利润率/);
+  assert.throws(() => normalizeCostSettings({ riskCostRatio: 0 }), /预警线/);
+  assert.throws(() => normalizeCostSettings({ quoteFactorRate: 201 }), /折算默认比例/);
 
   const reviewSummary = summarizeCostEstimate([
     { qty: 1, amount: 100, costUnitPrice: 70, costReviewStatus: 'pending' },
@@ -90,6 +92,12 @@ export function testCostEstimationMath() {
   assert.equal(reviewSummary.targetCost, 80);
   assert.equal(reviewSummary.costHeadroom, 10);
   assert.equal(reviewSummary.minimumBidForTarget, 87.5);
+
+  const customFactorSuggestion = generateCostSuggestions([
+    { id: 'no-reference', name: '临时设施', unit: '项', unitPrice: 100 },
+  ], { quoteFactorRate: 70 });
+  assert.equal(customFactorSuggestion.suggestions[0].suggestedPrice, 70);
+  assert.equal(customFactorSuggestion.suggestions[0].reason.includes('70%'), true);
 
   const history = rankHistoryReferences(
     { id: 'current', projectId: 'p-current', code: 'TJ-5', name: 'C30混凝土', unit: 'm³' },

@@ -8,5 +8,15 @@
       "source": "/app/:path*",
       "destination": "/app/index.html"
     }
+  ],
+  "headers": [
+    {
+      "source": "/app.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }]
+    },
+    {
+      "source": "/assets/:path*.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }]
+    }
   ]
 }

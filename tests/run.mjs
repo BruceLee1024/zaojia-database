@@ -29,6 +29,7 @@ import { testAiCopilot, testAiSessionPersistence } from './aiCopilot.mjs';
 import { testCostEstimationMath, testCostEstimationPersistence } from './costEstimation.mjs';
 import { testIndicatorAggregation } from './indicatorAggregation.mjs';
 import { effectiveSpecialty, specialtyMatchLabel, specialtyRank } from '../assets/utils/specialty.js?v=6.15';
+import { paginateQuotas } from '../assets/views/quota.js?v=6.15';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -47,6 +48,17 @@ function testSpecialtyMatching() {
   assert.equal(specialtyRank({}, '装饰装修'), 1, '旧数据应作为通用定额保留');
   assert.equal(specialtyRank({ specialty: '土建建筑' }, '装饰装修'), 0);
   assert.match(specialtyMatchLabel({ specialty: '土建建筑' }, '装饰装修'), /跨专业候选/);
+}
+
+function testQuotaPagination() {
+  const rows = Array.from({ length: 45 }, (_, index) => ({ id: String(index + 1) }));
+  const first = paginateQuotas(rows, 1);
+  assert.deepEqual({ total: first.total, page: first.page, totalPages: first.totalPages, start: first.start, end: first.end }, { total: 45, page: 1, totalPages: 3, start: 1, end: 20 });
+  assert.equal(first.rows.length, 20);
+  assert.equal(first.rows[0].id, '1');
+  const last = paginateQuotas(rows, 99);
+  assert.deepEqual({ page: last.page, totalPages: last.totalPages, start: last.start, end: last.end }, { page: 3, totalPages: 3, start: 41, end: 45 });
+  assert.equal(last.rows.length, 5);
 }
 
 function testProjectCurrencies() {
@@ -864,6 +876,7 @@ function notFound() {
 
 testCosting();
 testSpecialtyMatching();
+testQuotaPagination();
 testCostEstimationMath();
 testIndicatorAggregation();
 testProjectCurrencies();
