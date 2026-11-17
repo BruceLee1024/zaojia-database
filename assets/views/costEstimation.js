@@ -234,8 +234,8 @@ function bindEvents(document, model) {
     render();
   };
   document.getElementById('costOpenBoq').onclick = () => window.__app.go('boq', { projectId: model.project.id });
-  document.getElementById('costExport').onclick = () => {
-    if (model.lines.length) exportCostEstimateExcel(model.project, model.lines, model.summary);
+  document.getElementById('costExport').onclick = async () => {
+    if (model.lines.length) await exportCostEstimateExcel(model.project, model.lines, model.summary);
   };
   if (!model.lines.length) {
     document.getElementById('costStartBoq')?.addEventListener('click', () => window.__app.go('boq', { projectId: model.project.id }));

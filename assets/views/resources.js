@@ -252,12 +252,12 @@ function exposeActions(workspace, generation) {
     withdrawPrice: async (resourceId, priceId) => { if (!confirm('撤回这条价格快照？历史记录和附件仍保留。')) return; await resourcePriceService.withdraw(priceId); if (!isResourceContextCurrent(context)) return; await refresh(workspace, generation); await loadPriceHistory(resourceId, workspace, generation); },
     addToProject: id => showAddToProject(id, context),
     importExcel: () => window.__app.go('ai-import', { targetType: state.resourceType }),
-    downloadTemplate: () => exportResourceTemplate(state.resourceType),
+    downloadTemplate: () => exportResourceTemplate(state.resourceType).catch(error => toast(error.message || '模板下载失败', 'error')),
     exportLibrary: async () => {
       try {
         const rows = await resourceService.list({ resourceType: state.resourceType });
         const prices = await resourcePriceService.getCurrentPriceMap(rows);
-        exportResourceLibraryExcel(state.resourceType, rows, prices);
+        await exportResourceLibraryExcel(state.resourceType, rows, prices);
         toast(`已导出 ${rows.length} 条${LABELS[state.resourceType].singular}及当前有效价格`, 'success');
       } catch (error) { toast(error?.message || '导出失败', 'error'); }
     },

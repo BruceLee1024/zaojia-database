@@ -1,8 +1,8 @@
 import { buildImportColumnMapping } from './importMappingService.js?v=6.15&build=20260814';
 import { getImportSchema, normalizeImportValue } from './importSchemaService.js?v=6.15&build=20260814';
 import { boqService } from './boqService.js?v=6.15';
-import { boqLibraryService } from './boqLibraryService.js?v=6.15';
-import { quotaService } from './quotaService.js?v=6.15';
+import { boqLibraryService } from './boqLibraryService.js?v=6.15&build=20261117c';
+import { quotaService } from './quotaService.js?v=6.15&build=20261117c';
 import { resourceImportService } from './resourceImportService.js?v=6.15';
 import { dataEngineService } from './dataEngineService.js?v=6.15';
 import { importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.15';
@@ -116,6 +116,7 @@ export function analyzeImport(regions = [], {
     skippedRows.push(...region.skippedRows.map(row => ({ ...row, regionId: region.id, sheetName: region.sheetName })));
     analyzedRegions.push({ ...region, mapping, fieldState, regionKind });
   });
+  const duplicateCount = blockDuplicateImportRows(outputRows, issues, targetType);
   return {
     targetType,
     schema,
@@ -133,6 +134,7 @@ export function analyzeImport(regions = [], {
       skipped: skippedRows.length,
       warnings: issues.filter(issue => issue.severity === 'warning').length,
       errors: issues.filter(issue => issue.severity === 'error').length,
+      duplicates: duplicateCount,
     },
   };
 }
@@ -157,9 +159,9 @@ export async function commitImport(preview, options = {}) {
       warnings.push(`清单已写入，但数据沉淀索引更新失败：${error.message || '未知错误'}`);
     }
   } else if (preview.targetType === 'boq_library') {
-    domainResult = await boqLibraryService.importRows(validRows);
+    domainResult = await boqLibraryService.importRows(validRows, { updateExisting: options.updateExisting !== false });
   } else if (preview.targetType === 'quota') {
-    domainResult = await quotaService.importRows(validRows);
+    domainResult = await quotaService.importRows(validRows, { updateExisting: options.updateExisting !== false });
   } else if (preview.targetType === 'material' || preview.targetType === 'equipment') {
     const resourcePreview = await resourceImportService.preview(validRows.map(resourceRowForDomain), preview.targetType);
     domainResult = await resourceImportService.commit(resourcePreview, { updateExisting: options.updateExisting !== false });
@@ -176,6 +178,45 @@ export async function commitImport(preview, options = {}) {
     domainResult,
     rows: mergeCommitRows(preview.rows, domainResult, preview.targetType),
   };
+}
+
+function blockDuplicateImportRows(rows, issues, targetType) {
+  const firstByIdentity = new Map();
+  let duplicates = 0;
+  rows.forEach(row => {
+    if (!row.importable) return;
+    const identity = importIdentity(row.data, targetType);
+    if (!identity) return;
+    const first = firstByIdentity.get(identity);
+    if (!first) {
+      firstByIdentity.set(identity, row);
+      return;
+    }
+    const issue = {
+      code: 'duplicate_in_file', severity: 'error',
+      message: `与 ${first.sheetName} 第 ${first.sourceRowNumber} 行身份重复，请保留其中一行后再导入`,
+      rowId: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers,
+    };
+    row.issues.push(issue);
+    row.importable = false;
+    issues.push(issue);
+    duplicates += 1;
+  });
+  return duplicates;
+}
+
+function importIdentity(data = {}, targetType = '') {
+  const part = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  if (targetType === 'quota') return ['quota', part(data.specialty), part(data.name), part(data.feature)].join('|');
+  if (targetType === 'boq_library') {
+    const code = part(data.code);
+    return code ? `boq-library|code|${code}` : ['boq-library', part(data.name), part(data.feature), part(data.unit)].join('|');
+  }
+  if (targetType === 'material' || targetType === 'equipment') {
+    const code = part(data.code);
+    return code ? `resource|code|${code}` : ['resource', targetType, part(data.name), part(data.specModel), part(data.unit), part(data.brand || data.manufacturer)].join('|');
+  }
+  return '';
 }
 
 function domainCounts(result = {}, targetType, attempted) {

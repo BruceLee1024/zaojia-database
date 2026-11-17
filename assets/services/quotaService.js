@@ -115,7 +115,7 @@ export const quotaService = {
   },
 
   /** 导入已经统一引擎标准化的定额行。 */
-  async importRows(inputRows = [], { sourceRows = null } = {}) {
+  async importRows(inputRows = [], { sourceRows = null, updateExisting = true } = {}) {
     const items = await quotaRepo.all();
     const result = {
       total: inputRows.length,
@@ -156,6 +156,11 @@ export const quotaService = {
       const specialty = normalizeSpecialty(item.specialty);
       const k = specialty + '|' + item.name + '|' + (item.feature || '').slice(0, 30);
       const exist = items.find(x => `${normalizeSpecialty(x.specialty)}|${x.name}|${(x.feature || '').slice(0, 30)}` === k);
+      if (exist && !updateExisting) {
+        result.skipped++;
+        result.warnings.push(`第 ${idx + 2} 行与已有定额“${exist.name}”身份相同，未覆盖。`);
+        return;
+      }
       const obj = {
         ...item,
         specialty,

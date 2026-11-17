@@ -7,6 +7,7 @@ import { fmt, fmtMoney, esc } from '../utils/dom.js?v=6.15';
 import { hasMissingPrice } from '../utils/costing.js?v=6.15';
 import { categoryGuess } from '../utils/stats.js?v=6.15';
 import { formatCurrencySummary, normalizeCurrency } from '../utils/currency.js?v=6.15';
+import { ensureChart } from '../utils/vendorLoader.js?v=6.15&build=20261117b';
 
 const chartState = {
   trend: null,
@@ -989,9 +990,12 @@ function emptyBlock(text) {
   return `<div class="h-full min-h-[120px] flex items-center justify-center text-sm text-slate-400">${text}</div>`;
 }
 
-function drawCharts(stats, workspace = document) {
+async function drawCharts(stats, workspace = document) {
+  const trendCanvas = workspace.querySelector('#costChart');
+  const typeCanvas = workspace.querySelector('#typeChart');
+  if (!trendCanvas && !typeCanvas) return;
+  await ensureChart();
   if (stats.archivedTrend?.hasAnyInWindow) {
-    const trendCanvas = workspace.querySelector('#costChart');
     if (!trendCanvas) {
       if (chartState.trend) {
         chartState.trend.destroy();
@@ -1102,7 +1106,6 @@ function drawCharts(stats, workspace = document) {
   
 
   if (stats.projects.length) {
-    const typeCanvas = workspace.querySelector('#typeChart');
     if (!typeCanvas) {
       if (chartState.composition) {
         chartState.composition.destroy();

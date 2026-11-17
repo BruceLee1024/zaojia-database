@@ -1,7 +1,7 @@
 // 应用入口：路由 + 启动
 import * as dashboard from './assets/views/dashboard.js?v=6.15&build=20260814e';
 import * as importer  from './assets/views/importer.js?v=6.15';
-import * as quota     from './assets/views/quota.js?v=6.15&build=20260818k';
+import * as quota     from './assets/views/quota.js?v=6.15&build=20261117c';
 import * as projects  from './assets/views/projects.js?v=6.15&build=20260818d';
 import * as boq       from './assets/views/boq.js?v=6.15';
 import * as costEstimation from './assets/views/costEstimation.js?v=6.15&build=20260814f';
@@ -60,7 +60,7 @@ const renderers = {
   },
   'ai-import': {
     render: async workspace => {
-      const module = await import('./assets/views/aiImportWizard.js?v=6.15&build=20260814');
+      const module = await import('./assets/views/aiImportWizard.js?v=6.15&build=20261117g');
       return module.render(workspace);
     },
   },

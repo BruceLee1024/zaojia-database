@@ -12,7 +12,7 @@ let items = [];
 
 export async function render(workspace = document.getElementById('workspace'), { preserveSelection = false } = {}) {
   const route = window.__app && window.__app.state ? window.__app.state.routeParams || {} : {};
-  if (!route.selectedId) state.selectedId = '';
+  if (!preserveSelection && !route.selectedId) state.selectedId = '';
   if (route.keyword != null) state.keyword = route.keyword;
   if (route.selectedId) state.selectedId = route.selectedId;
   else if (!preserveSelection) state.selectedId = '';
@@ -27,7 +27,7 @@ export async function render(workspace = document.getElementById('workspace'), {
     </div>`;
   const document = scopedDom(workspace);
   document.getElementById('libImport').onclick = importExcel;
-  document.getElementById('libTemplate').onclick = exportBoqLibraryTemplate;
+  document.getElementById('libTemplate').onclick = () => exportBoqLibraryTemplate().catch(error => toast(error.message || '模板下载失败', 'error'));
   document.getElementById('libKeyword').oninput = function (event) { state.keyword = event.target.value; renderRows(workspace); };
   await renderRows(workspace);
 }
@@ -75,7 +75,7 @@ function select(workspace, id) { state.selectedId = id; render(workspace, { pres
 async function exportLibrary() {
   try {
     const rows = await boqLibraryService.list({});
-    exportBoqLibraryExcel(rows);
+    await exportBoqLibraryExcel(rows);
     toast(`已导出 ${rows.length} 条清单及关联定额信息`, 'success');
   } catch (error) { toast(error?.message || '清单库导出失败', 'error'); }
 }

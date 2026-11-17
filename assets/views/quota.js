@@ -75,7 +75,7 @@ function exposeQuotaActions() {
 
 export async function render(workspace = document.getElementById('workspace'), { preserveSelection = false } = {}) {
   const params = window.__app?.state?.routeParams || {};
-  if (!params.selectedId && !(Array.isArray(params.quotaItemIds) && params.quotaItemIds[0])) editorState.selectedId = '';
+  if (!preserveSelection && !params.selectedId && !(Array.isArray(params.quotaItemIds) && params.quotaItemIds[0])) editorState.selectedId = '';
   if (params.keyword != null) filterState.keyword = params.keyword;
   if (params.priceStatus != null) filterState.priceStatus = params.priceStatus;
   const routedSelection = params.selectedId || (Array.isArray(params.quotaItemIds) ? params.quotaItemIds[0] : '');
@@ -165,7 +165,7 @@ export async function render(workspace = document.getElementById('workspace'), {
   $('#qUnit', workspace).onchange = e => { filterState.unit = e.target.value; filterState.page = 1; renderList(workspace); };
   $('#qPrice', workspace).onchange = e => { filterState.priceStatus = e.target.value; filterState.page = 1; renderList(workspace); };
   $('#btnImport', workspace).onclick = importExcel;
-  $('#btnTpl', workspace).onclick = exportQuotaTemplate;
+  $('#btnTpl', workspace).onclick = () => exportQuotaTemplate().catch(error => toast(error.message || '模板下载失败', 'error'));
   $('#btnExport', workspace).onclick = exportLibrary;
   await renderList(workspace);
 }
@@ -173,7 +173,7 @@ export async function render(workspace = document.getElementById('workspace'), {
 async function exportLibrary() {
   try {
     const rows = await quotaService.list();
-    exportQuotaLibraryExcel(rows);
+    await exportQuotaLibraryExcel(rows);
     toast(`已导出 ${rows.length} 条定额（含专业和人材机拆分）`, 'success');
   } catch (error) {
     toast(error?.message || '定额库导出失败', 'error');
@@ -256,8 +256,10 @@ export function paginateQuotas(rows = [], page = 1, pageSize = QUOTA_PAGE_SIZE) 
 }
 
 function pager({ total, page, totalPages, start, end }) {
-  const pageButtons = Array.from({ length: Math.min(totalPages, 3) }, (_, index) => index + 1)
-    .map(value => `<button onclick="window.__quota.setPage(${value})" class="h-7 w-7 rounded ${value === page ? 'bg-teal-700 text-white' : 'border border-slate-200 bg-white text-slate-600'}">${value}</button>`)
+  const pageButtons = quotaPageTokens(page, totalPages)
+    .map(value => value === 'ellipsis'
+      ? '<span aria-hidden="true">...</span>'
+      : `<button onclick="window.__quota.setPage(${value})" class="h-7 min-w-7 px-1 rounded ${value === page ? 'bg-teal-700 text-white' : 'border border-slate-200 bg-white text-slate-600'}">${value}</button>`)
     .join('');
   return `
     <div class="flex items-center gap-3 text-xs text-slate-500">
@@ -272,6 +274,20 @@ function pager({ total, page, totalPages, start, end }) {
       <span>页</span>
     </div>
   `;
+}
+
+export function quotaPageTokens(page, totalPages) {
+  const total = Math.max(1, Number(totalPages) || 1);
+  const current = Math.min(total, Math.max(1, Number(page) || 1));
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+  const tokens = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) tokens.push('ellipsis');
+  for (let value = start; value <= end; value += 1) tokens.push(value);
+  if (end < total - 1) tokens.push('ellipsis');
+  tokens.push(total);
+  return tokens;
 }
 
 function kpiStrip(rows) {

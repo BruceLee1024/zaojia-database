@@ -33,9 +33,130 @@ const LIBRARY_FIELDS = [
 
 const AMOUNT_RULES = new Set(['calculated', 'sourceAmount', 'deriveUnitPrice']);
 const CONFIDENCE = new Set(['high', 'medium', 'low']);
+const REGION_KINDS = new Set(['data', 'summary', 'instruction', 'cover', 'unknown']);
+const REGION_RECOMMENDATIONS = new Set(['include', 'review', 'exclude']);
+const RISK_LEVELS = new Set(['high', 'medium', 'low']);
 
 export function getRecognitionFields(targetType) {
   return getImportSchema(targetType).fields.map(field => ({ ...field }));
+}
+
+export function createRegionRecognitionRequest({ targetType, region = {} } = {}) {
+  const columns = (region.columns || []).slice(0, 40).map(column => ({
+    id: column.id, path: [...(column.path || [])], leaf: column.leaf || '', unitHint: column.unitHint || '',
+  }));
+  const samples = (region.rows || []).slice(0, 6).map(row => columns.map(column => row?.values?.[column.id] ?? '').slice(0, 12));
+  return {
+    targetType: String(targetType || ''),
+    sheetName: String(region.sheetName || ''),
+    title: String(region.title || ''),
+    headerRows: [Number(region.headerStart || 0) + 1, Number(region.headerEnd || 0) + 1],
+    columnPaths: columns.map(({ id, ...column }) => column),
+    sampleRows: samples,
+    localSignal: { confidence: region.confidence || 'low', detailRows: Number(region.rows?.length || 0), skippedRows: Number(region.skippedRows?.length || 0) },
+    instruction: '判断该数据区是否适合导入目标。只给出建议与理由；不得修改、补造或推断具体业务数据。',
+  };
+}
+
+export function validateRegionRecognitionPayload(payload, request = {}) {
+  const kind = REGION_KINDS.has(payload?.kind) ? payload.kind : 'unknown';
+  const recommendation = REGION_RECOMMENDATIONS.has(payload?.recommendation) ? payload.recommendation : 'review';
+  const reason = String(payload?.reason || 'AI 未提供充分理由，请人工确认').trim().slice(0, 240);
+  return {
+    kind,
+    recommendation,
+    confidence: CONFIDENCE.has(payload?.confidence) ? payload.confidence : 'low',
+    reason,
+    summary: String(payload?.summary || `${request.sheetName || '当前工作表'}需要人工确认`).trim().slice(0, 160),
+    degraded: false,
+    degradationReason: '',
+  };
+}
+
+export async function recognizeImportRegion(input, { fetchImpl = fetch, timeoutMs = 15000 } = {}) {
+  const request = createRegionRecognitionRequest(input);
+  const cfg = getAIConfig();
+  if (!cfg.api_key) return { ...localRegionRecognition(request), degraded: true, degradationReason: '未配置 AI 模型，已使用本地数据区判断' };
+  try {
+    const payload = await requestStructuredCompletion({
+      cfg,
+      request,
+      fetchImpl,
+      timeoutMs,
+      system: '你是工程造价表格导入的资料分诊助手。只根据工作表名称、表头路径和有限样本，返回 JSON：kind(data|summary|instruction|cover|unknown)、recommendation(include|review|exclude)、confidence(high|medium|low)、reason、summary。不得建议自动写入，不得虚构数据。',
+    });
+    return validateRegionRecognitionPayload(payload, request);
+  } catch (error) {
+    return { ...localRegionRecognition(request), degraded: true, degradationReason: `AI 数据区判断失败（${error.message || '未知错误'}），已使用本地判断` };
+  }
+}
+
+export function createImportQualityReviewRequest(preview = {}) {
+  const rows = Array.isArray(preview.rows) ? preview.rows : [];
+  const issueRows = rows.filter(row => row.issues?.length).slice(0, 30);
+  const sheetsByName = new Map();
+  rows.forEach(row => {
+    const sheetName = row.sheetName || '未命名工作表';
+    const summary = sheetsByName.get(sheetName) || { sheetName, total: 0, valid: 0, invalid: 0 };
+    summary.total += 1;
+    if (row.importable) summary.valid += 1;
+    else summary.invalid += 1;
+    sheetsByName.set(sheetName, summary);
+  });
+  return {
+    targetType: String(preview.targetType || ''),
+    counts: { ...(preview.counts || {}) },
+    sheets: [...sheetsByName.values()],
+    issues: issueRows.flatMap(row => (row.issues || []).map(issue => ({ sheetName: row.sheetName || '', rowNumber: row.sourceRowNumber || 0, code: issue.code || '', severity: issue.severity || 'warning', message: String(issue.message || '').slice(0, 180) }))).slice(0, 40),
+    instruction: '根据统计和问题摘要识别导入风险，只给复核建议。不得生成、修改或建议自动写入业务数据。',
+  };
+}
+
+export function validateImportQualityReviewPayload(payload, request = {}) {
+  const risks = Array.isArray(payload?.risks) ? payload.risks.slice(0, 10).flatMap(item => {
+    const title = String(item?.title || '').trim().slice(0, 80);
+    const detail = String(item?.detail || '').trim().slice(0, 240);
+    const action = String(item?.action || '').trim().slice(0, 160);
+    if (!title || !detail || !action) return [];
+    return [{ severity: RISK_LEVELS.has(item?.severity) ? item.severity : 'low', title, detail, action }];
+  }) : [];
+  return { summary: String(payload?.summary || '请结合质量预览逐项确认').trim().slice(0, 240), risks, degraded: false, degradationReason: '' };
+}
+
+export async function reviewImportQuality(preview, { fetchImpl = fetch, timeoutMs = 15000 } = {}) {
+  const request = createImportQualityReviewRequest(preview);
+  const cfg = getAIConfig();
+  if (!cfg.api_key) return { ...localQualityReview(request), degraded: true, degradationReason: '未配置 AI 模型，已使用本地质量复核' };
+  try {
+    const payload = await requestStructuredCompletion({
+      cfg,
+      request,
+      fetchImpl,
+      timeoutMs,
+      system: '你是工程造价表格导入的质量复核助手。只基于给出的统计与问题摘要返回 JSON：summary、risks[]；risk 包含 severity(high|medium|low)、title、detail、action。只给人工复核建议，不得建议自动修改、补造或写入数据。',
+    });
+    return validateImportQualityReviewPayload(payload, request);
+  } catch (error) {
+    return { ...localQualityReview(request), degraded: true, degradationReason: `AI 质量复核失败（${error.message || '未知错误'}），已使用本地复核` };
+  }
+}
+
+function localQualityReview(request = {}) {
+  const counts = request.counts || {};
+  const risks = [];
+  if (Number(counts.errors || counts.invalid || 0) > 0) risks.push({ severity: 'high', title: '存在不可导入记录', detail: `当前有 ${Number(counts.errors || counts.invalid || 0)} 条错误或无效记录。`, action: '先筛选“只看问题行”，补齐必填字段或移除不应入库的记录。' });
+  if (Number(counts.duplicates || 0) > 0) risks.push({ severity: 'high', title: '检测到文件内重复身份', detail: `当前有 ${Number(counts.duplicates || 0)} 条重复记录。`, action: '保留唯一可信来源行，再重新生成质量预览。' });
+  if (Number(counts.warnings || 0) > 0) risks.push({ severity: 'medium', title: '存在待确认口径', detail: `当前有 ${Number(counts.warnings || 0)} 条警告。`, action: '核对单价、单位、金额规则和跨 Sheet 口径是否一致。' });
+  if (!risks.length) risks.push({ severity: 'low', title: '未发现阻断性问题', detail: '本地规则未发现错误、重复或警告。', action: '仍请抽查每个 Sheet 的前几行、字段映射和覆盖策略后再确认写入。' });
+  return { summary: '本地质量复核已完成，请以质量预览和人工判断为准。', risks, degraded: false, degradationReason: '' };
+}
+
+function localRegionRecognition(request = {}) {
+  const text = [request.sheetName, request.title, ...(request.columnPaths || []).flatMap(column => [...(column.path || []), column.leaf])].join(' ').replace(/\s+/g, '');
+  if (/(封面|目录|说明|编制说明|使用说明|注[:：]?)/.test(text)) return { kind: /封面|目录/.test(text) ? 'cover' : 'instruction', recommendation: 'exclude', confidence: 'high', reason: '名称或表头表明这是封面、目录或说明性内容，不应作为业务明细写入。', summary: '本地判断为非明细资料区' };
+  if (/(汇总|合计|总计|指标|分析表)/.test(text) && Number(request.localSignal?.detailRows || 0) < 3) return { kind: 'summary', recommendation: 'review', confidence: 'medium', reason: '可能是汇总或分析表；除“其他项目费”等特例外，建议先确认是否包含可计价明细。', summary: '本地判断为可能的汇总数据区' };
+  if (Number(request.localSignal?.detailRows || 0) > 0) return { kind: 'data', recommendation: 'include', confidence: request.localSignal?.confidence === 'high' ? 'high' : 'medium', reason: '检测到可解析的明细行和字段列，建议进入映射预览后确认。', summary: '本地判断为可导入数据区' };
+  return { kind: 'unknown', recommendation: 'review', confidence: 'low', reason: '未检测到足够明细行，需要人工确认表头范围。', summary: '本地无法确定数据区用途' };
 }
 
 export function createHierarchicalRecognitionRequest({ targetType, signature = '', columns = [], rows = [] } = {}) {
@@ -65,30 +186,7 @@ export async function recognizeImportColumns(input, { fetchImpl = fetch, localRe
   const cfg = getAIConfig();
   if (!cfg.api_key) return { ...(localResult || {}), degraded: true, degradationReason: '未配置 AI 模型，已使用本地映射' };
   try {
-    const controller = new AbortController();
-    let timeout;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeout = setTimeout(() => { controller.abort(); reject(new Error('请求超时')); }, Math.max(1000, timeoutMs));
-    });
-    let response;
-    try {
-      response = await Promise.race([fetchImpl(`${cfg.base_url.replace(/\/$/, '')}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: cfg.model, temperature: 0, response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: hierarchicalRecognitionPrompt() },
-            { role: 'user', content: JSON.stringify(request) },
-          ],
-        }),
-      }), timeoutPromise]);
-    } finally {
-      clearTimeout(timeout);
-    }
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const payload = JSON.parse(stripCodeFence((await response.json())?.choices?.[0]?.message?.content || ''));
+    const payload = await requestStructuredCompletion({ cfg, request, fetchImpl, timeoutMs, system: hierarchicalRecognitionPrompt() });
     return validateColumnRecognitionPayload(payload, request, localResult);
   } catch (error) {
     return { ...(localResult || {}), degraded: true, degradationReason: `AI 识别失败（${error.message || '未知错误'}），已使用本地映射` };
@@ -340,6 +438,40 @@ function pickRow(row, headers) {
 
 function stripCodeFence(value) {
   return String(value || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+}
+
+async function requestStructuredCompletion({ cfg, system, request, fetchImpl = fetch, timeoutMs = 15000 } = {}) {
+  const controller = new AbortController();
+  let timeout;
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        reject(new Error('请求超时'));
+      }, Math.max(1000, timeoutMs));
+    });
+    const response = await Promise.race([fetchImpl(`${cfg.base_url.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: cfg.model,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(request) }],
+      }),
+    }), timeoutPromise]);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const content = (await response.json())?.choices?.[0]?.message?.content;
+    if (!content) throw new Error('模型未返回结构化结果');
+    try {
+      return JSON.parse(stripCodeFence(content));
+    } catch {
+      throw new Error('模型返回的结构化结果不是有效 JSON');
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function canShareColumn(first, second, source) {

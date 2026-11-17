@@ -6,6 +6,7 @@ import { categoryGuess } from '../utils/stats.js?v=6.15';
 import { calculateAmount } from '../utils/costing.js?v=6.15';
 import { normalizeImportHeader } from '../services/importMappingService.js?v=6.15&build=20260814';
 import { detectImportRegions } from './importEngine.js?v=6.15&build=20260814';
+import { ensureXlsx } from '../utils/vendorLoader.js?v=6.15&build=20261117b';
 
 const HEADER_QUOTA  = ['清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'];
 const HEADER_BOQ    = ['序号', '项目编码', '项目名称', '项目特征', '计量单位', '工程数量', '综合单价', '合价'];
@@ -54,7 +55,7 @@ export async function parseImportFile(file, options = {}) {
   if (!['xlsx', 'xls', 'csv'].includes(extension)) throw new Error('仅支持 .xlsx、.xls 和 .csv 文件');
   const maxFileSizeBytes = Number(options.maxFileSizeBytes || 200 * 1024 * 1024);
   if (Number(file.size || 0) > maxFileSizeBytes) throw new Error(`文件超过 ${Math.round(maxFileSizeBytes / 1024 / 1024)}MB 上限，请拆分后导入`);
-  if (!globalThis.XLSX?.read || !globalThis.XLSX?.utils?.sheet_to_json) throw new Error('Excel 解析组件未加载');
+  const XLSX = await ensureXlsx();
   const buffer = await file.arrayBuffer();
   let workbook;
   let csvMeta = null;
@@ -392,7 +393,8 @@ export function rowToBoqLibraryItem(row) {
 }
 
 /** 导出 Excel 报价单 */
-export function exportBOQExcel(project, boq) {
+export async function exportBOQExcel(project, boq) {
+  const XLSX = await ensureXlsx();
   const total = boq.reduce((s, b) => s + (b.amount || 0), 0);
   const aoa = [
     [`项目名称：${project.name}      类型：${project.type || ''}      规模：${project.scale || ''}`],
@@ -433,7 +435,8 @@ export function exportBOQExcel(project, boq) {
   XLSX.writeFile(wb, `${project.name}-报价单-${Date.now()}.xlsx`);
 }
 
-export function exportCostEstimateExcel(project, lines, summary) {
+export async function exportCostEstimateExcel(project, lines, summary) {
+  const XLSX = await ensureXlsx();
   const sourceLabels = {
     manual: '手工测算', history: '历史项目', resource: '材料设备价', subcontract: '分包报价',
     experience: '经验指标', quote_factor: '投标价折算',
@@ -505,7 +508,8 @@ export function exportCostEstimateExcel(project, lines, summary) {
 }
 
 /** 导出定额库模板 */
-export function exportQuotaTemplate() {
+export async function exportQuotaTemplate() {
+  const XLSX = await ensureXlsx();
   const data = [
     ['专业', '分类', '清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'],
     ['土建建筑', '土石方与支护', '机械挖一般土方', '土壤类别：综合；开挖深度：按实际', '挖土、弃土、清理机下余土', '按开挖前天然密实体积计算', 'm³', 5, '人工+机械+管理+利润+风险'],
@@ -529,8 +533,8 @@ export function quotaExportRows(items = []) {
   });
 }
 
-export function exportQuotaLibraryExcel(items = [], { fileName } = {}) {
-  if (!globalThis.XLSX?.utils?.aoa_to_sheet) throw new Error('Excel 导出组件未加载');
+export async function exportQuotaLibraryExcel(items = [], { fileName } = {}) {
+  const XLSX = await ensureXlsx();
   const rows = quotaExportRows(items);
   if (!rows.length) throw new Error('当前定额库没有可导出的条目');
   const ws = XLSX.utils.aoa_to_sheet([QUOTA_EXPORT_HEADERS, ...rows]);
@@ -557,7 +561,8 @@ export function buildQuotaExportRows(items = []) {
   })];
 }
 
-export function exportQuotaExcel(items = []) {
+export async function exportQuotaExcel(items = []) {
+  const XLSX = await ensureXlsx();
   const ws = XLSX.utils.aoa_to_sheet(buildQuotaExportRows(items));
   ws['!cols'] = [16, 16, 30, 50, 30, 30, 10, 14, 12, 24, 36].map(wch => ({ wch }));
   const wb = XLSX.utils.book_new();
@@ -566,7 +571,8 @@ export function exportQuotaExcel(items = []) {
 }
 
 /** 导出独立清单库 Excel 模板 */
-export function exportBoqLibraryTemplate() {
+export async function exportBoqLibraryTemplate() {
+  const XLSX = await ensureXlsx();
   const data = [
     ['专业', '清单编码', '清单名称', '项目特征', '单位', '默认工程量', '适用范围', '结构分组', '关联定额编码', '来源', '版本', '备注'],
     ['水处理工程', '030101001001', '土方开挖', '土壤类别：三类土；挖土深度：≤3m', 'm³', 100, '市政污水处理工程', 'civil', '机械挖一般土方', '企业自建', 'v1.0', '适用于一般场地开挖'],
@@ -589,8 +595,8 @@ export function boqLibraryExportRows(items = []) {
   ]);
 }
 
-export function exportBoqLibraryExcel(items = [], { fileName } = {}) {
-  if (!globalThis.XLSX?.utils?.aoa_to_sheet) throw new Error('Excel 导出组件未加载');
+export async function exportBoqLibraryExcel(items = [], { fileName } = {}) {
+  const XLSX = await ensureXlsx();
   const rows = boqLibraryExportRows(items);
   if (!rows.length) throw new Error('当前清单库没有可导出的条目');
   const ws = XLSX.utils.aoa_to_sheet([BOQ_LIBRARY_EXPORT_HEADERS, ...rows]);
@@ -617,7 +623,8 @@ export function getResourceTemplateData(resourceType) {
   };
 }
 
-export function exportResourceTemplate(resourceType) {
+export async function exportResourceTemplate(resourceType) {
+  const XLSX = await ensureXlsx();
   const template = getResourceTemplateData(resourceType);
   const ws = XLSX.utils.aoa_to_sheet(template.rows);
   ws['!cols'] = template.rows[0].map((header, index) => ({ wch: index === 2 ? 24 : Math.max(10, String(header).length * 2 + 2) }));
@@ -638,8 +645,8 @@ export function resourceExportRows(resourceType, resources = [], prices = new Ma
   });
 }
 
-export function exportResourceLibraryExcel(resourceType, resources = [], prices = new Map(), { fileName } = {}) {
-  if (!globalThis.XLSX?.utils?.aoa_to_sheet) throw new Error('Excel 导出组件未加载');
+export async function exportResourceLibraryExcel(resourceType, resources = [], prices = new Map(), { fileName } = {}) {
+  const XLSX = await ensureXlsx();
   const template = getResourceTemplateData(resourceType);
   const rows = resourceExportRows(resourceType, resources, prices);
   if (!rows.length) throw new Error(`当前${resourceType === 'equipment' ? '设备' : '材料'}库没有可导出的条目`);

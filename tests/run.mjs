@@ -11,8 +11,8 @@ import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../
 import { analyzeImport, detectProjectBoqRegionKind, isImportFieldRequired, mergeCommitRows } from '../assets/services/importWorkflowService.js?v=6.15';
 import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js?v=6.15';
 import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.15';
-import { createHierarchicalRecognitionRequest, createRecognitionRequest, validateColumnRecognitionPayload, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.15';
-import { applyHierarchicalTemplate, getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js?v=6.15';
+import { createHierarchicalRecognitionRequest, createRecognitionRequest, createImportQualityReviewRequest, createRegionRecognitionRequest, validateColumnRecognitionPayload, validateImportQualityReviewPayload, validateRecognitionPayload, validateRegionRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.15';
+import { applyHierarchicalTemplate, getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature, summarizeImportSheets } from '../assets/views/aiImportWizard.js?v=6.15';
 import { normalizeHubImportResult } from '../assets/views/importer.js?v=6.15';
 import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js?v=6.15';
 import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js?v=6.15';
@@ -29,7 +29,7 @@ import { testAiCopilot, testAiSessionPersistence } from './aiCopilot.mjs';
 import { testCostEstimationMath, testCostEstimationPersistence } from './costEstimation.mjs';
 import { testIndicatorAggregation } from './indicatorAggregation.mjs';
 import { effectiveSpecialty, specialtyMatchLabel, specialtyRank } from '../assets/utils/specialty.js?v=6.15';
-import { paginateQuotas } from '../assets/views/quota.js?v=6.15';
+import { paginateQuotas, quotaPageTokens } from '../assets/views/quota.js?v=6.15';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -59,6 +59,10 @@ function testQuotaPagination() {
   const last = paginateQuotas(rows, 99);
   assert.deepEqual({ page: last.page, totalPages: last.totalPages, start: last.start, end: last.end }, { page: 3, totalPages: 3, start: 41, end: 45 });
   assert.equal(last.rows.length, 5);
+  assert.deepEqual(quotaPageTokens(1, 25), [1, 2, 'ellipsis', 25]);
+  assert.deepEqual(quotaPageTokens(12, 25), [1, 'ellipsis', 11, 12, 13, 'ellipsis', 25]);
+  assert.deepEqual(quotaPageTokens(25, 25), [1, 'ellipsis', 24, 25]);
+  assert.deepEqual(quotaPageTokens(3, 5), [1, 2, 3, 4, 5]);
 }
 
 function testProjectCurrencies() {
@@ -607,6 +611,25 @@ function testUnifiedImportAnalysis() {
   assert.equal(missingOtherCharge.counts.invalid, 1);
   assert.equal(missingOtherCharge.rows[0].issues.some(issue => issue.code === 'missing_amount'), true);
 
+  const duplicateQuotaRegion = {
+    id: 'sheet:quota', signature: 'quota', sheetName: '定额', title: '定额库', dataStart: 1, matrix: [],
+    columns: [
+      { id: 'specialty', columnIndex: 0, path: ['专业'], leaf: '专业', displayName: '专业' },
+      { id: 'name', columnIndex: 1, path: ['清单名称'], leaf: '清单名称', displayName: '清单名称' },
+      { id: 'feature', columnIndex: 2, path: ['项目特征'], leaf: '项目特征', displayName: '项目特征' },
+    ],
+    rows: [
+      { sourceRow: 1, sourceRowNumber: 2, kind: 'detail', raw: [], values: { specialty: '装饰装修', name: '油漆施工', feature: '两遍' } },
+      { sourceRow: 2, sourceRowNumber: 3, kind: 'detail', raw: [], values: { specialty: '装饰装修', name: '油漆施工', feature: '两遍' } },
+    ], skippedRows: [],
+  };
+  const duplicateQuota = analyzeImport([duplicateQuotaRegion], { targetType: 'quota', mappings: { quota: { specialty: 'specialty', name: 'name', feature: 'feature' } } });
+  assert.equal(duplicateQuota.counts.valid, 1);
+  assert.equal(duplicateQuota.counts.duplicates, 1);
+  assert.equal(duplicateQuota.rows[1].issues.some(issue => issue.code === 'duplicate_in_file'), true);
+  assert.deepEqual(summarizeImportSheets(duplicateQuota), [{ sheetName: '定额', regions: 1, total: 2, valid: 1, invalid: 1, duplicates: 1 }]);
+  assert.equal(summarizeImportSheets({ ...duplicateQuota, regions: [...duplicateQuota.regions, { ...duplicateQuota.regions[0], id: 'sheet:quota:second' }] })[0].regions, 2);
+
   const reportRows = mergeCommitRows([
     { id: 'r1', importable: true, sheetName: '材料', sourceRowNumber: 2, issues: [] },
     { id: 'r2', importable: false, sheetName: '材料', sourceRowNumber: 3, issues: [{ severity: 'error', message: '缺少名称' }] },
@@ -670,6 +693,19 @@ function testHierarchicalAiRecognitionValidation() {
   assert.equal(result.semanticSuggestions[0].suggestedMeaning, '历史采购价');
   assert.throws(() => validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'unknown', columnId: 'c1' }] }, request), /不支持的字段/);
   assert.throws(() => validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'name', columnId: 'c1' }, { fieldKey: 'feature', columnId: 'c1' }] }, request), /重复列映射/);
+
+  const regionRequest = createRegionRecognitionRequest({ targetType: 'quota', region: {
+    sheetName: '定额明细', title: '装饰装修定额', headerStart: 1, headerEnd: 2, confidence: 'medium',
+    columns: [{ id: 'name', path: ['清单名称'], leaf: '清单名称' }], rows: [{ values: { name: '油漆施工' }, raw: ['错误样本'] }], skippedRows: [],
+  } });
+  assert.equal(regionRequest.sampleRows[0][0], '油漆施工');
+  const regionResult = validateRegionRecognitionPayload({ kind: 'data', recommendation: 'include', confidence: 'high', reason: '包含定额明细', summary: '建议导入' }, regionRequest);
+  assert.equal(regionResult.recommendation, 'include');
+  assert.equal(regionResult.degraded, false);
+  const qualityRequest = createImportQualityReviewRequest({ targetType: 'quota', counts: { total: 2, warnings: 1, duplicates: 1 }, rows: [{ sheetName: '定额', sourceRowNumber: 2, importable: false, issues: [{ code: 'duplicate_in_file', severity: 'error', message: '重复' }] }] });
+  assert.equal(qualityRequest.issues[0].code, 'duplicate_in_file');
+  const qualityResult = validateImportQualityReviewPayload({ summary: '需先处理重复', risks: [{ severity: 'high', title: '重复', detail: '存在重复身份', action: '保留唯一记录' }] }, qualityRequest);
+  assert.equal(qualityResult.risks[0].severity, 'high');
 }
 
 function testCombinedNameFeatureColumnMetadata() {

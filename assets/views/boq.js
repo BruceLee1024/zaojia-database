@@ -273,7 +273,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   document.getElementById('btnExp').onclick = async () => {
     const fresh = await projectRepo.findById(proj.id);
     const lines = await boqService.listByProject(proj.id);
-    exportBOQExcel(fresh, lines);
+    await exportBOQExcel(fresh, lines);
     toast('已导出 Excel 报价单', 'success');
   };
 

@@ -120,7 +120,7 @@ export const boqLibraryService = {
     const rows = await parseExcel(file);
     return this.importRows(rows.map(rowToBoqLibraryItem));
   },
-  async importRows(rows = []) {
+  async importRows(rows = [], { updateExisting = true } = {}) {
     const [items, quotas, originalRelations] = await Promise.all([boqLibraryRepo.all(), quotaRepo.all(), boqLibraryQuotaRelationRepo.all()]);
     const relations = [...originalRelations];
     const result = { total: rows.length, success: 0, added: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
@@ -132,6 +132,7 @@ export const boqLibraryService = {
       item.quotaItemIds = refs.map(ref => quotas.find(q => q.id === ref || q.code === ref || q.name === ref)?.id).filter(Boolean);
       if (refs.length && !item.quotaItemIds.length) result.warnings.push(`第 ${index + 2} 行关联定额未匹配：${refs.join('、')}`);
       const existing = findDuplicateLibraryItem(items, item);
+      if (existing && !updateExisting) { result.skipped++; result.warnings.push(`第 ${index + 2} 行与已有清单“${existing.code || existing.name}”身份相同，未覆盖。`); return; }
       if (existing) { Object.assign(existing, { ...item, id: existing.id, createdAt: existing.createdAt }); result.updated++; }
       else { item.id = uid(); items.push(item); result.added++; }
       const owner = existing || item;

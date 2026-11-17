@@ -4,6 +4,7 @@ import { dataEngineService } from '../services/dataEngineService.js?v=6.15';
 import { parseEstimatePrompt, explainIndicators } from '../services/aiAssistService.js?v=6.15';
 import { projectRepo, dataFactRepo, dataCandidateRepo, dataQualityReportRepo, dataJobRepo } from '../data/repository.js?v=6.15';
 import { fmt, fmtMoney, esc, openModal, toast } from '../utils/dom.js?v=6.15';
+import { ensureChart } from '../utils/vendorLoader.js?v=6.15&build=20261117b';
 
 const state = {
   tab: 'cases',
@@ -1403,8 +1404,7 @@ function formatTime(s) {
   return new Date(s).toLocaleString('zh-CN', { hour12: false });
 }
 
-function drawCharts(workspace = document.getElementById('workspace')) {
-  if (typeof Chart === 'undefined') return;
+async function drawCharts(workspace = document.getElementById('workspace')) {
   const yearCanvas = workspace.querySelector('#indicatorYearTrendChart');
   if (!yearCanvas) {
     if (chartState.year) {
@@ -1413,6 +1413,7 @@ function drawCharts(workspace = document.getElementById('workspace')) {
     }
     return;
   }
+  await ensureChart();
   if (chartState.year) {
     chartState.year.destroy();
     chartState.year = null;
@@ -1500,7 +1501,7 @@ function compactChartNumber(value) {
   return fmt(n);
 }
 
-function drill(it) {
+async function drill(it) {
   if (!it) return;
   const samples = cache.projects.filter(p => (it.sampleProjectIds || []).includes(p.id));
   const values = (it.values || []).slice().sort((a, b) => a - b);
@@ -1521,7 +1522,8 @@ function drill(it) {
       </div>
     </div>
   `, `<button onclick="window.__modalClose ? window.__modalClose() : document.getElementById('modal').classList.add('hidden')" class="px-3 py-1.5 text-sm border rounded">关闭</button>`);
-  if (!values.length || typeof Chart === 'undefined') return;
+  if (!values.length) return;
+  await ensureChart();
   const bins = 6;
   const min = values[0], max = values[values.length - 1];
   const w = (max - min) / bins || 1;

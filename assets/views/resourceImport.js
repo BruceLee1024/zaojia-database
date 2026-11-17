@@ -32,7 +32,7 @@ function exposeActions(workspace) {
       catch (error) { state.report = error.report || null; toast(error.message || '导入失败', 'error'); }
       finally { state.busy = false; await paint(workspace); }
     },
-    template: () => exportResourceTemplate(state.resourceType),
+    template: () => exportResourceTemplate(state.resourceType).catch(error => toast(error.message || '模板下载失败', 'error')),
   };
 }
 
