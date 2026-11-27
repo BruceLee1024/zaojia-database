@@ -1,10 +1,10 @@
 // 统一表格导入向导
-import { exportImportTemplate, parseImportFile } from '../data/excel.js?v=6.15&build=20261127';
-import { buildHeaderTree, classifyRegionRows, detectImportRegions } from '../data/importEngine.js?v=6.15&build=20261127';
-import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.15&build=20261127';
-import { getImportSchema } from '../services/importSchemaService.js?v=6.15&build=20261127';
-import { recognizeImportColumns } from '../services/aiImportRecognitionService.js?v=6.15&build=20261127';
-import { analyzeImport, commitImport, detectProjectBoqRegionKind, isImportFieldRequired, reviewResourceImport } from '../services/importWorkflowService.js?v=6.15&build=20261127';
+import { exportImportTemplate, parseImportFile } from '../data/excel.js?v=6.15&build=20261127r1';
+import { buildHeaderTree, buildImportRows, detectImportRegions } from '../data/importEngine.js?v=6.15&build=20261127r1';
+import { buildImportColumnMapping } from '../services/importMappingService.js?v=6.15&build=20261127r1';
+import { getImportSchema } from '../services/importSchemaService.js?v=6.15&build=20261127r1';
+import { recognizeImportColumns, recognizeImportRegion, reviewImportQuality } from '../services/aiImportRecognitionService.js?v=6.15&build=20261127r1';
+import { analyzeImport, commitImport, detectProjectBoqRegionKind, isImportFieldRequired, reviewResourceImport } from '../services/importWorkflowService.js?v=6.15&build=20261127r1';
 import { listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.15';
 import { projectRepo } from '../data/repository.js?v=6.15';
 import { esc, fmt, toast } from '../utils/dom.js?v=6.15';
@@ -22,10 +22,10 @@ const REVIEW_PAGE_SIZE = 50;
 const state = {
   targetType: 'project_boq', projectId: '', routeSignature: '', returnTo: '', step: 'upload', busy: false,
   fileName: '', workbook: null, regions: [], selectedRegionIds: new Set(),
-  mappingByRegion: {}, fieldMetaBySignature: {}, fixedByRegion: {}, aiStatusBySignature: {},
+  mappingByRegion: {}, fieldMetaBySignature: {}, fixedByRegion: {}, aiStatusBySignature: {}, aiRegionById: {},
   templateBySignature: {}, templateNameBySignature: {}, templateScopeBySignature: {},
   csvEncoding: '', csvDelimiter: '',
-  amountRule: 'calculated', importMode: 'append', updateExisting: true, issueOnly: false, issueSeverity: '', preview: null, report: null,
+  amountRule: 'calculated', importMode: 'append', updateExisting: true, issueOnly: false, issueSeverity: '', preview: null, qualityReview: null, report: null,
   fileRead: null, mappingReview: null, previewReview: null, reportPage: 1,
 };
 let activeCommit = null;
@@ -64,10 +64,10 @@ export async function render(workspace = document.getElementById('workspace')) {
 function resetState(targetType, projectId, routeSignature, returnTo) {
   Object.assign(state, {
     targetType, projectId, routeSignature, returnTo, step: 'upload', busy: false, fileName: '', workbook: null, regions: [],
-    selectedRegionIds: new Set(), mappingByRegion: {}, fieldMetaBySignature: {}, fixedByRegion: {}, aiStatusBySignature: {},
+    selectedRegionIds: new Set(), mappingByRegion: {}, fieldMetaBySignature: {}, fixedByRegion: {}, aiStatusBySignature: {}, aiRegionById: {},
     templateBySignature: {}, templateNameBySignature: {}, templateScopeBySignature: {},
     csvEncoding: '', csvDelimiter: '',
-    amountRule: 'calculated', importMode: 'append', updateExisting: targetType !== 'boq_quota_bundle', issueOnly: false, issueSeverity: '', preview: null, report: null,
+    amountRule: 'calculated', importMode: 'append', updateExisting: targetType !== 'boq_quota_bundle', issueOnly: false, issueSeverity: '', preview: null, qualityReview: null, report: null,
     fileRead: null, mappingReview: null, previewReview: null, reportPage: 1,
   });
 }
@@ -79,11 +79,13 @@ function expose(workspace) {
       return window.__app.go(back, back === 'importer' ? { mode: 'hub', projectId: state.projectId } : {});
     },
     setTarget: value => window.__app.go('ai-import', { targetType: value, projectId: state.projectId, returnTo: state.returnTo }),
-    downloadTemplate: () => exportImportTemplate(state.targetType),
+    downloadTemplate: () => exportImportTemplate(state.targetType).catch(error => toast(error.message || '模板下载失败', 'error')),
     chooseFile: file => chooseFile(workspace, file),
     setCsvEncoding: value => { state.csvEncoding = value; },
     setCsvDelimiter: value => { state.csvDelimiter = value; },
     toggleRegion: (id, checked) => { checked ? state.selectedRegionIds.add(id) : state.selectedRegionIds.delete(id); paint(workspace); },
+    selectRegions: mode => selectRegions(workspace, mode),
+    analyzeRegions: () => analyzeRegions(workspace),
     toggleHidden: checked => { state.regions.filter(region => region.hidden).forEach(region => checked ? state.selectedRegionIds.add(region.id) : state.selectedRegionIds.delete(region.id)); paint(workspace); },
     adjustRegion: id => adjustRegion(workspace, id),
     prepareMapping: () => prepareMapping(workspace),
@@ -107,6 +109,7 @@ function expose(workspace) {
     setUpdateExisting: value => { state.updateExisting = value; },
     setIssueOnly: value => { state.issueOnly = value; paint(workspace); },
     setIssueSeverity: value => { state.issueSeverity = value; paint(workspace); },
+    reviewQuality: () => reviewQuality(workspace),
     buildPreview: () => buildPreview(workspace),
     commit: () => commit(workspace),
     back: () => {
@@ -123,7 +126,7 @@ async function paint(workspace) {
   if (workspace.isInvalidated) return;
   const reviewOpen = workspace.querySelector('#unifiedReportReview')?.open;
   workspace.innerHTML = `<div class="page-frame min-h-full p-5">
-    <header class="mb-5 flex items-start gap-3"><button onclick="window.__aiImport.cancel()" class="mt-0.5 h-9 w-9 border border-slate-300 bg-white" aria-label="返回"><span class="material-symbols-outlined">arrow_back</span></button><div><h1 class="text-xl font-semibold text-slate-950">导入${esc(target.label)}</h1><p class="mt-1 text-sm text-slate-500">支持 Excel / CSV、多工作表、多数据区及 1–6 层合并表头。写入前始终需要确认预览。</p></div></header>
+    <header class="mb-5 flex items-start gap-3"><button onclick="window.__aiImport.cancel()" class="mt-0.5 h-9 w-9 border border-slate-300 bg-white" aria-label="返回"><span class="material-symbols-outlined">arrow_back</span></button><div><h1 class="text-xl font-semibold text-slate-950">导入${esc(target.label)}</h1><p class="mt-1 text-sm text-slate-500">支持 Excel / CSV、多工作表、多数据区及 1–10 层合并表头。写入前始终需要确认预览。</p></div></header>
     ${stepper()}
     ${state.step === 'upload' ? uploadPanel(projects) : state.step === 'regions' ? regionsPanel() : state.step === 'mapping' ? mappingPanel() : state.step === 'preview' ? previewPanel(projects) : resultPanel(reviewOpen)}
   </div>`;
@@ -157,7 +160,23 @@ function uploadPanel(projects) {
 
 function regionsPanel() {
   const selected = state.selectedRegionIds.size;
-  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden"><div class="border-b border-slate-200 p-5"><div class="flex flex-wrap items-start gap-3"><div><h2 id="unifiedRegionsHeading" tabindex="-1" class="font-semibold text-slate-900">选择要导入的数据区</h2><p class="mt-1 text-sm text-slate-500">${esc(state.fileName)} · 发现 ${state.regions.length} 个候选数据区，已选 ${selected} 个。</p></div><label class="ml-auto text-xs text-slate-600"><input type="checkbox" onchange="window.__aiImport.toggleHidden(this.checked)"> 包含隐藏工作表</label></div>${(state.workbook?.warnings || []).length ? warningBox(state.workbook.warnings) : ''}</div><div class="divide-y divide-slate-100">${state.regions.map(regionCard).join('') || '<div class="p-10 text-center text-slate-400">没有发现可用数据区</div>'}</div><footer class="flex justify-between border-t border-slate-200 bg-slate-50 p-4"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">重新选文件</button><button onclick="window.__aiImport.prepareMapping()" ${selected && !state.busy ? '' : 'disabled'} class="h-9 px-4 brand-bg text-white text-sm disabled:opacity-40">${state.busy ? 'AI 与本地规则分析中…' : '继续字段映射'}</button></footer></section>`;
+  return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+    <div class="border-b border-slate-200 p-5">
+      <div class="flex flex-wrap items-start gap-3">
+        <div><h2 id="unifiedRegionsHeading" tabindex="-1" class="font-semibold text-slate-900">选择要导入的数据区</h2><p class="mt-1 text-sm text-slate-500">${esc(state.fileName)} · 发现 ${state.regions.length} 个候选数据区，已选 ${selected} 个。</p></div>
+        <label class="ml-auto text-xs text-slate-600"><input type="checkbox" onchange="window.__aiImport.toggleHidden(this.checked)"> 包含隐藏工作表</label>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-2 text-xs">
+        <button onclick="window.__aiImport.selectRegions('recommended')" class="h-8 border border-teal-300 bg-teal-50 px-3 text-teal-800">选择推荐数据区</button>
+        <button onclick="window.__aiImport.selectRegions('visible')" class="h-8 border border-slate-300 bg-white px-3 text-slate-700">选择全部可见数据区</button>
+        <button onclick="window.__aiImport.analyzeRegions()" ${state.busy ? 'disabled' : ''} class="h-8 border border-violet-300 bg-violet-50 px-3 text-violet-800 disabled:opacity-40">AI 判断数据区用途</button>
+        <button onclick="window.__aiImport.selectRegions('clear')" class="h-8 border border-slate-300 bg-white px-3 text-slate-700">清空选择</button>
+      </div>
+      ${(state.workbook?.warnings || []).length ? warningBox(state.workbook.warnings) : ''}
+    </div>
+    <div class="divide-y divide-slate-100">${state.regions.map(regionCard).join('') || '<div class="p-10 text-center text-slate-400">没有发现可用数据区</div>'}</div>
+    <footer class="flex justify-between border-t border-slate-200 bg-slate-50 p-4"><button onclick="window.__aiImport.back()" class="h-9 px-3 border border-slate-300 bg-white text-sm">重新选文件</button><button onclick="window.__aiImport.prepareMapping()" ${selected && !state.busy ? '' : 'disabled'} class="h-9 px-4 brand-bg text-white text-sm disabled:opacity-40">${state.busy ? 'AI 与本地规则分析中…' : '继续字段映射'}</button></footer>
+  </section>`;
 }
 
 function regionCard(region) {
@@ -166,7 +185,16 @@ function regionCard(region) {
   const firstRow = (region.rowOffset || 0) + 1;
   const headerStart = region.headerStart + firstRow;
   const headerEnd = region.headerEnd + firstRow;
-  return `<article class="p-4 ${checked ? 'bg-teal-50/30' : ''}"><div class="flex items-start gap-3"><input type="checkbox" class="mt-1" ${checked ? 'checked' : ''} onchange="window.__aiImport.toggleRegion(${inlineArg(region.id)}, this.checked)" aria-label="选择${esc(region.sheetName)}"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><h3 class="font-medium text-slate-900">${esc(region.sheetName)}${region.title ? ` · ${esc(region.title)}` : ''}</h3>${region.hidden ? '<span class="badge badge-gray">隐藏表</span>' : ''}<span class="badge ${region.confidence === 'high' || region.confidence === 'manual' ? 'badge-green' : 'badge-yellow'}">${region.confidence === 'manual' ? '人工确认' : `${region.confidence === 'high' ? '高' : region.confidence === 'medium' ? '中' : '低'}置信`}</span></div><p class="mt-1 text-xs text-slate-500">表头第 ${headerStart}–${headerEnd} 行 · 数据 ${region.rows.length} 行 · 自动跳过 ${region.skippedRows.length} 行</p><p class="mt-2 text-xs text-slate-600">列路径：${esc(pathPreview)}${region.columns.length > 6 ? '…' : ''}</p><div class="mt-3 flex flex-wrap items-end gap-2 text-xs"><label>表头起始行<input id="regionStart-${safeId(region.id)}" type="number" min="${firstRow}" value="${headerStart}" class="ml-1 h-8 w-20 border border-slate-300 px-2"></label><label>结束行<input id="regionEnd-${safeId(region.id)}" type="number" min="${firstRow}" max="${headerStart + 5}" value="${headerEnd}" class="ml-1 h-8 w-20 border border-slate-300 px-2"></label><button onclick="window.__aiImport.adjustRegion(${inlineArg(region.id)})" class="h-8 px-3 border border-slate-300 bg-white">重新识别</button></div>${region.warnings?.length ? warningBox(region.warnings) : ''}</div></div></article>`;
+  const ai = state.aiRegionById[region.id];
+  const recommendation = ai?.recommendation === 'include' ? '建议导入' : ai?.recommendation === 'exclude' ? '建议排除' : '需人工确认';
+  const recommendationTone = ai?.recommendation === 'include' ? 'text-teal-700 bg-teal-50 border-teal-200' : ai?.recommendation === 'exclude' ? 'text-slate-600 bg-slate-50 border-slate-200' : 'text-amber-700 bg-amber-50 border-amber-200';
+  return `<article class="p-4 ${checked ? 'bg-teal-50/30' : ''}">
+    <div class="flex items-start gap-3"><input type="checkbox" class="mt-1" ${checked ? 'checked' : ''} onchange="window.__aiImport.toggleRegion(${inlineArg(region.id)}, this.checked)" aria-label="选择${esc(region.sheetName)}">
+      <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><h3 class="font-medium text-slate-900">${esc(region.sheetName)}${region.title ? ` · ${esc(region.title)}` : ''}</h3>${region.hidden ? '<span class="badge badge-gray">隐藏表</span>' : ''}<span class="badge ${region.confidence === 'high' || region.confidence === 'manual' ? 'badge-green' : 'badge-yellow'}">${region.confidence === 'manual' ? '人工确认' : `${region.confidence === 'high' ? '高' : region.confidence === 'medium' ? '中' : '低'}置信`}</span></div>
+      <p class="mt-1 text-xs text-slate-500">表头第 ${headerStart}–${headerEnd} 行 · 数据 ${region.rows.length} 行 · 自动跳过 ${region.skippedRows.length} 行</p><p class="mt-2 text-xs text-slate-600">列路径：${esc(pathPreview)}${region.columns.length > 6 ? '…' : ''}</p>${ai ? `<div class="mt-2 border px-2 py-1.5 text-xs ${recommendationTone}"><span class="font-medium">AI：${recommendation}</span> · ${esc(ai.reason)}${ai.degraded ? '（本地降级判断）' : ''}</div>` : ''}
+      <div class="mt-3 flex flex-wrap items-end gap-2 text-xs"><label>表头起始行<input id="regionStart-${safeId(region.id)}" type="number" min="${firstRow}" value="${headerStart}" class="ml-1 h-8 w-20 border border-slate-300 px-2"></label><label>结束行<input id="regionEnd-${safeId(region.id)}" type="number" min="${firstRow}" max="${headerStart + 9}" value="${headerEnd}" class="ml-1 h-8 w-20 border border-slate-300 px-2"></label><button onclick="window.__aiImport.adjustRegion(${inlineArg(region.id)})" class="h-8 px-3 border border-slate-300 bg-white">重新识别</button></div>${region.warnings?.length ? warningBox(region.warnings) : ''}</div>
+    </div>
+  </article>`;
 }
 
 function mappingPanel() {
@@ -239,7 +267,7 @@ function previewPanel(projects) {
   return `<section class="rounded-lg border border-slate-200 bg-white overflow-hidden">
     <header class="border-b border-slate-200 p-5">
       <h2 id="unifiedPreviewHeading" tabindex="-1" class="font-semibold text-slate-900">质量预览</h2>
-      <div class="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-6">${metric('数据区', preview.counts.regions)}${metric('读取明细', preview.counts.total)}${metric('可导入', preview.counts.valid, 'teal')}${metric('无效', preview.counts.invalid, 'red')}${metric('自动跳过', preview.counts.skipped)}${resourceImport ? metric('价格待确认', preview.counts.pending, 'amber') : metric('警告', preview.counts.warnings, 'amber')}</div>
+      <div class="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-7">${metric('数据区', preview.counts.regions)}${metric('读取明细', preview.counts.total)}${metric('可导入', preview.counts.valid, 'teal')}${metric('无效', preview.counts.invalid, 'red')}${metric('自动跳过', preview.counts.skipped)}${preview.counts.duplicates ? metric('文件内重复', preview.counts.duplicates, 'red') : ''}${resourceImport ? metric('价格待确认', preview.counts.pending, 'amber') : metric('警告', preview.counts.warnings, 'amber')}</div>
       <div class="mt-3 flex flex-wrap items-center gap-3 text-xs"><label><input type="checkbox" ${state.issueOnly ? 'checked' : ''} onchange="window.__aiImport.setIssueOnly(this.checked)"> 只看问题行</label><label>问题级别<select onchange="window.__aiImport.setIssueSeverity(this.value)" class="ml-2 h-8 border border-slate-300 bg-white px-2"><option value="">全部</option><option value="error" ${state.issueSeverity === 'error' ? 'selected' : ''}>错误</option><option value="warning" ${state.issueSeverity === 'warning' ? 'selected' : ''}>警告</option></select></label><button onclick="window.__aiImport.back()" class="text-teal-700 hover:underline">返回修改映射</button><span class="text-slate-400">当前显示 ${rows.length}${filteredRows.length > rows.length ? ` / ${filteredRows.length}` : ''} 行</span></div>
       ${isProjectImport ? hierarchyPreviewNotice(preview) : ''}
       ${state.targetType === 'boq_quota_bundle' ? '<div class="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800">清单行作为父项；后续定额行将写入定额库，并通过独立关系记录挂到该清单。相同定额可以被其他清单继续引用。</div>' : ''}
@@ -278,7 +306,7 @@ function previewRowsHtml(rows, { isProjectImport, resourceImport }) {
     const action = { create: '可新增资源', update: '匹配已有资源', duplicate: '同批已有相同资源' }[row.resourceAction];
     const checkText = messages.join(' · ') || action || (child ? '关联上方最近清单' : '检查通过');
     return `<tr class="border-t ${row.importable ? child ? 'bg-amber-50/30' : '' : 'bg-red-50/50'}">
-      <td class="p-2 text-slate-500">${esc(row.sheetName)}:${row.sourceRowNumber}</td>
+      <td class="p-2 text-slate-500">${esc(row.sheetName)}:${sourceRowLabel(row)}</td>
       <td class="p-2 font-medium text-slate-800"><div class="flex items-center gap-2 ${child ? 'pl-5' : ''}">${child ? '<span class="text-slate-300">└</span>' : ''}${badge}<span>${esc(row.data.code || '')}${row.data.code ? ' · ' : ''}${esc(row.data.name || '-')}${section}</span></div></td>
       <td class="p-2">${esc(row.data.unit || '-')}</td>
       ${resourceImport ? '' : `<td class="p-2 text-right">${esc(row.data.qty ?? row.data.defaultQty ?? '-')}</td>`}
@@ -287,6 +315,11 @@ function previewRowsHtml(rows, { isProjectImport, resourceImport }) {
       <td class="p-2 ${!row.importable ? 'text-red-700' : messages.length ? 'text-amber-700' : 'text-teal-700'}">${esc(checkText)}</td>
     </tr>`;
   }).join('');
+}
+
+function sourceRowLabel(row = {}) {
+  const rowNumbers = [...new Set((row.sourceRowNumbers || [row.sourceRowNumber]).filter(Number.isFinite))];
+  return rowNumbers.length > 1 ? rowNumbers.join('、') : String(rowNumbers[0] || '-');
 }
 
 function resultPanel(reviewOpen) {
@@ -337,7 +370,7 @@ function reportReviewRow(row) {
   const fallback = row.priceStatus === 'skipped' ? '已有相同价格记录' : '已匹配主数据，本次跳过';
   const reason = row.issues?.map(issue => issue.message).join(' · ') || fallback;
   return `<li class="px-3 py-2">
-    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 break-words"><span class="text-xs text-slate-500">${esc(row.sheetName)} · 第 ${esc(row.sourceRowNumber)} 行</span>${row.name ? `<span class="font-medium text-slate-800">${esc(row.name)}</span>` : ''}<span class="text-xs ${notWritten ? 'text-red-700' : 'text-amber-800'}">${status}</span></div>
+    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 break-words"><span class="text-xs text-slate-500">${esc(row.sheetName)} · 第 ${esc(sourceRowLabel(row))} 行</span>${row.name ? `<span class="font-medium text-slate-800">${esc(row.name)}</span>` : ''}<span class="text-xs ${notWritten ? 'text-red-700' : 'text-amber-800'}">${status}</span></div>
     <div class="mt-1 break-words text-xs text-slate-600">${notWritten && pending ? '价格待确认 · ' : ''}${esc(reason)}</div>
   </li>`;
 }
@@ -422,9 +455,9 @@ function adjustRegion(workspace, id) {
   const start = Math.min(lastIndex, Math.max(0, sourceStart - firstRow));
   const sourceEnd = Number(workspace.querySelector(`#regionEnd-${safeId(id)}`)?.value || start + firstRow);
   const end = Math.min(lastIndex, Math.max(start, sourceEnd - firstRow));
-  if (end - start + 1 > 6) return toast('表头最多选择 6 行', 'error');
+  if (end - start + 1 > 10) return toast('表头最多选择 10 行', 'error');
   const header = buildHeaderTree({ sheetName: current.sheetName, regionId: current.id, matrix: current.matrix, merges: current.merges, headerStart: start, headerEnd: end });
-  const { rows, skippedRows } = classifyRegionRows(current.matrix, header.columns, end + 1, current.dataEnd, rowOffset);
+  const { rows, skippedRows } = buildImportRows(current.matrix, header.columns, end + 1, current.dataEnd, rowOffset);
   state.regions[index] = { ...current, headerStart: start, headerEnd: end, dataStart: end + 1, columns: header.columns, rows, skippedRows, title: header.title, warnings: header.warnings, signature: header.columns.map(column => column.normalizedPath.join('>')).join('|'), confidence: 'manual', manualRequired: false };
   state.selectedRegionIds.add(current.id);
   toast('已按手动表头范围重新识别', 'success');
@@ -558,6 +591,7 @@ function buildPreview(workspace) {
   }
   if (missing.length) return toast(`请先补齐必填映射：${[...new Set(missing)].join('、')}`, 'error');
   const preview = analyzeImport(state.regions, { targetType: state.targetType, mappings: state.mappingByRegion, fixedValues: state.fixedByRegion, amountRule: state.amountRule, selectedRegionIds: [...state.selectedRegionIds] });
+  state.qualityReview = null;
   if (isResourceTarget(preview.targetType)) return buildResourcePreview(workspace, preview);
   state.preview = preview;
   state.step = 'preview';
@@ -614,11 +648,104 @@ async function commit(workspace) {
   }
 }
 
+async function reviewQuality(workspace) {
+  const { preview } = state;
+  if (!preview || state.busy || workspace.isInvalidated) return;
+  const review = { workspace };
+  state.previewReview = review;
+  state.busy = true;
+  try {
+    await paint(workspace);
+    if (state.previewReview !== review || review.workspace.isInvalidated) return;
+    const result = await reviewImportQuality(preview);
+    if (state.previewReview !== review || review.workspace.isInvalidated) return;
+    state.qualityReview = result;
+    toast(result.degraded ? '已完成本地质量复核；配置模型后可获得 AI 风险归纳' : 'AI 已完成质量复核，请确认建议后再入库', result.degraded ? 'info' : 'success');
+  } finally {
+    if (state.previewReview === review) {
+      state.previewReview = null;
+      state.busy = false;
+      await paint(review.workspace);
+    }
+  }
+}
+
 function commitOptions(projects) {
-  if (state.targetType === 'project_boq') return `<div>${projectPicker(projects)}<div class="mt-3 text-sm"><label class="mr-4"><input type="radio" name="unifiedMode" ${state.importMode === 'append' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('append')"> 追加</label><label><input type="radio" name="unifiedMode" ${state.importMode === 'replace' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('replace')"> 覆盖当前清单</label></div><label for="unifiedAmountRule" class="mt-3 block text-sm">金额规则 <select id="unifiedAmountRule" onchange="window.__aiImport.setAmountRule(this.value)" class="ml-2 h-9 border border-slate-300 bg-white px-2"><option value="calculated" ${state.amountRule === 'calculated' ? 'selected' : ''}>数量 × 综合单价</option><option value="sourceAmount" ${state.amountRule === 'sourceAmount' ? 'selected' : ''}>使用源合价</option><option value="deriveUnitPrice" ${state.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option></select></label></div>`;
-  if (state.targetType === 'boq_quota_bundle') return `<div class="text-sm text-slate-600"><div>已有清单按编码更新；本次出现的清单会以文件中的定额组合替换旧关系。</div><label class="mt-2 block"><input type="checkbox" ${state.updateExisting ? 'checked' : ''} onchange="window.__aiImport.setUpdateExisting(this.checked)"> 同步更新定额库已有价格（未勾选时仅保存关系价格快照）</label></div>`;
-  if (isResourceTarget(state.targetType)) return `<label class="text-sm"><input type="checkbox" ${state.updateExisting ? 'checked' : ''} onchange="window.__aiImport.setUpdateExisting(this.checked)"> 更新已有同身份资源</label>`;
-  return '<p class="text-sm text-slate-600">将按现有领域去重规则新增或更新数据。</p>';
+  const sourceSummary = `${sheetSummaryMarkup(state.preview)}${qualityReviewMarkup(state.qualityReview)}<button onclick="window.__aiImport.reviewQuality()" ${state.busy ? 'disabled' : ''} class="mb-3 h-8 border border-violet-300 bg-violet-50 px-3 text-xs text-violet-800 disabled:opacity-40">${state.busy ? '正在复核…' : 'AI 复核导入风险'}</button>`;
+  if (state.targetType === 'project_boq') return `<div>${sourceSummary}${projectPicker(projects)}<div class="mt-3 text-sm"><label class="mr-4"><input type="radio" name="unifiedMode" ${state.importMode === 'append' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('append')"> 追加</label><label><input type="radio" name="unifiedMode" ${state.importMode === 'replace' ? 'checked' : ''} onchange="window.__aiImport.setImportMode('replace')"> 覆盖当前清单</label></div><label for="unifiedAmountRule" class="mt-3 block text-sm">金额规则 <select id="unifiedAmountRule" onchange="window.__aiImport.setAmountRule(this.value)" class="ml-2 h-9 border border-slate-300 bg-white px-2"><option value="calculated" ${state.amountRule === 'calculated' ? 'selected' : ''}>数量 × 综合单价</option><option value="sourceAmount" ${state.amountRule === 'sourceAmount' ? 'selected' : ''}>使用源合价</option><option value="deriveUnitPrice" ${state.amountRule === 'deriveUnitPrice' ? 'selected' : ''}>合价 ÷ 数量补单价</option></select></label></div>`;
+  if (state.targetType === 'boq_quota_bundle') return `${sourceSummary}<div class="text-sm text-slate-600"><div>已有清单按编码更新；本次出现的清单会以文件中的定额组合替换旧关系。</div><label class="mt-2 block"><input type="checkbox" ${state.updateExisting ? 'checked' : ''} onchange="window.__aiImport.setUpdateExisting(this.checked)"> 同步更新定额库已有价格（未勾选时仅保存关系价格快照）</label></div>`;
+  if (state.targetType === 'material' || state.targetType === 'equipment') return `${sourceSummary}<label class="text-sm"><input type="checkbox" ${state.updateExisting ? 'checked' : ''} onchange="window.__aiImport.setUpdateExisting(this.checked)"> 更新已有同身份资源</label>`;
+  if (state.targetType === 'quota' || state.targetType === 'boq_library') return `${sourceSummary}<label class="text-sm"><input type="checkbox" ${state.updateExisting ? 'checked' : ''} onchange="window.__aiImport.setUpdateExisting(this.checked)"> 更新已有同身份${state.targetType === 'quota' ? '定额' : '清单'}</label><p class="mt-1 text-xs text-slate-500">关闭后，已存在的条目只记录为跳过，不会覆盖历史价格或关联关系。</p>`;
+  return `${sourceSummary}<p class="text-sm text-slate-600">将按现有领域去重规则新增或更新数据。</p>`;
+}
+
+function qualityReviewMarkup(review) {
+  if (!review) return '';
+  const tone = severity => severity === 'high' ? 'border-red-200 bg-red-50 text-red-900' : severity === 'medium' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700';
+  return `<section class="mb-3 rounded border border-violet-200 bg-violet-50 p-3 text-xs text-violet-950"><div class="font-medium">${review.degraded ? '本地质量复核' : 'AI 导入质量复核'}${review.degraded ? '（AI 未调用）' : ''}</div><p class="mt-1 text-violet-800">${esc(review.summary)}</p><div class="mt-2 space-y-1">${(review.risks || []).map(risk => `<div class="border px-2 py-1.5 ${tone(risk.severity)}"><span class="font-medium">${esc(risk.title)}</span>：${esc(risk.detail)}<br><span>建议：${esc(risk.action)}</span></div>`).join('')}</div></section>`;
+}
+
+function selectRegions(workspace, mode) {
+  if (mode === 'clear') state.selectedRegionIds.clear();
+  else {
+    const regions = state.regions.filter(region => !region.hidden && region.rows.length && (mode === 'visible' || region.confidence !== 'low'));
+    state.selectedRegionIds = new Set(regions.map(region => region.id));
+  }
+  paint(workspace);
+}
+
+async function analyzeRegions(workspace) {
+  if (state.busy || workspace.isInvalidated) return;
+  const candidates = state.regions.filter(region => !region.hidden && region.columns.length).slice(0, 12);
+  if (!candidates.length) return toast('没有可供 AI 判断的数据区', 'error');
+  const { targetType } = state;
+  const review = { workspace };
+  state.mappingReview = review;
+  state.busy = true;
+  try {
+    await paint(workspace);
+    const results = [];
+    for (let index = 0; index < candidates.length; index += 3) {
+      if (state.mappingReview !== review || review.workspace.isInvalidated) return;
+      const batch = candidates.slice(index, index + 3);
+      results.push(...await Promise.all(batch.map(async region => [region.id, await recognizeImportRegion({ targetType, region })])));
+    }
+    if (state.mappingReview !== review || review.workspace.isInvalidated) return;
+    state.aiRegionById = { ...state.aiRegionById, ...Object.fromEntries(results) };
+    const remoteCount = results.filter(([, result]) => !result.degraded).length;
+    toast(remoteCount ? `AI 已完成 ${results.length} 个数据区判断，请确认后再选择` : `已完成 ${results.length} 个本地降级判断；配置模型后可获得 AI 语义判断`, remoteCount ? 'success' : 'info');
+  } finally {
+    if (state.mappingReview === review) {
+      state.mappingReview = null;
+      state.busy = false;
+      await paint(review.workspace);
+    }
+  }
+}
+
+export function summarizeImportSheets(preview = {}) {
+  const summary = new Map();
+  (preview.regions || []).forEach(region => {
+    const sheetName = region.sheetName || '未命名工作表';
+    const item = summary.get(sheetName) || { sheetName, regions: 0, total: 0, valid: 0, invalid: 0, duplicates: 0 };
+    item.regions += 1;
+    summary.set(sheetName, item);
+  });
+  (preview.rows || []).forEach(row => {
+    const item = summary.get(row.sheetName || '未命名工作表') || { sheetName: row.sheetName || '未命名工作表', regions: 0, total: 0, valid: 0, invalid: 0, duplicates: 0 };
+    item.total += 1;
+    if (row.importable) item.valid += 1;
+    else item.invalid += 1;
+    if ((row.issues || []).some(issue => issue.code === 'duplicate_in_file')) item.duplicates += 1;
+    summary.set(item.sheetName, item);
+  });
+  return [...summary.values()];
+}
+
+function sheetSummaryMarkup(preview) {
+  const sheets = summarizeImportSheets(preview);
+  if (!sheets.length) return '';
+  return `<div class="mb-3 rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"><span class="font-medium text-slate-800">本次写入来源：</span>${sheets.map(sheet => `${esc(sheet.sheetName)} ${sheet.valid}/${sheet.total} 可写入${sheet.duplicates ? `，重复 ${sheet.duplicates}` : ''}`).join('；')}</div>`;
 }
 
 function isResourceTarget(targetType) { return targetType === 'material' || targetType === 'equipment'; }

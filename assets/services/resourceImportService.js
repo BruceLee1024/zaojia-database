@@ -1,6 +1,7 @@
 import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.15';
 import { resourceCodeIdentity, resourceCompositeIdentity, validateResourceCollection } from './resourceService.js?v=6.15';
 import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from './importSemanticService.js?v=6.15&build=20261126b';
+import { ensureXlsx } from '../utils/vendorLoader.js?v=6.15&build=20261117b';
 
 const SOURCE_TYPE_MAP = new Map([
   ['official', 'official'], ['官方信息价', 'official'], ['信息价', 'official'],
@@ -21,8 +22,7 @@ export const resourceImportService = {
   async parse(file, resourceType) {
     validateResourceType(resourceType);
     if (!file?.arrayBuffer) throw new Error('请选择 Excel 文件');
-    const xlsx = globalThis.XLSX;
-    if (!xlsx?.read || !xlsx?.utils?.sheet_to_json) throw new Error('Excel 解析组件未加载');
+    const xlsx = await ensureXlsx();
     const workbook = xlsx.read(await file.arrayBuffer(), { type: 'array' });
     for (const name of workbook.SheetNames || []) {
       const matrix = xlsx.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' });

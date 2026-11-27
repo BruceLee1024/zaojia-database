@@ -1,12 +1,12 @@
-import { buildImportColumnMapping } from './importMappingService.js?v=6.15&build=20261127';
-import { getImportSchema, normalizeImportNumber, normalizeImportValue } from './importSchemaService.js?v=6.15&build=20261127';
+import { buildImportColumnMapping } from './importMappingService.js?v=6.15&build=20261127r1';
+import { getImportSchema, normalizeImportNumber, normalizeImportValue } from './importSchemaService.js?v=6.15&build=20261127r1';
 import { boqService } from './boqService.js?v=6.15';
 import { assertProjectEditableById } from './projectLockService.js?v=6.15';
-import { boqLibraryService } from './boqLibraryService.js?v=6.15&build=20261127';
-import { quotaService } from './quotaService.js?v=6.15';
-import { resourceImportService } from './resourceImportService.js?v=6.15&build=20261127';
+import { boqLibraryService } from './boqLibraryService.js?v=6.15&build=20261127r1';
+import { quotaService } from './quotaService.js?v=6.15&build=20261117c';
+import { resourceImportService } from './resourceImportService.js?v=6.15&build=20261127r1';
 import { dataEngineService } from './dataEngineService.js?v=6.15';
-import { groupBundleRows, importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.15&build=20261127';
+import { groupBundleRows, importBoqQuotaBundle, normalizeBundleLayer } from './boqQuotaBundleImportService.js?v=6.15&build=20261127r1';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.15';
 import { categoryGuess } from '../utils/stats.js?v=6.15';
 
@@ -114,6 +114,7 @@ export function analyzeImport(regions = [], {
         sheetName: region.sheetName,
         sourceRow: sourceRow.sourceRow,
         sourceRowNumber: sourceRow.sourceRowNumber,
+        sourceRowNumbers: [sourceRow.sourceRowNumber, ...(sourceRow.continuationRows || [])],
         source: sourceRow,
         data: normalized,
         issues: rowIssues,
@@ -132,6 +133,7 @@ export function analyzeImport(regions = [], {
       row.importable = false;
     }
   }
+  const duplicateCount = blockDuplicateImportRows(outputRows, targetType);
   const issues = collectRowIssues(outputRows);
   return {
     targetType,
@@ -146,6 +148,7 @@ export function analyzeImport(regions = [], {
       regions: analyzedRegions.length,
       skipped: skippedRows.length,
       ...summarizeRows(outputRows, issues),
+      duplicates: duplicateCount,
     },
   };
 }
@@ -182,7 +185,7 @@ export async function reviewResourceImport(preview) {
 
 function collectRowIssues(rows) {
   return rows.flatMap(row => row.issues.map(issue => ({
-    ...issue, rowId: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber,
+    ...issue, rowId: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers,
   })));
 }
 
@@ -194,7 +197,9 @@ function summarizeRows(rows, issues) {
 
 export async function commitImport(preview, options = {}) {
   if (!preview?.targetType || !Array.isArray(preview.rows)) throw new Error('导入预览无效');
-  const validRows = preview.rows.filter(row => row.importable).map(row => ({ ...row.data, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber }));
+  const validRows = preview.rows.filter(row => row.importable).map(row => ({
+    ...row.data, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers,
+  }));
   if (!validRows.length) throw new Error('没有可导入的有效数据');
   const sourceName = String(options.sourceName || '表格导入');
   let domainResult;
@@ -211,9 +216,9 @@ export async function commitImport(preview, options = {}) {
       warnings.push(`清单已写入，但数据沉淀索引更新失败：${error.message || '未知错误'}`);
     }
   } else if (preview.targetType === 'boq_library') {
-    domainResult = await boqLibraryService.importRows(validRows);
+    domainResult = await boqLibraryService.importRows(validRows, { updateExisting: options.updateExisting !== false });
   } else if (preview.targetType === 'quota') {
-    domainResult = await quotaService.importRows(validRows);
+    domainResult = await quotaService.importRows(validRows, { updateExisting: options.updateExisting !== false });
   } else if (preview.targetType === 'material' || preview.targetType === 'equipment') {
     const resourcePreview = await resourceImportService.preview(validRows.map(resourceRowForDomain), preview.targetType);
     domainResult = await resourceImportService.commit(resourcePreview, { updateExisting: options.updateExisting !== false });
@@ -242,6 +247,40 @@ export async function commitImport(preview, options = {}) {
     domainResult,
     rows: mergeCommitRows(preview.rows, domainResult, preview.targetType),
   };
+}
+
+function blockDuplicateImportRows(rows, targetType) {
+  const firstByIdentity = new Map();
+  let duplicates = 0;
+  rows.forEach(row => {
+    if (!row.importable) return;
+    const identity = importIdentity(row.data, targetType);
+    if (!identity) return;
+    const first = firstByIdentity.get(identity);
+    if (!first) {
+      firstByIdentity.set(identity, row);
+      return;
+    }
+    const issue = {
+      code: 'duplicate_in_file', severity: 'error',
+      message: `与 ${first.sheetName} 第 ${first.sourceRowNumber} 行身份重复，请保留其中一行后再导入`,
+      rowId: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers,
+    };
+    row.issues.push(issue);
+    row.importable = false;
+    duplicates += 1;
+  });
+  return duplicates;
+}
+
+function importIdentity(data = {}, targetType = '') {
+  const part = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  if (targetType === 'quota') return ['quota', part(data.specialty), part(data.name), part(data.feature)].join('|');
+  if (targetType === 'boq_library') {
+    const code = part(data.code);
+    return code ? `boq-library|code|${code}` : ['boq-library', part(data.name), part(data.feature), part(data.unit)].join('|');
+  }
+  return '';
 }
 
 function bundleDomainRows(rows) {
@@ -278,7 +317,7 @@ export function mergeCommitRows(previewRows = [], domainResult = {}, targetType 
   let domainIndex = 0;
   const domainRows = new Map((domainResult.rows || []).map(row => [Number(row.index), row]));
   return previewRows.map(row => {
-    const source = { id: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, name: row.data?.name || '' };
+    const source = { id: row.id, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sourceRowNumbers: row.sourceRowNumbers, name: row.data?.name || '' };
     if (!row.importable) return { ...source, status: 'invalid', issues: row.issues };
     const result = domainRows.get(domainIndex++);
     if (targetType !== 'material' && targetType !== 'equipment') {

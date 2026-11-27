@@ -5,9 +5,9 @@ import { dataEngineService } from '../services/dataEngineService.js?v=6.15';
 import { quotaService } from '../services/quotaService.js?v=6.15';
 import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=6.15';
 import { quotaRepo } from '../data/repository.js?v=6.15';
-import { parseExcel, exportImportTemplate } from '../data/excel.js?v=6.15&build=20261127';
+import { parseExcel, exportImportTemplate } from '../data/excel.js?v=6.15&build=20261127r1';
 import { getStorageStatus } from '../data/storage.js?v=6.15';
-import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=6.15&build=20261127';
+import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=6.15&build=20261127r1';
 import { createMappingTemplate, deleteMappingTemplate, duplicateMappingTemplate, getMappingTemplate, listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.15';
 import { esc, fmtMoney, openModal, closeModal, toast } from '../utils/dom.js?v=6.15';
 import { hasMissingPrice } from '../utils/costing.js?v=6.15';
@@ -277,7 +277,7 @@ function exposeImporterActions(workspace) {
     repairUnitFromPrevious,
     mapUnknownCategory,
     mergeDuplicateRows,
-    downloadTemplate: () => exportImportTemplate(state.hubSelectedType),
+    downloadTemplate: () => exportImportTemplate(state.hubSelectedType).catch(error => toast(error.message || '模板下载失败', 'error')),
     goBOQ: () => {
       if (state.projectId) window.__app.go('boq', { projectId: state.projectId });
     },

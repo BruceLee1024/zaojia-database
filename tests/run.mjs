@@ -5,15 +5,15 @@ import { testResourceHealth } from './resourceHealth.mjs';
 import { runImportWorkflowRegressions } from './importWorkflowRegressions.mjs';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.15';
 import { formatCurrency, normalizeCurrency, sumByCurrency } from '../assets/utils/currency.js?v=6.15';
-import { buildQuotaExportRows, decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, exportImportTemplate, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
+import { buildQuotaExportRows, decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, exportImportTemplate, parseImportFile, QUOTA_EXPORT_HEADERS, quotaExportRows, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
 import { buildHeaderTree, classifyImportRow, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.15';
 import { applyMappingTemplate, buildImportColumnMapping, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.15';
 import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../assets/services/importSchemaService.js?v=6.15';
 import { analyzeImport, commitImport, detectProjectBoqRegionKind, isImportFieldRequired, mergeCommitRows, reviewResourceImport } from '../assets/services/importWorkflowService.js?v=6.15';
 import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js?v=6.15';
 import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.15';
-import { createHierarchicalRecognitionRequest, createRecognitionRequest, validateColumnRecognitionPayload, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.15';
-import { applyHierarchicalTemplate, getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature } from '../assets/views/aiImportWizard.js?v=6.15';
+import { createHierarchicalRecognitionRequest, createRecognitionRequest, createImportQualityReviewRequest, createRegionRecognitionRequest, validateColumnRecognitionPayload, validateImportQualityReviewPayload, validateRecognitionPayload, validateRegionRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.15';
+import { applyHierarchicalTemplate, getImportBlockingReasons, normalizeWizardStep, splitImportedNameFeature, summarizeImportSheets } from '../assets/views/aiImportWizard.js?v=6.15';
 import { normalizeHubImportResult } from '../assets/views/importer.js?v=6.15';
 import { applyLibraryAISuggestions, buildLibraryEditPayload, buildLibraryMetricCards, getLibraryDetailSummary } from '../assets/views/boqLibrary.js?v=6.15';
 import { ICONS, ICON_TONES, getIcon } from '../assets/utils/icons.js?v=6.15';
@@ -29,6 +29,8 @@ import { testFinalFixes } from './finalFixes.mjs';
 import { testAiCopilot, testAiSessionPersistence } from './aiCopilot.mjs';
 import { testCostEstimationMath, testCostEstimationPersistence } from './costEstimation.mjs';
 import { testIndicatorAggregation } from './indicatorAggregation.mjs';
+import { effectiveSpecialty, specialtyMatchLabel, specialtyRank } from '../assets/utils/specialty.js?v=6.15';
+import { paginateQuotas, quotaPageTokens } from '../assets/views/quota.js?v=6.15';
 
 function testCosting() {
   assert.equal(calculateAmount(10, 25, 1.08), 270);
@@ -37,6 +39,31 @@ function testCosting() {
   assert.equal(hasMissingPrice(0), true);
   assert.equal(hasMissingPrice(''), true);
   assert.equal(hasMissingPrice(1), false);
+}
+
+function testSpecialtyMatching() {
+  const project = { specialty: '装饰装修' };
+  assert.equal(effectiveSpecialty({}, project), '装饰装修');
+  assert.equal(effectiveSpecialty({ specialty: '土建建筑' }, project), '土建建筑');
+  assert.equal(specialtyRank({ specialty: '装饰装修' }, '装饰装修'), 2);
+  assert.equal(specialtyRank({}, '装饰装修'), 1, '旧数据应作为通用定额保留');
+  assert.equal(specialtyRank({ specialty: '土建建筑' }, '装饰装修'), 0);
+  assert.match(specialtyMatchLabel({ specialty: '土建建筑' }, '装饰装修'), /跨专业候选/);
+}
+
+function testQuotaPagination() {
+  const rows = Array.from({ length: 45 }, (_, index) => ({ id: String(index + 1) }));
+  const first = paginateQuotas(rows, 1);
+  assert.deepEqual({ total: first.total, page: first.page, totalPages: first.totalPages, start: first.start, end: first.end }, { total: 45, page: 1, totalPages: 3, start: 1, end: 20 });
+  assert.equal(first.rows.length, 20);
+  assert.equal(first.rows[0].id, '1');
+  const last = paginateQuotas(rows, 99);
+  assert.deepEqual({ page: last.page, totalPages: last.totalPages, start: last.start, end: last.end }, { page: 3, totalPages: 3, start: 41, end: 45 });
+  assert.equal(last.rows.length, 5);
+  assert.deepEqual(quotaPageTokens(1, 25), [1, 2, 'ellipsis', 25]);
+  assert.deepEqual(quotaPageTokens(12, 25), [1, 'ellipsis', 11, 12, 13, 'ellipsis', 25]);
+  assert.deepEqual(quotaPageTokens(25, 25), [1, 'ellipsis', 24, 25]);
+  assert.deepEqual(quotaPageTokens(3, 5), [1, 2, 3, 4, 5]);
 }
 
 function testProjectCurrencies() {
@@ -102,6 +129,7 @@ function testSystemPromptGenerationContract() {
 
 function testExcelRows() {
   const quotaRow = {
+    专业: '土建建筑',
     清单名称: 'C30 满堂基础',
     项目特征: '混凝土强度等级：C30',
     单位: 'm³',
@@ -112,6 +140,16 @@ function testExcelRows() {
   assert.equal(quota.name, 'C30 满堂基础');
   assert.equal(quota.priceTotal, 520.5);
   assert.equal(quota.priceMissing, false);
+  assert.equal(quota.specialty, '土建建筑');
+  assert.equal(quota.category, '混凝土与钢筋');
+
+  const exportRows = quotaExportRows([{
+    specialty: '装饰装修', category: '油漆', code: 'Q-01', name: '油漆施工', feature: '墙面', unit: 'm²', priceTotal: 36,
+    useBreakdown: true, breakdown: { 人工: 20, 材料: 16 }, tags: ['油漆', '内墙'],
+  }]);
+  assert.equal(QUOTA_EXPORT_HEADERS.includes('专业'), true);
+  assert.equal(exportRows[0][0], '装饰装修');
+  assert.equal(exportRows[0][9], '是');
 
   const missingPriceQuota = rowToQuotaItem({ 清单名称: '缺价项', 单位: 'm²', 综合单价: '' });
   assert.equal(missingPriceQuota.priceMissing, true);
@@ -444,6 +482,20 @@ function testMergedHeaderTreeAndRegions() {
   assert.equal(standardBoqRegions[0].skippedRows.filter(row => row.kind === 'subtotal').length, 1);
   const standardBoqMapping = buildImportColumnMapping(standardBoqRegions[0].columns, standardBoqRegions[0].rows, 'project_boq');
   assert.equal(Boolean(standardBoqMapping.mapping.feature), true);
+
+  const raggedRegions = detectImportRegions({ sheets: [{
+    name: '拆行清单', hidden: false, merges: [], matrix: [
+      ['序号', '项目名称', '项目特征', '单位', '工程量', '综合单价'],
+      [1, '池壁混凝土', 'C30', 'm3', '', ''],
+      ['', '', '1、抗渗等级 P8', '', '', ''],
+      ['', '', '', '', 12.5, 680],
+    ],
+  }] }, { schema: getImportSchema('project_boq') });
+  assert.equal(raggedRegions.length, 1);
+  assert.equal(raggedRegions[0].rows.length, 1, '拆开的特征和计价字段应合并为一条逻辑明细');
+  assert.equal(raggedRegions[0].rows[0].values[raggedRegions[0].columns[2].id].includes('抗渗等级 P8'), true);
+  assert.equal(raggedRegions[0].rows[0].values[raggedRegions[0].columns[4].id], 12.5);
+  assert.deepEqual(raggedRegions[0].rows[0].continuationRows, [3, 4]);
 }
 
 function testUnifiedImportSchemaAndHierarchicalMapping() {
@@ -560,6 +612,25 @@ function testUnifiedImportAnalysis() {
   assert.equal(missingOtherCharge.counts.invalid, 1);
   assert.equal(missingOtherCharge.rows[0].issues.some(issue => issue.code === 'missing_amount'), true);
 
+  const duplicateQuotaRegion = {
+    id: 'sheet:quota', signature: 'quota', sheetName: '定额', title: '定额库', dataStart: 1, matrix: [],
+    columns: [
+      { id: 'specialty', columnIndex: 0, path: ['专业'], leaf: '专业', displayName: '专业' },
+      { id: 'name', columnIndex: 1, path: ['清单名称'], leaf: '清单名称', displayName: '清单名称' },
+      { id: 'feature', columnIndex: 2, path: ['项目特征'], leaf: '项目特征', displayName: '项目特征' },
+    ],
+    rows: [
+      { sourceRow: 1, sourceRowNumber: 2, kind: 'detail', raw: [], values: { specialty: '装饰装修', name: '油漆施工', feature: '两遍' } },
+      { sourceRow: 2, sourceRowNumber: 3, kind: 'detail', raw: [], values: { specialty: '装饰装修', name: '油漆施工', feature: '两遍' } },
+    ], skippedRows: [],
+  };
+  const duplicateQuota = analyzeImport([duplicateQuotaRegion], { targetType: 'quota', mappings: { quota: { specialty: 'specialty', name: 'name', feature: 'feature' } } });
+  assert.equal(duplicateQuota.counts.valid, 1);
+  assert.equal(duplicateQuota.counts.duplicates, 1);
+  assert.equal(duplicateQuota.rows[1].issues.some(issue => issue.code === 'duplicate_in_file'), true);
+  assert.deepEqual(summarizeImportSheets(duplicateQuota), [{ sheetName: '定额', regions: 1, total: 2, valid: 1, invalid: 1, duplicates: 1 }]);
+  assert.equal(summarizeImportSheets({ ...duplicateQuota, regions: [...duplicateQuota.regions, { ...duplicateQuota.regions[0], id: 'sheet:quota:second' }] })[0].regions, 2);
+
   const reportRows = mergeCommitRows([
     { id: 'r1', importable: true, sheetName: '材料', sourceRowNumber: 2, issues: [] },
     { id: 'r2', importable: false, sheetName: '材料', sourceRowNumber: 3, issues: [{ severity: 'error', message: '缺少名称' }] },
@@ -642,7 +713,7 @@ async function testImportTemplateRoundTrip() {
   XLSX.writeFile = (workbook, name) => { exported = { workbook, name }; };
   try {
     for (const [targetType, fileName, validRows] of templates) {
-      exportImportTemplate(targetType);
+      await exportImportTemplate(targetType);
       assert.equal(exported.name, fileName);
       const bytes = new Uint8Array(XLSX.write(exported.workbook, { type: 'array', bookType: 'xlsx' }));
       const parsed = await parseImportFile(new File([bytes], fileName));
@@ -669,6 +740,19 @@ function testHierarchicalAiRecognitionValidation() {
   assert.equal(result.semanticSuggestions[0].suggestedMeaning, '历史采购价');
   assert.throws(() => validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'unknown', columnId: 'c1' }] }, request), /不支持的字段/);
   assert.throws(() => validateColumnRecognitionPayload({ suggestions: [{ fieldKey: 'name', columnId: 'c1' }, { fieldKey: 'feature', columnId: 'c1' }] }, request), /重复列映射/);
+
+  const regionRequest = createRegionRecognitionRequest({ targetType: 'quota', region: {
+    sheetName: '定额明细', title: '装饰装修定额', headerStart: 1, headerEnd: 2, confidence: 'medium',
+    columns: [{ id: 'name', path: ['清单名称'], leaf: '清单名称' }], rows: [{ values: { name: '油漆施工' }, raw: ['错误样本'] }], skippedRows: [],
+  } });
+  assert.equal(regionRequest.sampleRows[0][0], '油漆施工');
+  const regionResult = validateRegionRecognitionPayload({ kind: 'data', recommendation: 'include', confidence: 'high', reason: '包含定额明细', summary: '建议导入' }, regionRequest);
+  assert.equal(regionResult.recommendation, 'include');
+  assert.equal(regionResult.degraded, false);
+  const qualityRequest = createImportQualityReviewRequest({ targetType: 'quota', counts: { total: 2, warnings: 1, duplicates: 1 }, rows: [{ sheetName: '定额', sourceRowNumber: 2, importable: false, issues: [{ code: 'duplicate_in_file', severity: 'error', message: '重复' }] }] });
+  assert.equal(qualityRequest.issues[0].code, 'duplicate_in_file');
+  const qualityResult = validateImportQualityReviewPayload({ summary: '需先处理重复', risks: [{ severity: 'high', title: '重复', detail: '存在重复身份', action: '保留唯一记录' }] }, qualityRequest);
+  assert.equal(qualityResult.risks[0].severity, 'high');
 }
 
 function testCombinedNameFeatureColumnMetadata() {
@@ -874,6 +958,8 @@ function notFound() {
 }
 
 testCosting();
+testSpecialtyMatching();
+testQuotaPagination();
 testCostEstimationMath();
 testIndicatorAggregation();
 testProjectCurrencies();
@@ -1138,6 +1224,17 @@ async function testVersions() {
   await boqService.updateStructureGroup(replaced.id, 'custom:安装清单');
   const grouped = (await repo.boqRepo.byProject('p1'))[0];
   assert.equal(grouped.structureGroup, 'custom:安装清单');
+  await repo.projectBoqQuotaRelationRepo.replaceAll([{
+    id: 'relation-original', projectId: 'p1', projectBoqLineId: grouped.id, quotaItemId: 'q2',
+    quantityBasis: 'per_unit', quantityValue: 1, quotaSnapshot: { id: 'q2', name: '钢筋', unit: 't', priceTotal: 3000 },
+  }]);
+  const duplicate = await boqService.duplicateLine(grouped.id);
+  assert.notEqual(duplicate.id, grouped.id);
+  assert.equal(duplicate.copiedFromBoqLineId, grouped.id);
+  assert.equal((await repo.boqRepo.byProject('p1')).length, 2);
+  const duplicatedRelations = await repo.projectBoqQuotaRelationRepo.byBoqLine(duplicate.id);
+  assert.equal(duplicatedRelations.length, 1);
+  assert.notEqual(duplicatedRelations[0].id, 'relation-original');
   await repo.boqRepo.replaceAll([
     { id: 'risk1', projectId: 'p1', quotaItemId: '', name: '缺价项', unit: 'm²', qty: 0, factor: 1.3, unitPrice: 0, amount: 0 },
   ]);

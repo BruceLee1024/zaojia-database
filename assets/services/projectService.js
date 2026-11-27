@@ -7,6 +7,7 @@ import { dataEngineService } from './dataEngineService.js?v=6.15';
 import { archiveEligibility } from './projectWorkflow.js?v=6.15';
 import { versionService } from './versionService.js?v=6.15';
 import { recordProjectLifecycleEvent } from './projectLockService.js?v=6.15';
+import { normalizeSpecialty } from '../utils/specialty.js?v=6.15';
 
 export function normalizeProjectMetadata(data = {}) {
   const priceYear = String(data.priceYear || '').trim();
@@ -18,6 +19,7 @@ export function normalizeProjectMetadata(data = {}) {
     pricingRegion: normalizePricingRegion(data.pricingRegion),
     pricingDate: isLocalDate(data.pricingDate) ? data.pricingDate : '',
     stage: String(data.stage || '').trim(),
+    ...(data.specialty !== undefined ? { specialty: normalizeSpecialty(data.specialty) } : {}),
     priceYear: /^\d{4}$/.test(priceYear) ? priceYear : '',
     currency: normalizeCurrency(data.currency),
   };

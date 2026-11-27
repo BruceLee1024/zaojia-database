@@ -2,7 +2,7 @@ import { boqLibraryQuotaRelationRepo, boqLibraryRepo, quotaRepo } from '../data/
 import { uid } from '../utils/dom.js?v=6.15';
 import { categoryGuess } from '../utils/stats.js?v=6.15';
 import { quotaPriceStatus } from '../utils/costing.js?v=6.15';
-import { findDuplicateLibraryItem, normalizeLibraryItem } from './boqLibraryService.js?v=6.15&build=20261127';
+import { findDuplicateLibraryItem, normalizeLibraryItem } from './boqLibraryService.js?v=6.15&build=20261127r1';
 import { normalizeQuotaRelation, parseQuotaUnit, quotaSnapshot } from './boqQuotaRelationService.js?v=6.15';
 
 export function normalizeBundleLayer(value = '') {

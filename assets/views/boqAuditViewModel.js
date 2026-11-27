@@ -5,8 +5,15 @@ const RESOURCE_ISSUES = [
   ['duplicateEquipmentInstallation', '设备安装重复计取', '核对安装综合价与安装定额的重复范围。'],
 ];
 
+const BOQ_QUALITY_ISSUES = [
+  ['missingFeature', '项目特征缺失', '补充材质、规格、工艺要求等可复核的项目特征。'],
+  ['unitMismatch', '清单与定额单位不一致', '确认换算关系后再替换定额或调整清单单位。'],
+  ['unconfirmedQuotaQuantity', '定额用量待确认', '复核单位含量/总套用量，并在定额组成中确认。'],
+  ['priceDeviation', '单价偏离关联定额', '当前单价与关联定额相差 30% 以上；确认市场调整依据或修正单价。'],
+];
+
 export function buildQuoteAuditViewModel(serviceAudit = {}, aiAudit = {}) {
-  const resourceBlocks = RESOURCE_ISSUES.map(([key, title, action]) => {
+  const resourceBlocks = [...RESOURCE_ISSUES, ...BOQ_QUALITY_ISSUES].map(([key, title, action]) => {
     const lines = serviceAudit.issues?.[key] || [];
     return { key, title, action, lines, count: lines.length };
   });

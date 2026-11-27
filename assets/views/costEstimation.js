@@ -91,11 +91,11 @@ function costWorkspacePanel(context) {
   return costCoveragePanel(context);
 }
 
-function costCoveragePanel({ lines, summary, filtered, readOnly, currency }) {
-  return `<div role="tabpanel" aria-label="成本覆价" class="flex flex-1 min-h-0 flex-col">${costListPanel(filtered, lines, summary, currency, readOnly)}</div>`;
+function costCoveragePanel({ lines, settings, summary, filtered, readOnly, currency }) {
+  return `<div role="tabpanel" aria-label="成本覆价" class="flex flex-1 min-h-0 flex-col">${costListPanel(filtered, lines, settings, summary, currency, readOnly)}</div>`;
 }
 
-function costListPanel(filtered, lines, summary, currency, readOnly) {
+function costListPanel(filtered, lines, settings, summary, currency, readOnly) {
   return `<section class="rounded-lg border border-slate-200 bg-white flex flex-col flex-1 min-h-[260px] overflow-hidden">
     <div class="border-b border-slate-200 bg-slate-50 px-3 py-2.5 flex flex-col gap-2 shrink-0 lg:flex-row lg:items-center">
       <div class="relative min-w-0 lg:w-72"><span class="material-symbols-outlined icon-inline absolute left-3 top-2.5 text-slate-400" aria-hidden="true">search</span><input id="costSearch" value="${esc(state.keyword)}" type="search" class="h-9 w-full rounded border border-slate-300 bg-white pl-9 pr-3 text-sm" placeholder="搜索编码、名称或特征" aria-label="搜索成本测算清单" /></div>
@@ -109,7 +109,7 @@ function costListPanel(filtered, lines, summary, currency, readOnly) {
       <button id="costAiBatch" ${readOnly || !summary.missingCount ? 'disabled' : ''} class="h-9 px-3 brand-bg text-white text-sm inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-40"><span class="material-symbols-outlined text-[17px]" aria-hidden="true">auto_awesome</span>AI 批量覆价</button>
       <button id="costBatchFactor" ${readOnly ? 'disabled' : ''} class="h-9 px-3 border border-teal-300 bg-teal-50 text-teal-800 text-sm disabled:opacity-40">按投标价批量折算</button>
     </div>
-    ${costTable(filtered, currency, readOnly)}
+    ${costTable(filtered, currency, readOnly, settings.riskCostRatio)}
   </section>`;
 }
 
@@ -126,10 +126,12 @@ function profitPanel({ settings, summary, readOnly, currency }) {
     <section class="rounded-lg border border-slate-200 bg-white p-4 shrink-0">
       <div class="flex flex-col gap-3 xl:flex-row xl:items-end">
         <div class="min-w-[180px]"><h2 class="font-semibold text-slate-900">取费与调整</h2><p class="mt-1 text-xs text-slate-500">按当前已覆价直接成本实时计算。</p></div>
-        <div class="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        <div class="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
           ${settingInput('目标利润率', 'costTargetProfitRate', settings.targetProfitRate, '%', readOnly)}
           ${settingInput('税率', 'costTaxRate', settings.taxRate, '%', readOnly)}
           ${settingInput('措施及临设费', 'costMeasureRate', settings.measureRate, '%', readOnly)}
+          ${settingInput('偏薄预警线', 'costRiskCostRatio', settings.riskCostRatio, '%', readOnly)}
+          ${settingInput('投标价折算默认', 'costQuoteFactorRate', settings.quoteFactorRate, '%', readOnly)}
           ${settingInput('暂列及专业分包', 'costProvisional', settings.provisionalAmount, '', readOnly)}
           ${settingInput('其他成本', 'costOther', settings.otherAmount, '', readOnly)}
           ${settingInput('回收残值', 'costRecovery', settings.recoveryAmount, '扣减', readOnly)}
@@ -141,17 +143,18 @@ function profitPanel({ settings, summary, readOnly, currency }) {
   </div>`;
 }
 
-function riskPanel({ lines, summary, readOnly, currency }) {
-  const riskLines = lines.filter(line => line.costIncluded !== false && (!hasCostPrice(line) || line.costReviewStatus === 'pending' || (costBidRatio(line) ?? 0) > 0.9)).sort((a, b) => riskScore(b) - riskScore(a));
-  const thinCount = riskLines.filter(line => hasCostPrice(line) && line.costReviewStatus !== 'pending' && (costBidRatio(line) ?? 0) > 0.9).length;
+function riskPanel({ lines, settings, summary, readOnly, currency }) {
+  const riskRatio = Number(settings.riskCostRatio || 0) / 100;
+  const riskLines = lines.filter(line => line.costIncluded !== false && (!hasCostPrice(line) || line.costReviewStatus === 'pending' || (costBidRatio(line) ?? 0) > riskRatio)).sort((a, b) => riskScore(b) - riskScore(a));
+  const thinCount = riskLines.filter(line => hasCostPrice(line) && line.costReviewStatus !== 'pending' && (costBidRatio(line) ?? 0) > riskRatio).length;
   return `<div role="tabpanel" aria-label="风险复核" class="flex flex-1 min-h-0 flex-col gap-3">
     ${decisionPanel(summary, currency)}
     <section class="grid grid-cols-3 gap-3 shrink-0">
       ${metricCard('未覆价', summary.missingCount, money(summary.missingBidAmount, currency), 'warning', summary.missingCount ? 'amber' : 'teal')}
       ${metricCard('待复核', summary.pendingCount, money(summary.pendingBidAmount, currency), 'rule', summary.pendingCount ? 'amber' : 'teal')}
-      ${metricCard('成本偏薄或倒挂', thinCount, '直接成本占投标价超过 90%', 'trending_down', thinCount ? 'red' : 'teal')}
+      ${metricCard('成本偏薄或倒挂', thinCount, `直接成本占投标价超过 ${number(settings.riskCostRatio)}%`, 'trending_down', thinCount ? 'red' : 'teal')}
     </section>
-    <section class="rounded-lg border border-slate-200 bg-white flex flex-col flex-1 min-h-[260px] overflow-hidden"><div class="border-b border-slate-200 bg-slate-50 px-3 py-2.5 flex items-center gap-3"><div><h2 class="text-sm font-semibold text-slate-900">高风险清单</h2><p class="mt-0.5 text-xs text-slate-500">按未覆价、待复核及成本偏薄优先排列。</p></div><div class="flex-1"></div><span class="text-xs text-slate-500">${riskLines.length} 项</span><button data-cost-tab-jump="cost" class="h-9 border border-slate-300 bg-white px-3 text-sm text-slate-700">返回全部覆价</button></div>${costTable(riskLines, currency, readOnly)}</section>
+    <section class="rounded-lg border border-slate-200 bg-white flex flex-col flex-1 min-h-[260px] overflow-hidden"><div class="border-b border-slate-200 bg-slate-50 px-3 py-2.5 flex items-center gap-3"><div><h2 class="text-sm font-semibold text-slate-900">高风险清单</h2><p class="mt-0.5 text-xs text-slate-500">按未覆价、待复核及成本偏薄优先排列。</p></div><div class="flex-1"></div><span class="text-xs text-slate-500">${riskLines.length} 项</span><button data-cost-tab-jump="cost" class="h-9 border border-slate-300 bg-white px-3 text-sm text-slate-700">返回全部覆价</button></div>${costTable(riskLines, currency, readOnly, settings.riskCostRatio)}</section>
   </div>`;
 }
 
@@ -176,21 +179,21 @@ function sourceLabel(value) {
   return COST_SOURCE_OPTIONS.find(option => option.value === value)?.label || '未选择';
 }
 
-function costTable(lines, currency, readOnly) {
+function costTable(lines, currency, readOnly, riskCostRatio) {
   if (!lines.length) return '<div class="flex-1 grid place-items-center p-10 text-sm text-slate-400">没有符合筛选条件的清单项。</div>';
   return `
-    <div class="mobile-card-list overflow-auto p-3 space-y-3">${lines.map(line => mobileCostCard(line, currency, readOnly)).join('')}</div>
+    <div class="mobile-card-list overflow-auto p-3 space-y-3">${lines.map(line => mobileCostCard(line, currency, readOnly, riskCostRatio)).join('')}</div>
     <div class="mobile-table overflow-auto scroll-thin flex-1 min-h-0">
       <table class="w-full min-w-[1430px] text-sm table-fixed">
         <thead class="sticky top-0 z-10 bg-white text-left text-xs text-slate-500"><tr class="border-b border-slate-200">
           <th class="w-12 px-3 py-3 text-center">计入</th><th class="w-24 px-2">编码</th><th class="w-[280px] px-2">清单项目</th><th class="w-20 px-2 text-right">工程量</th><th class="w-28 px-2 text-right">投标单价</th><th class="w-32 px-2 text-right">投标合价</th><th class="w-32 px-2 text-right">内部成本单价</th><th class="w-32 px-2 text-right">成本合价</th><th class="w-28 px-2 text-right">成本/投标</th><th class="w-36 px-2">成本来源</th><th class="w-[280px] px-2">依据与风险备注</th>
         </tr></thead>
-        <tbody>${lines.map(line => tableRow(line, currency, readOnly)).join('')}</tbody>
+        <tbody>${lines.map(line => tableRow(line, currency, readOnly, riskCostRatio)).join('')}</tbody>
       </table>
     </div>`;
 }
 
-function tableRow(line, currency, readOnly) {
+function tableRow(line, currency, readOnly, riskCostRatio) {
   const provided = hasCostPrice(line);
   const excluded = line.costIncluded === false;
   const pending = line.costReviewStatus === 'pending';
@@ -205,13 +208,13 @@ function tableRow(line, currency, readOnly) {
     <td class="px-2 py-3 text-right tabular-nums font-medium">${money(line.amount, currency)}</td>
     <td class="px-2 py-2"><input data-cost-price="${esc(line.id)}" value="${provided ? esc(line.costUnitPrice) : ''}" type="number" step="0.01" ${readOnly || excluded ? 'disabled' : ''} class="h-9 w-full rounded border ${provided ? 'border-slate-300' : 'border-amber-300 bg-amber-50'} px-2 text-right tabular-nums disabled:bg-slate-100" aria-label="${esc(line.name)}内部成本单价" placeholder="待覆价" /></td>
     <td class="px-2 py-3 text-right tabular-nums font-semibold ${provided ? 'text-slate-900' : 'text-amber-700'}">${provided ? money(line.costAmount, currency) : '待覆价'}</td>
-    <td class="px-2 py-3 text-right">${ratioBadge(ratio)}</td>
+    <td class="px-2 py-3 text-right">${ratioBadge(ratio, riskCostRatio)}</td>
     <td class="px-2 py-2"><select data-cost-source="${esc(line.id)}" ${readOnly || excluded ? 'disabled' : ''} class="h-9 w-full rounded border border-slate-300 bg-white px-2 text-xs disabled:bg-slate-100"><option value="">选择来源</option>${COST_SOURCE_OPTIONS.map(option => `<option value="${option.value}" ${line.costSource === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}</select>${costSourceReferenceControl(line, readOnly || excluded)}</td>
     <td class="px-2 py-2"><input data-cost-note="${esc(line.id)}" value="${esc(line.costNote || '')}" ${readOnly || excluded ? 'disabled' : ''} class="h-9 w-full rounded border border-slate-300 px-2 text-xs disabled:bg-slate-100" placeholder="价格依据、日期、供应商或风险" aria-label="${esc(line.name)}成本依据与风险备注" /></td>
   </tr>`;
 }
 
-function mobileCostCard(line, currency, readOnly) {
+function mobileCostCard(line, currency, readOnly, riskCostRatio) {
   const provided = hasCostPrice(line);
   const excluded = line.costIncluded === false;
   const ratio = costBidRatio(line);
@@ -219,7 +222,7 @@ function mobileCostCard(line, currency, readOnly) {
     <div class="flex items-start gap-3"><label class="pt-1"><input data-cost-included="${esc(line.id)}" type="checkbox" ${excluded ? '' : 'checked'} ${readOnly ? 'disabled' : ''} /><span class="sr-only">计入测算</span></label><div class="min-w-0 flex-1"><div class="font-medium text-slate-900">${esc(line.name)}</div><div class="mt-1 text-xs text-slate-500">${esc(line.code || '未编码')} · ${number(line.qty)} ${esc(line.unit || '')}</div></div><div class="text-right"><div class="text-xs text-slate-400">投标合价</div><div class="mt-1 font-medium tabular-nums">${money(line.amount, currency)}</div></div></div>
     <div class="mt-3 grid grid-cols-2 gap-2"><label class="text-xs text-slate-500">内部成本单价<input data-cost-price="${esc(line.id)}" value="${provided ? esc(line.costUnitPrice) : ''}" type="number" step="0.01" ${readOnly || excluded ? 'disabled' : ''} class="mt-1 h-10 w-full rounded border border-slate-300 px-2 text-right" placeholder="待覆价" /></label><div><label class="text-xs text-slate-500">成本来源<select data-cost-source="${esc(line.id)}" ${readOnly || excluded ? 'disabled' : ''} class="mt-1 h-10 w-full rounded border border-slate-300 bg-white px-2"><option value="">选择来源</option>${COST_SOURCE_OPTIONS.map(option => `<option value="${option.value}" ${line.costSource === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}</select></label>${costSourceReferenceControl(line, readOnly || excluded)}</div></div>
     <label class="mt-2 block text-xs text-slate-500">依据与风险备注<input data-cost-note="${esc(line.id)}" value="${esc(line.costNote || '')}" ${readOnly || excluded ? 'disabled' : ''} class="mt-1 h-10 w-full rounded border border-slate-300 px-2" placeholder="价格依据、日期、供应商或风险" /></label>
-    <div class="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs"><span class="text-slate-500">成本合价</span><div class="flex items-center gap-2">${ratioBadge(ratio)}<strong class="text-sm tabular-nums ${provided ? 'text-slate-900' : 'text-amber-700'}">${provided ? money(line.costAmount, currency) : '待覆价'}</strong></div></div>
+    <div class="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs"><span class="text-slate-500">成本合价</span><div class="flex items-center gap-2">${ratioBadge(ratio, riskCostRatio)}<strong class="text-sm tabular-nums ${provided ? 'text-slate-900' : 'text-amber-700'}">${provided ? money(line.costAmount, currency) : '待覆价'}</strong></div></div>
   </article>`;
 }
 
@@ -231,8 +234,8 @@ function bindEvents(document, model) {
     render();
   };
   document.getElementById('costOpenBoq').onclick = () => window.__app.go('boq', { projectId: model.project.id });
-  document.getElementById('costExport').onclick = () => {
-    if (model.lines.length) exportCostEstimateExcel(model.project, model.lines, model.summary);
+  document.getElementById('costExport').onclick = async () => {
+    if (model.lines.length) await exportCostEstimateExcel(model.project, model.lines, model.summary);
   };
   if (!model.lines.length) {
     document.getElementById('costStartBoq')?.addEventListener('click', () => window.__app.go('boq', { projectId: model.project.id }));
@@ -256,6 +259,8 @@ function bindEvents(document, model) {
       targetProfitRate: document.getElementById('costTargetProfitRate').value,
       taxRate: document.getElementById('costTaxRate').value,
       measureRate: document.getElementById('costMeasureRate').value,
+      riskCostRatio: document.getElementById('costRiskCostRatio').value,
+      quoteFactorRate: document.getElementById('costQuoteFactorRate').value,
       provisionalAmount: document.getElementById('costProvisional').value,
       otherAmount: document.getElementById('costOther').value,
       recoveryAmount: document.getElementById('costRecovery').value,
@@ -263,7 +268,7 @@ function bindEvents(document, model) {
     toast('取费与调整参数已保存', 'success');
     await render();
   }));
-  document.getElementById('costBatchFactor')?.addEventListener('click', () => openFactorDialog(model.project.id, model.summary.missingCount));
+  document.getElementById('costBatchFactor')?.addEventListener('click', () => openFactorDialog(model.project.id, model.summary.missingCount, model.settings.quoteFactorRate));
   document.getElementById('costAiBatch')?.addEventListener('click', event => run(async () => {
     const button = event.currentTarget;
     button.disabled = true;
@@ -293,19 +298,19 @@ function bindEvents(document, model) {
     await run(async () => {
       await costEstimationService.updateLine(lineId, { costSource: source, costSourceRef: null });
       await render();
-      if (source && source !== 'manual') await openCostSourceReferenceDialog({ ...line, costSource: source, costSourceRef: null }, source, model.project);
+      if (source && source !== 'manual') await openCostSourceReferenceDialog({ ...line, costSource: source, costSourceRef: null }, source, model.project, model.settings);
     });
   });
   document.querySelectorAll('[data-cost-source-ref]').forEach(button => button.onclick = () => {
     const line = model.lines.find(item => item.id === button.dataset.costSourceRef);
-    if (line?.costSource) openCostSourceReferenceDialog(line, line.costSource, model.project);
+    if (line?.costSource) openCostSourceReferenceDialog(line, line.costSource, model.project, model.settings);
   });
   document.querySelectorAll('[data-cost-note]').forEach(input => input.onchange = event => updateLine(event.target.dataset.costNote, { costNote: event.target.value }));
   document.querySelectorAll('[data-cost-included]').forEach(input => input.onchange = event => updateLine(event.target.dataset.costIncluded, { costIncluded: event.target.checked }));
 }
 
 async function openAiCostSuggestions(model) {
-  const result = await costAiEstimationService.suggest(model.lines);
+  const result = await costAiEstimationService.suggest(model.lines, { quoteFactorRate: model.settings.quoteFactorRate });
   const rows = result.suggestions || [];
   if (!rows.length) return toast('当前没有可生成建议的未覆价清单', 'success');
   const currency = model.project.currency || 'CNY';
@@ -360,8 +365,8 @@ function aiCostSummary(label, value, suffix) {
 function confidenceText(value) { return ({ high: '高', medium: '中', low: '低' })[value] || '低'; }
 function confidenceBadge(value) { return value === 'high' ? 'badge-green' : value === 'medium' ? 'badge-gray' : 'badge-yellow'; }
 
-function openFactorDialog(projectId, missingCount) {
-  openModal('按投标价批量折算成本', `<div class="space-y-4 text-sm"><div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">折算价只是快速起点，系统会将结果标记为“待复核”，不能替代材料、分包和历史成本依据。</div><label class="block">成本占投标综合单价比例<div class="mt-1 flex"><input id="costFactorPercent" type="number" min="1" max="200" step="0.1" value="85" class="h-10 min-w-0 flex-1 rounded-l border border-slate-300 px-3 text-right" /><span class="grid h-10 w-10 place-items-center rounded-r border border-l-0 border-slate-300 bg-slate-50">%</span></div></label><label class="flex items-center gap-2"><input id="costFactorOnlyMissing" type="checkbox" checked />仅填充当前 ${missingCount} 条未覆价清单</label></div>`, `<button onclick="window.__modalClose()" class="h-9 px-3 border border-slate-300 bg-white text-sm">取消</button><button id="costConfirmFactor" class="h-9 px-4 brand-bg text-white text-sm">应用折算</button>`);
+function openFactorDialog(projectId, missingCount, defaultRate) {
+  openModal('按投标价批量折算成本', `<div class="space-y-4 text-sm"><div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">折算价只是快速起点，系统会将结果标记为“待复核”，不能替代材料、分包和历史成本依据。</div><label class="block">成本占投标综合单价比例<div class="mt-1 flex"><input id="costFactorPercent" type="number" min="1" max="200" step="0.1" value="${esc(defaultRate)}" class="h-10 min-w-0 flex-1 rounded-l border border-slate-300 px-3 text-right" /><span class="grid h-10 w-10 place-items-center rounded-r border border-l-0 border-slate-300 bg-slate-50">%</span></div></label><label class="flex items-center gap-2"><input id="costFactorOnlyMissing" type="checkbox" checked />仅填充当前 ${missingCount} 条未覆价清单</label></div>`, `<button onclick="window.__modalClose()" class="h-9 px-3 border border-slate-300 bg-white text-sm">取消</button><button id="costConfirmFactor" class="h-9 px-4 brand-bg text-white text-sm">应用折算</button>`);
   document.getElementById('costConfirmFactor').onclick = () => run(async () => {
     const ratio = Number(document.getElementById('costFactorPercent').value) / 100;
     const onlyMissing = document.getElementById('costFactorOnlyMissing').checked;
@@ -430,11 +435,11 @@ function costBidRatio(line) {
   return costAmount / Number(line.amount);
 }
 
-function ratioBadge(ratio) {
+function ratioBadge(ratio, riskCostRatio = 90) {
   if (ratio === null || !Number.isFinite(ratio)) return '<span class="text-xs text-slate-400">-</span>';
   const label = percent(ratio);
   if (ratio > 1) return `<span class="badge badge-red" title="内部成本高于投标合价">倒挂 ${label}</span>`;
-  if (ratio > 0.9) return `<span class="badge badge-yellow" title="未考虑其他取费前，直接成本已超过投标合价的 90%">偏薄 ${label}</span>`;
+  if (ratio > Number(riskCostRatio || 90) / 100) return `<span class="badge badge-yellow" title="未考虑其他取费前，直接成本已超过投标合价的 ${number(riskCostRatio)}%">偏薄 ${label}</span>`;
   return `<span class="text-xs tabular-nums text-slate-600">${label}</span>`;
 }
 
@@ -444,10 +449,10 @@ function costSourceReferenceControl(line, disabled) {
   return `<button type="button" data-cost-source-ref="${esc(line.id)}" ${disabled ? 'disabled' : ''} title="${esc(reference?.detail || '选择可追溯的数据依据')}" class="mt-1 block w-full truncate text-left text-[11px] ${reference ? 'text-teal-700 hover:underline' : 'text-amber-700 hover:underline'} disabled:text-slate-400">${reference ? `已引用 · ${esc(reference.label)}` : '选择具体依据'}</button>`;
 }
 
-async function openCostSourceReferenceDialog(line, source, project) {
+async function openCostSourceReferenceDialog(line, source, project, settings = {}) {
   if (source === 'subcontract') return openSubcontractReferenceDialog(line);
   if (source === 'control_price_discount') return openControlPriceDiscountDialog(line, project);
-  if (source === 'quote_factor') return openSingleFactorReferenceDialog(line);
+  if (source === 'quote_factor') return openSingleFactorReferenceDialog(line, settings.quoteFactorRate);
   const references = await costSourceReferenceService.list(line, source);
   const sourceLabel = COST_SOURCE_OPTIONS.find(option => option.value === source)?.label || '成本来源';
   const referenceTip = source === 'enterprise_quota'
@@ -501,8 +506,8 @@ function openSubcontractReferenceDialog(line) {
   };
 }
 
-function openSingleFactorReferenceDialog(line) {
-  openModal('按投标价折算本项成本', `<div class="space-y-3 text-sm"><div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">折算价只是快速起点，会标记为“待复核”。</div><label>成本占投标综合单价比例<div class="mt-1 flex"><input id="costRefFactor" type="number" min="1" max="200" step="0.1" value="85" class="h-10 min-w-0 flex-1 rounded-l border border-slate-300 px-3 text-right" /><span class="grid h-10 w-10 place-items-center rounded-r border border-l-0 border-slate-300 bg-slate-50">%</span></div></label><div class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">投标单价 ${money(line.unitPrice, 'CNY')}</div></div>`, `<button onclick="window.__modalClose()" class="h-9 border border-slate-300 bg-white px-3 text-sm">取消</button><button id="costRefApplyFactor" class="h-9 brand-bg px-4 text-sm text-white">应用折算</button>`);
+function openSingleFactorReferenceDialog(line, defaultRate = 85) {
+  openModal('按投标价折算本项成本', `<div class="space-y-3 text-sm"><div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">折算价只是快速起点，会标记为“待复核”。</div><label>成本占投标综合单价比例<div class="mt-1 flex"><input id="costRefFactor" type="number" min="1" max="200" step="0.1" value="${esc(defaultRate)}" class="h-10 min-w-0 flex-1 rounded-l border border-slate-300 px-3 text-right" /><span class="grid h-10 w-10 place-items-center rounded-r border border-l-0 border-slate-300 bg-slate-50">%</span></div></label><div class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">投标单价 ${money(line.unitPrice, 'CNY')}</div></div>`, `<button onclick="window.__modalClose()" class="h-9 border border-slate-300 bg-white px-3 text-sm">取消</button><button id="costRefApplyFactor" class="h-9 brand-bg px-4 text-sm text-white">应用折算</button>`);
   document.getElementById('costRefApplyFactor').onclick = async () => {
     const percentValue = Number(document.getElementById('costRefFactor').value);
     if (!Number.isFinite(percentValue) || percentValue <= 0 || percentValue > 200) return toast('折算比例必须大于 0 且不超过 200%', 'error');

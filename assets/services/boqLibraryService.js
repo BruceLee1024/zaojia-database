@@ -1,6 +1,6 @@
 // 独立清单库：标准清单条目维护与套用到项目
 import { boqLibraryQuotaRelationRepo, boqLibraryRepo, boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.15';
-import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.15&build=20261127';
+import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.15&build=20261127r1';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.15';
 import { uid } from '../utils/dom.js?v=6.15';
 import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.15';
@@ -52,7 +52,7 @@ export const boqLibraryService = {
       const relationIds = quotaRelations.map(relation => relation.quotaItemId).filter(Boolean);
       const quotaItemIds = relationIds.length ? [...new Set(relationIds)] : (item.quotaItemIds || []);
       const composition = calculateQuotaRelations(quotaRelations, item.defaultQty);
-      return { ...item, quotaItemIds, quotaRelations, quotaCount: quotaRelations.length || quotaItemIds.length, referenceUnitPrice: composition.unitPrice };
+      return { ...item, quotaItemIds, quotaRelations, quotaCount: quotaRelations.length || quotaItemIds.length, referenceUnitPrice: composition.unitPrice, referenceBreakdown: composition.breakdown };
     }).filter(item => {
       if (major && item.major !== major) return false;
       if (code && !clean(item.code).includes(code)) return false;
@@ -66,7 +66,8 @@ export const boqLibraryService = {
     const item = await boqLibraryRepo.findById(id);
     if (!item) return null;
     const quotaRelations = await boqQuotaRelationService.libraryRelations(id);
-    return { ...item, quotaRelations, quotaItemIds: [...new Set(quotaRelations.map(row => row.quotaItemId).filter(Boolean))], quotaCount: quotaRelations.length, referenceUnitPrice: calculateQuotaRelations(quotaRelations, item.defaultQty).unitPrice };
+    const composition = calculateQuotaRelations(quotaRelations, item.defaultQty);
+    return { ...item, quotaRelations, quotaItemIds: [...new Set(quotaRelations.map(row => row.quotaItemId).filter(Boolean))], quotaCount: quotaRelations.length, referenceUnitPrice: composition.unitPrice, referenceBreakdown: composition.breakdown };
   },
   async options(field) {
     return [...new Set((await boqLibraryRepo.all()).map(item => clean(item[field])).filter(Boolean))].sort();
@@ -119,7 +120,7 @@ export const boqLibraryService = {
     const rows = await parseExcel(file);
     return this.importRows(rows.map(rowToBoqLibraryItem));
   },
-  async importRows(rows = []) {
+  async importRows(rows = [], { updateExisting = true } = {}) {
     const [originalItems, quotas, originalRelations] = await Promise.all([boqLibraryRepo.all(), quotaRepo.all(), boqLibraryQuotaRelationRepo.all()]);
     const items = originalItems.map(item => ({ ...item }));
     const updatedRelations = new Map();
@@ -145,6 +146,13 @@ export const boqLibraryService = {
         issues.push({ severity: 'warning', code: 'unmatched_quota_refs', message });
       }
       const existing = findDuplicateLibraryItem(items, item);
+      if (existing && !updateExisting) {
+        const message = `与已有清单“${existing.code || existing.name}”身份相同，已跳过更新`;
+        result.skipped++;
+        result.warnings.push(`${location} ${message}`);
+        result.rows.push({ index, status: 'skipped', issues: [...issues, { severity: 'warning', message }] });
+        return;
+      }
       const replaceRelations = refs.length > 0 && !unmatched.length;
       item.quotaItemIds = replaceRelations ? [...new Set(matched.map(quota => quota.id))] : existing?.quotaItemIds || [];
       if (existing) { Object.assign(existing, { ...item, id: existing.id, createdAt: existing.createdAt }); result.updated++; }

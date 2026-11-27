@@ -2,19 +2,22 @@
 import { quotaService } from '../services/quotaService.js?v=6.15';
 import { boqService } from '../services/boqService.js?v=6.15';
 import { fmtMoney, esc, $, openModal, closeModal, toast, scopedDom } from '../utils/dom.js?v=6.15';
-import { exportQuotaExcel, exportQuotaTemplate } from '../data/excel.js?v=6.15';
+import { exportQuotaLibraryExcel, exportQuotaTemplate } from '../data/excel.js?v=6.15&build=20260818f';
 import { hasMissingPrice, quotaPriceStatus } from '../utils/costing.js?v=6.15';
 import { BREAKDOWN_KEYS, compositionPanelShell, normalizeBreakdown, parseQuotaBreakdownInputValues } from './quotaResourceComposition.js?v=6.15';
 import { mountQuotaResourceComposition } from './quotaResourceCompositionPanel.js?v=6.15';
+import { BUILTIN_SPECIALTIES } from '../utils/specialty.js?v=6.15';
 
 const BREAKDOWN_COLORS = ['bg-blue-600', 'bg-emerald-500', 'bg-cyan-600', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-rose-400'];
-const filterState = { keyword: '', category: '', unit: '', priceStatus: '' };
+const QUOTA_PAGE_SIZE = 20;
+const filterState = { keyword: '', category: '', specialty: '', unit: '', priceStatus: '', page: 1 };
 let editorState = { selectedId: '', modalItem: null };
 let lastRows = [];
 
 const emptyQuota = () => ({
   id: '',
   category: '',
+  specialty: '',
   name: '',
   feature: '',
   work: '',
@@ -51,28 +54,37 @@ function exposeQuotaActions() {
     clearFilters: () => {
       filterState.keyword = '';
       filterState.category = '';
+      filterState.specialty = '';
       filterState.unit = '';
       filterState.priceStatus = '';
+      filterState.page = 1;
       render();
     },
     showMissing: () => {
       filterState.priceStatus = 'missing';
+      filterState.page = 1;
       render();
     },
-    exportExcel: () => exportQuotaExcel(lastRows),
+    setPage: page => {
+      filterState.page = Math.max(1, Number(page) || 1);
+      renderList();
+    },
+    exportLibrary: () => exportLibrary(),
   };
 }
 
-export async function render(workspace = document.getElementById('workspace')) {
+export async function render(workspace = document.getElementById('workspace'), { preserveSelection = false } = {}) {
   const params = window.__app?.state?.routeParams || {};
-  if (!params.selectedId && !(Array.isArray(params.quotaItemIds) && params.quotaItemIds[0])) editorState.selectedId = '';
+  if (!preserveSelection && !params.selectedId && !(Array.isArray(params.quotaItemIds) && params.quotaItemIds[0])) editorState.selectedId = '';
   if (params.keyword != null) filterState.keyword = params.keyword;
   if (params.priceStatus != null) filterState.priceStatus = params.priceStatus;
-  if (params.selectedId) editorState.selectedId = params.selectedId;
-  if (!params.selectedId && Array.isArray(params.quotaItemIds) && params.quotaItemIds[0]) editorState.selectedId = params.quotaItemIds[0];
+  const routedSelection = params.selectedId || (Array.isArray(params.quotaItemIds) ? params.quotaItemIds[0] : '');
+  if (routedSelection) editorState.selectedId = routedSelection;
+  else if (!preserveSelection) editorState.selectedId = '';
   const routeNotice = quotaRouteNotice(params);
-  const [cats, units, allRows] = await Promise.all([
+  const [cats, specialties, units, allRows] = await Promise.all([
     quotaService.categories(),
+    quotaService.specialties(),
     quotaService.units(),
     quotaService.list(),
   ]);
@@ -93,6 +105,10 @@ export async function render(workspace = document.getElementById('workspace')) {
             <option value="">全部分类</option>
             ${cats.map(c => `<option value="${esc(c)}" ${filterState.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
           </select>
+          <select id="qSpecialty" class="h-10 min-w-[130px] border border-slate-300 bg-white px-2 text-sm">
+            <option value="">全部专业</option>
+            ${[...new Set([...BUILTIN_SPECIALTIES, ...specialties])].map(value => `<option value="${esc(value)}" ${filterState.specialty === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}
+          </select>
           <select id="qUnit" class="h-10 min-w-[110px] border border-slate-300 bg-white px-2 text-sm">
             <option value="">全部单位</option>
             ${units.map(u => `<option value="${esc(u)}" ${filterState.unit === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}
@@ -102,7 +118,7 @@ export async function render(workspace = document.getElementById('workspace')) {
             <option value="priced" ${filterState.priceStatus === 'priced' ? 'selected' : ''}>已有单价</option>
             <option value="missing" ${filterState.priceStatus === 'missing' ? 'selected' : ''}>缺单价</option>
           </select>
-          <button onclick="window.__quota.clearFilters()" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button id="btnTpl" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">下载模板</button><button id="btnExport" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">导出 Excel</button><button id="btnImport" class="h-10 px-3 text-sm border border-teal-300 bg-white text-teal-700">导入 Excel</button><button onclick="window.__quota.newItem()" class="h-10 px-4 text-sm brand-bg text-white">新增定额</button></div>
+          <button onclick="window.__quota.clearFilters()" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">清除筛选</button><span class="library-toolbar-divider" aria-hidden="true"></span><button id="btnTpl" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">下载模板</button><button id="btnExport" class="h-10 px-3 text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">导出定额库</button><button id="btnImport" class="h-10 px-3 text-sm border border-teal-300 bg-white text-teal-700">导入 Excel</button><button onclick="window.__quota.newItem()" class="h-10 px-4 text-sm brand-bg text-white">新增定额</button></div>
         </div>
       </section>
 
@@ -122,7 +138,7 @@ export async function render(workspace = document.getElementById('workspace')) {
             <table class="w-full text-sm table-fixed">
               <thead>
                 <tr class="text-left border-b">
-                  <th class="py-2.5 px-3 w-36">分类</th>
+                  <th class="py-2.5 px-3 w-28">专业</th><th class="py-2.5 px-3 w-32">分类</th>
                   <th class="px-3 w-52">清单名称</th>
                   <th class="px-3">项目特征</th>
                   <th class="px-3 w-16">单位</th>
@@ -136,21 +152,32 @@ export async function render(workspace = document.getElementById('workspace')) {
           <div id="qPager" class="px-4 py-3 border-t border-slate-200 bg-white shrink-0"></div>
         </section>
 
-        <aside id="quotaInspector" class="library-detail-pane"></aside>
+        ${editorState.selectedId ? '<aside id="quotaInspector" class="library-detail-pane"></aside>' : ''}
       </div>
 
       <section id="quotaBottom" class="grid grid-cols-3 gap-4 shrink-0"></section>
     </div>
   `;
 
-  $('#qKw', workspace).oninput = e => { filterState.keyword = e.target.value; renderList(workspace); };
-  $('#qCat', workspace).onchange = e => { filterState.category = e.target.value; renderList(workspace); };
-  $('#qUnit', workspace).onchange = e => { filterState.unit = e.target.value; renderList(workspace); };
-  $('#qPrice', workspace).onchange = e => { filterState.priceStatus = e.target.value; renderList(workspace); };
+  $('#qKw', workspace).oninput = e => { filterState.keyword = e.target.value; filterState.page = 1; renderList(workspace); };
+  $('#qCat', workspace).onchange = e => { filterState.category = e.target.value; filterState.page = 1; renderList(workspace); };
+  $('#qSpecialty', workspace).onchange = e => { filterState.specialty = e.target.value; filterState.page = 1; renderList(workspace); };
+  $('#qUnit', workspace).onchange = e => { filterState.unit = e.target.value; filterState.page = 1; renderList(workspace); };
+  $('#qPrice', workspace).onchange = e => { filterState.priceStatus = e.target.value; filterState.page = 1; renderList(workspace); };
   $('#btnImport', workspace).onclick = importExcel;
-  $('#btnTpl', workspace).onclick = exportQuotaTemplate;
-  $('#btnExport', workspace).onclick = () => exportQuotaExcel(lastRows);
+  $('#btnTpl', workspace).onclick = () => exportQuotaTemplate().catch(error => toast(error.message || '模板下载失败', 'error'));
+  $('#btnExport', workspace).onclick = exportLibrary;
   await renderList(workspace);
+}
+
+async function exportLibrary() {
+  try {
+    const rows = await quotaService.list();
+    await exportQuotaLibraryExcel(rows);
+    toast(`已导出 ${rows.length} 条定额（含专业和人材机拆分）`, 'success');
+  } catch (error) {
+    toast(error?.message || '定额库导出失败', 'error');
+  }
 }
 
 export function quotaRouteNotice(params = {}) {
@@ -164,13 +191,16 @@ async function renderList(workspace = document.getElementById('workspace')) {
   const [rows, allRows] = await Promise.all([quotaService.list(filterState), quotaService.list()]);
   lastRows = rows;
   if (editorState.selectedId && !rows.some(row => row.id === editorState.selectedId)) editorState.selectedId = '';
+  const pagination = paginateQuotas(rows, filterState.page);
+  filterState.page = pagination.page;
 
   document.getElementById('quotaKpis').innerHTML = kpiStrip(allRows);
-  document.getElementById('qCount').textContent = `显示 ${rows.length} / ${allRows.length} 条，最多展示前 500 条`;
-  document.getElementById('qList').innerHTML = quotaRows(rows);
-  document.getElementById('qMobileList').innerHTML = quotaMobileCards(rows);
-  document.getElementById('qPager').innerHTML = pager(rows);
-  document.getElementById('quotaInspector').innerHTML = inspector(selectedItem());
+  document.getElementById('qCount').textContent = rows.length ? `显示 ${pagination.start}-${pagination.end} / ${allRows.length} 条` : `显示 0 / ${allRows.length} 条`;
+  document.getElementById('qList').innerHTML = quotaRows(pagination.rows);
+  document.getElementById('qMobileList').innerHTML = quotaMobileCards(pagination.rows);
+  document.getElementById('qPager').innerHTML = pager(pagination);
+  const inspectorEl = document.getElementById('quotaInspector');
+  if (inspectorEl) inspectorEl.innerHTML = inspector(selectedItem());
   const split = document.getElementById('quotaSplit');
   split?.classList.toggle('library-split--detail', Boolean(editorState.selectedId));
   split?.classList.toggle('library-split--list-only', !editorState.selectedId);
@@ -179,15 +209,15 @@ async function renderList(workspace = document.getElementById('workspace')) {
 }
 
 function quotaRows(rows) {
-  const visible = rows.slice(0, 500);
-  if (!visible.length) {
-    return `<tr><td colspan="6" class="py-12 text-center text-slate-400">没有匹配的定额条目。可调整筛选条件，或点击「导入 Excel」上传定额库。</td></tr>`;
+  if (!rows.length) {
+    return `<tr><td colspan="7" class="py-12 text-center text-slate-400">没有匹配的定额条目。可调整筛选条件，或点击「导入 Excel」上传定额库。</td></tr>`;
   }
-  return visible.map(it => {
+  return rows.map(it => {
     const active = editorState.selectedId === it.id;
     const missing = isQuotaMissing(it);
     return `
       <tr class="border-b border-slate-100 cursor-pointer ${active ? 'bg-teal-50/80 shadow-[inset_3px_0_0_#0f766e]' : 'hover:bg-slate-50'}" onclick="window.__quota.select('${it.id}')">
+        <td class="py-2.5 px-3"><span class="badge badge-gray">${esc(it.specialty || '通用')}</span></td>
         <td class="py-2.5 px-3"><span class="badge badge-blue">${esc(it.category || '未分类')}</span></td>
         <td class="px-3 font-semibold text-slate-800 truncate" title="${esc(it.name)}">${esc(it.name)}</td>
         <td class="px-3 text-slate-600 truncate" title="${esc(it.feature || '')}">${esc(it.feature || '-')}</td>
@@ -200,33 +230,64 @@ function quotaRows(rows) {
 }
 
 function quotaMobileCards(rows) {
-  const visible = rows.slice(0, 500);
-  if (!visible.length) return '<div class="px-5 py-12 text-center text-sm text-slate-400">没有匹配的定额条目。请调整筛选条件，或导入定额库。</div>';
-  return visible.map(it => {
+  if (!rows.length) return '<div class="px-5 py-12 text-center text-sm text-slate-400">没有匹配的定额条目。请调整筛选条件，或导入定额库。</div>';
+  return rows.map(it => {
     const missing = isQuotaMissing(it);
     return `<button type="button" class="w-full px-4 py-3 text-left hover:bg-teal-50/50" data-mobile-quota="${esc(it.id)}">
-      <div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="badge badge-blue">${esc(it.category || '未分类')}</span>${priceBadge(it)}</div><div class="mt-2 truncate font-semibold text-slate-900">${esc(it.name || '未命名定额')}</div><div class="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">${esc(it.feature || '未填写项目特征')}</div></div><div class="shrink-0 text-right"><div class="text-xs text-slate-500">${esc(it.unit || '-')}</div><div class="mt-2 font-semibold tabular-nums ${missing ? 'text-amber-700' : 'text-slate-900'}">${missing ? '待补价' : fmtMoney(it.priceTotal)}</div><span class="material-symbols-outlined mt-2 text-slate-400" aria-hidden="true">chevron_right</span></div></div>
+      <div class="flex items-start gap-3"><div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="badge badge-gray">${esc(it.specialty || '通用')}</span><span class="badge badge-blue">${esc(it.category || '未分类')}</span>${priceBadge(it)}</div><div class="mt-2 truncate font-semibold text-slate-900">${esc(it.name || '未命名定额')}</div><div class="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">${esc(it.feature || '未填写项目特征')}</div></div><div class="shrink-0 text-right"><div class="text-xs text-slate-500">${esc(it.unit || '-')}</div><div class="mt-2 font-semibold tabular-nums ${missing ? 'text-amber-700' : 'text-slate-900'}">${missing ? '待补价' : fmtMoney(it.priceTotal)}</div><span class="material-symbols-outlined mt-2 text-slate-400" aria-hidden="true">chevron_right</span></div></div>
     </button>`;
   }).join('');
 }
 
-function pager(rows) {
+export function paginateQuotas(rows = [], page = 1, pageSize = QUOTA_PAGE_SIZE) {
+  const total = Array.isArray(rows) ? rows.length : 0;
+  const safeSize = Math.max(1, Number(pageSize) || QUOTA_PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / safeSize));
+  const safePage = Math.min(totalPages, Math.max(1, Number(page) || 1));
+  const startIndex = (safePage - 1) * safeSize;
+  return {
+    total,
+    page: safePage,
+    totalPages,
+    start: total ? startIndex + 1 : 0,
+    end: Math.min(total, startIndex + safeSize),
+    rows: rows.slice(startIndex, startIndex + safeSize),
+  };
+}
+
+function pager({ total, page, totalPages, start, end }) {
+  const pageButtons = quotaPageTokens(page, totalPages)
+    .map(value => value === 'ellipsis'
+      ? '<span aria-hidden="true">...</span>'
+      : `<button onclick="window.__quota.setPage(${value})" class="h-7 min-w-7 px-1 rounded ${value === page ? 'bg-teal-700 text-white' : 'border border-slate-200 bg-white text-slate-600'}">${value}</button>`)
+    .join('');
   return `
     <div class="flex items-center gap-3 text-xs text-slate-500">
-      <span>共 ${rows.length} 条</span>
+      <span>共 ${start && end ? `${start}-${end} / ` : ''}${total} 条</span>
       <span class="rounded border border-slate-200 bg-slate-50 px-2 py-1">20 条/页</span>
       <div class="flex-1"></div>
-      <button class="h-7 w-7 rounded border border-slate-200 text-slate-400" disabled>‹</button>
-      <span class="h-7 w-7 rounded bg-teal-700 text-white flex items-center justify-center">1</span>
-      <button class="h-7 w-7 rounded border border-slate-200 bg-white text-slate-600">2</button>
-      <button class="h-7 w-7 rounded border border-slate-200 bg-white text-slate-600">3</button>
-      <span>...</span>
-      <button class="h-7 w-7 rounded border border-slate-200 bg-white text-slate-600">›</button>
+      <button onclick="window.__quota.setPage(${page - 1})" class="h-7 w-7 rounded border border-slate-200 ${page <= 1 ? 'text-slate-400' : 'bg-white text-slate-600'}" ${page <= 1 ? 'disabled' : ''}>‹</button>
+      ${pageButtons}${totalPages > 3 ? '<span>...</span>' : ''}
+      <button onclick="window.__quota.setPage(${page + 1})" class="h-7 w-7 rounded border border-slate-200 ${page >= totalPages ? 'text-slate-400' : 'bg-white text-slate-600'}" ${page >= totalPages ? 'disabled' : ''}>›</button>
       <span>前往</span>
-      <span class="h-7 w-10 rounded border border-slate-200 bg-white flex items-center justify-center">1</span>
+      <input value="${page}" min="1" max="${totalPages}" onchange="window.__quota.setPage(this.value)" type="number" class="h-7 w-10 rounded border border-slate-200 bg-white text-center" aria-label="前往页码" />
       <span>页</span>
     </div>
   `;
+}
+
+export function quotaPageTokens(page, totalPages) {
+  const total = Math.max(1, Number(totalPages) || 1);
+  const current = Math.min(total, Math.max(1, Number(page) || 1));
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+  const tokens = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) tokens.push('ellipsis');
+  for (let value = start; value <= end; value += 1) tokens.push(value);
+  if (end < total - 1) tokens.push('ellipsis');
+  tokens.push(total);
+  return tokens;
 }
 
 function kpiStrip(rows) {
@@ -452,13 +513,7 @@ function selectedItem() {
 
 async function selectQuota(id) {
   editorState.selectedId = id;
-  const split = document.getElementById('quotaSplit');
-  split?.classList.add('library-split--detail');
-  split?.classList.remove('library-split--list-only');
-  document.getElementById('qList').innerHTML = quotaRows(lastRows);
-  document.getElementById('qMobileList').innerHTML = quotaMobileCards(lastRows);
-  document.getElementById('quotaInspector').innerHTML = inspector(selectedItem());
-  document.querySelectorAll('[data-mobile-quota]').forEach(button => button.onclick = () => selectQuota(button.dataset.mobileQuota));
+  await render(document.getElementById('workspace'), { preserveSelection: true });
   if (window.matchMedia('(max-width: 767px)').matches) openModal('定额详情', inspector(selectedItem()));
 }
 
@@ -555,9 +610,14 @@ function quotaForm(it) {
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="mb-3 font-semibold text-slate-900">基础信息</div>
         <div class="grid grid-cols-4 gap-3">
+          <datalist id="quotaSpecialties">${BUILTIN_SPECIALTIES.map(value => `<option value="${esc(value)}"></option>`).join('')}</datalist>
           <label class="block">
             <span class="text-xs font-medium text-slate-500">定额编码</span>
             <input id="qf_code" class="mt-1 h-10 w-full border bg-slate-50 px-3 text-sm" value="${esc(it.code || '')}" />
+          </label>
+          <label class="block">
+            <span class="text-xs font-medium text-slate-500">专业</span>
+            <input id="qf_specialty" list="quotaSpecialties" class="mt-1 h-10 w-full border bg-slate-50 px-3 text-sm" placeholder="可自定义；留空为通用" value="${esc(it.specialty || '')}" />
           </label>
           <label class="block">
             <span class="text-xs font-medium text-slate-500">分类</span>
@@ -802,6 +862,7 @@ function syncModalDraft() {
   const it = editorState.modalItem || emptyQuota();
   const val = id => document.getElementById(id)?.value;
   it.category = (val('qf_cat') || '').trim();
+  it.specialty = (val('qf_specialty') || '').trim();
   it.code = (val('qf_code') || '').trim();
   it.unit = (val('qf_unit') || '').trim();
   it.priceTotal = parseFloat(val('qf_price')) || 0;
@@ -836,6 +897,7 @@ async function saveFromModal() {
   const saved = await quotaService.save({
     id: it.id || null,
     category: it.category || '',
+    specialty: it.specialty || '',
     name: it.name,
     feature: it.feature || '',
     work: it.work || '',

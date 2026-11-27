@@ -8,10 +8,11 @@ import { searchAll } from './globalSearchService.js?v=6.15';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.15';
 import { categoryGuess } from '../utils/stats.js?v=6.15';
 import { buildImportMapping } from './importMappingService.js?v=6.15';
+import { effectiveSpecialty, specialtyRank, specialtyMatchLabel } from '../utils/specialty.js?v=6.15';
 
 export async function suggestBoqLine(line = {}, context = {}) {
   const quotas = context.quotas || await quotaRepo.all();
-  const candidates = rankQuotas(quotas, line).slice(0, 5);
+  const candidates = rankQuotas(quotas, { ...line, specialty: effectiveSpecialty(line, context.project) }).slice(0, 5);
   const best = candidates[0] || null;
   const unit = line.unit || best?.unit || inferUnit(line.name, line.feature);
   const feature = line.feature || inferFeature(line.name, context.project);
@@ -40,7 +41,7 @@ export async function suggestBoqDraft(project = {}, brief = '', options = {}) {
   const quotas = await quotaRepo.all();
   if (!quotas.length) return wrap({ source: 'local', confidence: 'low', summary: '当前定额库为空，暂无法生成可核验的清单草稿。', suggestions: [], warnings: ['请先导入或建立常用定额库。'] });
   const contextText = [project.name, project.type, project.structure, project.process, description].filter(Boolean).join(' ');
-  const candidates = rankQuotas(quotas, { name: contextText, feature: description })
+  const candidates = rankQuotas(quotas, { name: contextText, feature: description, specialty: project.specialty })
     .slice(0, 40)
     .map(item => ({
       quotaId: item.id,
@@ -51,7 +52,7 @@ export async function suggestBoqDraft(project = {}, brief = '', options = {}) {
       unitPrice: Number(item.priceTotal || 0),
       score: Number(item.score || 0),
       confidence: item.score >= 5 ? 'high' : item.score >= 3 ? 'medium' : 'low',
-      reason: `与项目描述的关键词匹配得分 ${item.score.toFixed(1)}`,
+      reason: `${specialtyMatchLabel(item, project.specialty)}；关键词匹配得分 ${item.score.toFixed(1)}`,
       apply: item.score >= 3,
     }));
   const local = wrap({
@@ -429,13 +430,13 @@ function rankQuotas(quotas, line) {
   const source = `${line?.name || ''} ${line?.feature || ''}`.trim().toLowerCase();
   const words = source.split(/[\s,，;；、/]+/).filter(word => word.length > 1);
   return quotas.map(item => {
-    const blob = `${item.name || ''} ${item.feature || ''} ${(item.tags || []).join(' ')} ${item.category || ''}`.toLowerCase();
+    const blob = `${item.name || ''} ${item.feature || ''} ${(item.tags || []).join(' ')} ${item.category || ''} ${item.specialty || ''}`.toLowerCase();
     const exact = source && blob.includes(source) ? 4 : 0;
     const wordScore = words.reduce((sum, word) => sum + (blob.includes(word) ? 1 : 0), 0);
     const unitScore = item.unit && line?.unit && item.unit === line.unit ? 1.5 : 0;
     const priceScore = hasMissingPrice(item.priceTotal) ? -1 : 1;
-    return { ...item, score: exact + wordScore + unitScore + priceScore };
-  }).filter(item => item.score > 0).sort((a, b) => b.score - a.score);
+    return { ...item, score: exact + wordScore + unitScore + priceScore, specialtyScore: specialtyRank(item, line?.specialty) };
+  }).filter(item => item.score > 0).sort((a, b) => b.specialtyScore - a.specialtyScore || b.score - a.score);
 }
 
 function categoryAverage(lines, line) {

@@ -17,6 +17,8 @@ export const DEFAULT_COST_SETTINGS = Object.freeze({
   taxRate: 9,
   measureRate: 2,
   targetProfitRate: 8,
+  riskCostRatio: 90,
+  quoteFactorRate: 85,
   provisionalAmount: 0,
   otherAmount: 0,
   recoveryAmount: 0,
@@ -27,6 +29,8 @@ export function normalizeCostSettings(settings = {}) {
     taxRate: normalizeRate(settings.taxRate, DEFAULT_COST_SETTINGS.taxRate),
     measureRate: normalizeRate(settings.measureRate, DEFAULT_COST_SETTINGS.measureRate),
     targetProfitRate: normalizeTargetProfitRate(settings.targetProfitRate),
+    riskCostRatio: normalizeRiskCostRatio(settings.riskCostRatio),
+    quoteFactorRate: normalizeQuoteFactorRate(settings.quoteFactorRate),
     provisionalAmount: normalizeMoney(settings.provisionalAmount),
     otherAmount: normalizeMoney(settings.otherAmount),
     recoveryAmount: normalizeMoney(settings.recoveryAmount),
@@ -267,6 +271,20 @@ function normalizeTargetProfitRate(value) {
   if (value === '' || value === null || value === undefined) return DEFAULT_COST_SETTINGS.targetProfitRate;
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0 || number >= 100) throw new Error('目标利润率必须在 0 到 100 之间');
+  return roundMoney(number, 4);
+}
+
+function normalizeRiskCostRatio(value) {
+  if (value === '' || value === null || value === undefined) return DEFAULT_COST_SETTINGS.riskCostRatio;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0 || number > 100) throw new Error('成本偏薄预警线必须大于 0 且不超过 100%');
+  return roundMoney(number, 4);
+}
+
+function normalizeQuoteFactorRate(value) {
+  if (value === '' || value === null || value === undefined) return DEFAULT_COST_SETTINGS.quoteFactorRate;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0 || number > 200) throw new Error('投标价折算默认比例必须大于 0 且不超过 200%');
   return roundMoney(number, 4);
 }
 

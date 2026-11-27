@@ -6,6 +6,7 @@ import { uid } from '../utils/dom.js?v=6.15';
 import { calculateAmount } from '../utils/costing.js?v=6.15';
 import { versionService } from '../services/versionService.js?v=6.15';
 import { dataEngineService } from '../services/dataEngineService.js?v=6.15';
+import { ensureXlsx } from '../utils/vendorLoader.js?v=6.15&build=20261117b';
 
 const FILES = [
   '定额数据库.xlsx',
@@ -202,6 +203,7 @@ export async function autoFillMissingPrices() {
 
 /** 加载演示数据 */
 export async function loadDemoData() {
+  const XLSX = await ensureXlsx();
   const items = await quotaRepo.all();
   const seen = new Set(items.map(i => i.name + '|' + (i.feature || '').slice(0, 30)));
 

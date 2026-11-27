@@ -39,7 +39,10 @@ export async function testBoqQuotaRelations() {
     const firstRelations = relations.filter(item => item.boqLibraryItemId === firstLibrary.id);
     assert.equal(firstRelations.length, 2);
     assert.equal(firstRelations.some(item => item.quotaSnapshot.priceTotal === -74.7), true, '负价调整定额必须保留为有效组成');
-    assert.equal(calculateQuotaRelations(firstRelations, 435.05).unitPrice, 20.76);
+    const firstComposition = calculateQuotaRelations(firstRelations, 435.05);
+    assert.equal(firstComposition.unitPrice, 20.76);
+    assert.ok(Math.abs(firstComposition.breakdown.人工 - 2.751) < 1e-9, '清单库应按关联定额和套用量汇总人工组成');
+    assert.ok(Math.abs(firstComposition.breakdown.材料 - 16.529) < 1e-9, '清单库应按关联定额和套用量汇总材料组成');
 
     const sharedQuota = quotas.find(item => item.code === '9-2-47');
     assert.equal(relations.filter(item => item.quotaItemId === sharedQuota.id).length, 2, '同一定额主数据应能被多条清单引用');

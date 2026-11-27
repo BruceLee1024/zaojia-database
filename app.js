@@ -1,38 +1,38 @@
 // 应用入口：路由 + 启动
 import * as dashboard from './assets/views/dashboard.js?v=6.15&build=20260814e';
-import * as importer  from './assets/views/importer.js?v=6.15&build=20261127';
-import * as quota     from './assets/views/quota.js?v=6.15';
-import * as projects  from './assets/views/projects.js?v=6.15&build=20261126c';
-import * as boq       from './assets/views/boq.js?v=6.15';
+import * as importer  from './assets/views/importer.js?v=6.15&build=20261127r1';
+import * as quota     from './assets/views/quota.js?v=6.15&build=20261117c';
+import * as projects  from './assets/views/projects.js?v=6.15&build=20261127r1';
+import * as boq       from './assets/views/boq.js?v=6.15&build=20261117h';
 import * as costEstimation from './assets/views/costEstimation.js?v=6.15&build=20260814f';
 import * as indicators from './assets/views/indicators.js?v=6.15';
 import * as experience from './assets/views/experience.js?v=6.15';
 import * as settings  from './assets/views/settings.js?v=6.15';
 import * as ai        from './assets/views/ai.js?v=6.15';
-import * as resources from './assets/views/resources.js?v=6.15';
+import * as resources from './assets/views/resources.js?v=6.15&build=20260818l';
 import { searchAll, searchGroups } from './assets/services/globalSearchService.js?v=6.15';
 import { smartSearch } from './assets/services/aiAssistService.js?v=6.15';
 import { getStorageStatus } from './assets/data/storage.js?v=6.15';
 import { openModal, closeModal, esc } from './assets/utils/dom.js?v=6.15';
 import { ICONS } from './assets/utils/icons.js?v=6.15';
-import { navigationItemHtml } from './assets/views/navigation.js?v=6.15';
+import { navigationItemHtml } from './assets/views/navigation.js?v=6.15&build=20260818f';
 import { createLatestCoordinator, createLatestWorkspaceCoordinator, createWorkspaceRoot } from './assets/utils/requestCoordinator.js?v=6.15';
 
 const VIEWS = [
-  { id: 'dashboard',  label: '我的概览',   icon: ICONS.navigation.overview, group: '我的工作台', desc: '继续最近工作' },
-  { id: 'importer',   label: '导入资料',   icon: ICONS.navigation.import, group: '我的工作台', desc: '清单、定额、材料和设备' },
-  { id: 'ai-import',  label: 'AI 导入',    icon: ICONS.resource.ai, group: '我的工作台', desc: '自由格式清单识别', hidden: true },
-  { id: 'quota',      label: '我的定额库', icon: ICONS.navigation.quota, group: '我的工作台', desc: '常用价格参考' },
-  { id: 'materials',  label: '我的材料库', icon: ICONS.navigation.materials, group: '我的工作台', desc: '材料主数据与价格' },
-  { id: 'equipment',  label: '我的设备库', icon: ICONS.navigation.equipment, group: '我的工作台', desc: '设备选型与价格' },
-  { id: 'resource-import', label: '导入材料设备', icon: ICONS.navigation.import, group: '我的工作台', desc: '预览并写入资源库', hidden: true },
-  { id: 'boq-library', label: '我的清单库', icon: ICONS.navigation.boqLibrary, group: '我的工作台', desc: '通用清单复用' },
-  { id: 'projects',   label: '我的项目',   icon: ICONS.navigation.projects, group: '我的工作台', desc: '项目资料与案例' },
-  { id: 'boq',        label: '工程量清单', icon: ICONS.navigation.boq, group: '工作台', desc: '报价编制' },
-  { id: 'cost-estimation', label: '成本测算', icon: 'payments', group: '工作台', desc: '内部覆价与利润' },
-  { id: 'indicators', label: '造价参考',   icon: ICONS.navigation.indicators, group: '工作台', desc: '案例与指标' },
-  { id: 'experience', label: '复盘笔记',   icon: ICONS.navigation.experience, group: '个人积累', desc: '记录可复用经验' },
-  { id: 'settings',   label: '数据与备份', icon: ICONS.navigation.settings, group: '个人积累', desc: '本地存储与维护' },
+  { id: 'dashboard',  label: '我的概览',   icon: ICONS.navigation.overview, group: '开始工作', desc: '继续最近工作' },
+  { id: 'importer',   label: '导入资料',   icon: ICONS.navigation.import, group: '开始工作', desc: '清单、定额、材料和设备' },
+  { id: 'ai-import',  label: 'AI 导入',    icon: ICONS.resource.ai, group: '开始工作', desc: '自由格式清单识别', hidden: true },
+  { id: 'quota',      label: '我的定额库', icon: ICONS.navigation.quota, group: '资料库', desc: '常用价格参考' },
+  { id: 'materials',  label: '我的材料库', icon: ICONS.navigation.materials, group: '资料库', desc: '材料主数据与价格' },
+  { id: 'equipment',  label: '我的设备库', icon: ICONS.navigation.equipment, group: '资料库', desc: '设备选型与价格' },
+  { id: 'resource-import', label: '导入材料设备', icon: ICONS.navigation.import, group: '资料库', desc: '预览并写入资源库', hidden: true },
+  { id: 'boq-library', label: '我的清单库', icon: ICONS.navigation.boqLibrary, group: '资料库', desc: '通用清单复用' },
+  { id: 'projects',   label: '我的项目',   icon: ICONS.navigation.projects, group: '项目与报价', desc: '项目资料与案例' },
+  { id: 'boq',        label: '工程量清单', icon: ICONS.navigation.boq, group: '项目与报价', desc: '报价编制' },
+  { id: 'cost-estimation', label: '成本测算', icon: 'payments', group: '项目与报价', desc: '内部覆价与利润' },
+  { id: 'indicators', label: '造价参考',   icon: ICONS.navigation.indicators, group: '项目与报价', desc: '案例与指标' },
+  { id: 'experience', label: '复盘笔记',   icon: ICONS.navigation.experience, group: '复盘与维护', desc: '记录可复用经验' },
+  { id: 'settings',   label: '数据与备份', icon: ICONS.navigation.settings, group: '复盘与维护', desc: '本地存储与维护' },
 ];
 
 const state = {
@@ -54,13 +54,13 @@ const renderers = {
   },
   'boq-library': {
     render: async workspace => {
-      const module = await import('./assets/views/boqLibrary.js?v=6.15&build=20261127');
+      const module = await import('./assets/views/boqLibrary.js?v=6.15&build=20261127r1');
       return module.render(workspace);
     },
   },
   'ai-import': {
     render: async workspace => {
-      const module = await import('./assets/views/aiImportWizard.js?v=6.15&build=20261127');
+      const module = await import('./assets/views/aiImportWizard.js?v=6.15&build=20261127r1');
       return module.render(workspace);
     },
   },
@@ -73,17 +73,47 @@ const routeCoordinator = createLatestWorkspaceCoordinator({
   dispose: root => root.remove(),
 });
 const searchCoordinator = createLatestCoordinator();
+const NAV_GROUP_STATE_KEY = 'cost-workbench-nav-groups';
+const navGroupState = loadNavGroupState();
+const TRIAL_CODE = 'C90C-01C6-54A7-34D7';
+const TRIAL_UNLOCK_KEY = 'cost-workbench-trial-unlocked';
+let trialGateActive = false;
 
 function renderNav() {
   const groups = [...new Set(VIEWS.map(v => v.group))];
   document.getElementById('nav').innerHTML = groups.map(group => `
-    <div class="nav-section-title">${group}</div>
-    <div class="space-y-1.5">
+    <section class="nav-section ${isNavGroupExpanded(group) ? '' : 'is-collapsed'}">
+    <button type="button" class="nav-section-toggle" data-nav-group="${escapeHtml(group)}" aria-expanded="${isNavGroupExpanded(group)}">
+      <span>${escapeHtml(group)}</span>
+      <span class="material-symbols-outlined nav-section-chevron" aria-hidden="true">expand_more</span>
+    </button>
+    <div class="nav-section-items space-y-1" ${isNavGroupExpanded(group) ? '' : 'hidden'}>
       ${VIEWS.filter(v => v.group === group && !v.hidden).map(v => navigationItemHtml(v, state.currentView === v.id)).join('')}
     </div>
+    </section>
   `).join('');
   document.querySelectorAll('[data-go]').forEach(el => el.onclick = () => go(el.dataset.go));
+  document.querySelectorAll('[data-nav-group]').forEach(button => button.onclick = () => toggleNavGroup(button.dataset.navGroup));
   renderMobileNav();
+}
+
+function loadNavGroupState() {
+  try {
+    const value = JSON.parse(localStorage.getItem(NAV_GROUP_STATE_KEY) || '{}');
+    return value && typeof value === 'object' ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function isNavGroupExpanded(group) {
+  return navGroupState[group] !== false;
+}
+
+function toggleNavGroup(group) {
+  navGroupState[group] = !isNavGroupExpanded(group);
+  try { localStorage.setItem(NAV_GROUP_STATE_KEY, JSON.stringify(navGroupState)); } catch { /* 存储不可用时仅保留当前会话状态 */ }
+  renderNav();
 }
 
 const MOBILE_PRIMARY_VIEWS = ['dashboard', 'importer', 'projects', 'boq'];
@@ -139,6 +169,11 @@ function openMobileSearch() {
 async function go(view, params = {}) {
   state.currentView = view;
   state.routeParams = params || {};
+  const currentGroup = VIEWS.find(item => item.id === view)?.group;
+  if (currentGroup) {
+    navGroupState[currentGroup] = true;
+    try { localStorage.setItem(NAV_GROUP_STATE_KEY, JSON.stringify(navGroupState)); } catch { /* 存储不可用时仅保留当前会话状态 */ }
+  }
   if ((view === 'boq' || view === 'cost-estimation') && params.projectId) state.currentProjectId = params.projectId;
   renderNav();
   const generation = ++routeGeneration;
@@ -307,6 +342,62 @@ function showSearchResults(keyword, results) {
   document.querySelectorAll('[data-search-result]').forEach(btn => btn.onclick = () => openSearchResult(btn.dataset.searchResult));
 }
 
+function trialIsUnlocked() {
+  try { return localStorage.getItem(TRIAL_UNLOCK_KEY) === 'true'; } catch { return false; }
+}
+
+function showTrialCodePrompt() {
+  trialGateActive = true;
+  openModal('获取试用码', `
+    <div class="mx-auto max-w-md text-center">
+      <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-teal-50 text-teal-700">
+        <span class="material-symbols-outlined text-2xl" aria-hidden="true">key</span>
+      </div>
+      <h2 class="mt-4 text-lg font-semibold text-slate-950">添加作者微信，获取试用码</h2>
+      <p class="mt-2 text-sm leading-6 text-slate-600">扫码添加作者「Bruce」，备注“造价数据库”，即可获取试用码并了解后续服务。</p>
+      <div class="mx-auto mt-4 w-52 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <img src="../landing-assets/wechat-cybertumu.jpg" alt="Bruce 微信二维码" class="block h-full w-full object-contain" />
+      </div>
+      <p class="mt-3 text-xs text-slate-500">微信：Bruce</p>
+      <p class="mt-2 text-xs font-medium text-teal-700">本系统永久免费使用，不收取任何费用。</p>
+      <label class="mx-auto mt-5 block max-w-xs text-left">
+        <span class="text-xs font-medium text-slate-600">试用码</span>
+        <input id="trialCodeInput" autocomplete="one-time-code" placeholder="XXXX-XXXX-XXXX-XXXX" class="mt-1 h-11 w-full border border-slate-300 bg-white px-3 text-center font-data tracking-[0.12em] uppercase outline-none focus:border-teal-600" />
+      </label>
+      <p id="trialCodeError" class="mt-2 min-h-5 text-xs text-red-600" role="alert"></p>
+    </div>
+  `, '<button id="verifyTrialCode" type="button" class="h-9 px-4 brand-bg text-sm text-white">验证并进入系统</button>');
+  const modal = document.getElementById('modal');
+  modal.dataset.locked = 'true';
+  const closeButton = document.querySelector('#modalPanel > div:first-child button');
+  if (closeButton) { closeButton.hidden = true; closeButton.disabled = true; }
+  window.__modalClose = () => { if (!trialGateActive) closeModal(); };
+  document.getElementById('verifyTrialCode').onclick = verifyTrialCode;
+  document.getElementById('trialCodeInput').addEventListener('keydown', event => {
+    if (event.key === 'Enter') verifyTrialCode();
+  });
+}
+
+async function verifyTrialCode() {
+  const input = document.getElementById('trialCodeInput');
+  const error = document.getElementById('trialCodeError');
+  const value = String(input?.value || '').trim().toUpperCase();
+  if (value !== TRIAL_CODE) {
+    if (error) error.textContent = '试用码无效，请添加作者微信获取正确试用码。';
+    input?.focus();
+    return;
+  }
+  try { localStorage.setItem(TRIAL_UNLOCK_KEY, 'true'); } catch { /* 本次会话仍可继续使用 */ }
+  trialGateActive = false;
+  const modal = document.getElementById('modal');
+  delete modal.dataset.locked;
+  const closeButton = document.querySelector('#modalPanel > div:first-child button');
+  if (closeButton) { closeButton.hidden = false; closeButton.disabled = false; }
+  window.__modalClose = closeModal;
+  closeModal();
+  await renderWorkspace(++routeGeneration);
+}
+
 // 全局对象：内嵌 onclick / 模块间共享
 window.__app = {
   state,
@@ -327,6 +418,13 @@ window.__app = {
   openMobileSearch,
 };
 
+document.addEventListener('keydown', event => {
+  if (trialGateActive && event.key === 'Escape') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}, true);
+
 window.addEventListener('DOMContentLoaded', async () => {
   // 首次使用保持正式资料库为空；演示资料只能由用户在「备份与恢复」中主动加载。
   renderNav();
@@ -336,7 +434,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('workspace').innerHTML = '<div class="min-h-full flex items-center justify-center p-8 text-sm text-slate-500">正在读取本机资料…</div>';
   ai.close();
   renderStorageBadge();
-  await renderWorkspace(++routeGeneration);
+  if (trialIsUnlocked()) await renderWorkspace(++routeGeneration);
+  else showTrialCodePrompt();
 
   document.getElementById('aiInput').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) {

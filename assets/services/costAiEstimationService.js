@@ -5,11 +5,11 @@ import { rankHistoryReferences, rankQuotaReferences, rankResourceReferences } fr
 const DEFAULT_QUOTE_FACTOR = 0.85;
 
 export const costAiEstimationService = {
-  async suggest(lines = []) {
+  async suggest(lines = [], { quoteFactorRate } = {}) {
     const [projects, allLines, quotas, resources, prices] = await Promise.all([
       projectRepo.all(), boqRepo.all(), quotaRepo.all(), resourceRepo.all(), resourcePriceRepo.all(),
     ]);
-    return generateCostSuggestions(lines, { projects, allLines, quotas, resources, prices });
+    return generateCostSuggestions(lines, { projects, allLines, quotas, resources, prices, quoteFactorRate });
   },
 };
 
@@ -53,7 +53,8 @@ export function suggestLineCost(line = {}, context = {}) {
   }
   const bidUnitPrice = Number(line.unitPrice);
   if (!Number.isFinite(bidUnitPrice)) return null;
-  const suggestedPrice = roundMoney(bidUnitPrice * DEFAULT_QUOTE_FACTOR);
+  const quoteFactor = normalizeQuoteFactor(context.quoteFactorRate);
+  const suggestedPrice = roundMoney(bidUnitPrice * quoteFactor);
   return {
     lineId: line.id,
     lineName: line.name || '未命名清单',
@@ -63,13 +64,13 @@ export function suggestLineCost(line = {}, context = {}) {
     confidence: 'low',
     costSource: 'quote_factor',
     sourceLabel: '投标综合单价折算',
-    reason: `缺少同单位企业定额、历史成本或材料设备价格，暂按投标单价的 ${DEFAULT_QUOTE_FACTOR * 100}% 生成起算建议`,
+    reason: `缺少同单位企业定额、历史成本或材料设备价格，暂按投标单价的 ${quoteFactor * 100}% 生成起算建议`,
     costSourceRef: {
-      id: `quote-factor:${line.id}:${DEFAULT_QUOTE_FACTOR}`,
+      id: `quote-factor:${line.id}:${quoteFactor}`,
       type: 'quote_factor',
       sourceId: line.id,
-      label: `投标单价 × ${DEFAULT_QUOTE_FACTOR * 100}%`,
-      detail: `${bidUnitPrice} × ${DEFAULT_QUOTE_FACTOR * 100}%`,
+      label: `投标单价 × ${quoteFactor * 100}%`,
+      detail: `${bidUnitPrice} × ${quoteFactor * 100}%`,
       unitPrice: suggestedPrice,
       date: new Date().toISOString(),
     },
@@ -79,4 +80,9 @@ export function suggestLineCost(line = {}, context = {}) {
 
 function roundMoney(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeQuoteFactor(value) {
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate > 0 && rate <= 200 ? rate / 100 : DEFAULT_QUOTE_FACTOR;
 }

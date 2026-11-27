@@ -177,7 +177,7 @@ async function resourceTemplateFieldsAndPercentage() {
   let exported;
   XLSX.writeFile = (workbook, name) => { exported = { workbook, name }; };
   try {
-    exportImportTemplate('equipment');
+    await exportImportTemplate('equipment');
   } finally {
     XLSX.writeFile = originalWriteFile;
   }

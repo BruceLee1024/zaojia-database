@@ -308,17 +308,22 @@ async function testVisibleQuoteAuditViewModel() {
       expiredResourcePrice: lines('expired'),
       missingResourcePriceBasis: lines('basis'),
       duplicateEquipmentInstallation: lines('duplicate-install'),
+      missingFeature: lines('feature'),
+      unitMismatch: lines('unit'),
+      unconfirmedQuotaQuantity: lines('quantity'),
+      priceDeviation: lines('price'),
     },
   };
   const vm = buildQuoteAuditViewModel(serviceAudit, { summary: 'AI 辅助审查', suggestions: [], warnings: [] });
   assert.equal(vm.score, 61);
   assert.equal(vm.level, '高风险');
-  assert.deepEqual(vm.issueBlocks.map(item => item.key), ['invalidResourceReference', 'expiredResourcePrice', 'missingResourcePriceBasis', 'duplicateEquipmentInstallation']);
+  assert.deepEqual(vm.issueBlocks.map(item => item.key), ['invalidResourceReference', 'expiredResourcePrice', 'missingResourcePriceBasis', 'duplicateEquipmentInstallation', 'missingFeature', 'unitMismatch', 'unconfirmedQuotaQuantity', 'priceDeviation']);
   assert.equal(vm.issueBlocks.every(item => item.count === 1), true);
   const html = renderQuoteAuditViewModel(vm);
   assert.equal(html.includes('健康分'), true);
   assert.equal(html.includes('资源引用失效'), true);
   assert.equal(html.includes('设备安装重复计取'), true);
+  assert.equal(html.includes('项目特征缺失'), true);
   const calls = [];
   const loaded = await loadQuoteAuditViewModel('project-visible', {
     audit: async projectId => { calls.push(['audit', projectId]); return serviceAudit; },
