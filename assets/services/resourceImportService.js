@@ -1,6 +1,6 @@
 import { resourcePriceRepo, resourceRepo } from '../data/repository.js?v=6.15';
 import { resourceCodeIdentity, resourceCompositeIdentity, validateResourceCollection } from './resourceService.js?v=6.15';
-import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from './importSemanticService.js?v=6.15';
+import { classifyResourcePriceReview, normalizeResourcePriceSemantics } from './importSemanticService.js?v=6.15&build=20261126b';
 
 const SOURCE_TYPE_MAP = new Map([
   ['official', 'official'], ['官方信息价', 'official'], ['信息价', 'official'],
@@ -14,6 +14,8 @@ const PRICE_BASIS_MAP = new Map([
 ]);
 const SOURCE_TYPES = new Set(['official', 'supplier_quote', 'transaction']);
 const PRICE_BASES = new Set(['ex_factory', 'delivered', 'installed_composite']);
+const RESOURCE_CONFLICT_MESSAGE = '编码或规格身份与已有资源冲突';
+const BATCH_CODE_CONFLICT_MESSAGE = '同一批次的资源编码对应多种名称、规格、单位或品牌，请核对编码';
 
 export const resourceImportService = {
   async parse(file, resourceType) {
@@ -36,9 +38,7 @@ export const resourceImportService = {
     const typedExisting = existing.filter(item => item.resourceType === resourceType);
     const existingByCode = new Map(existing.filter(item => text(item.code)).map(item => [resourceCodeIdentity(item), item]));
     const existingByComposite = new Map(typedExisting.map(item => [resourceCompositeIdentity(item), item]));
-    const batchByCode = new Map();
-    const batchByComposite = new Map();
-    const previewRows = (Array.isArray(rows) ? rows : []).map((raw, index) => {
+    const preparedRows = (Array.isArray(rows) ? rows : []).map((raw, index) => {
       const resource = normalizeResourceRow(raw, resourceType);
       const price = normalizePriceRow(raw);
       const errors = validateResourceRow(resource);
@@ -49,17 +49,40 @@ export const resourceImportService = {
       const usesCode = Boolean(text(resource.code));
       const codeMatch = codeIdentity ? existingByCode.get(codeIdentity) : null;
       const compositeMatch = existingByComposite.get(compositeIdentity);
-      const existingItem = codeMatch || (!usesCode ? compositeMatch : null);
-      const first = (codeIdentity ? batchByCode.get(codeIdentity) : null) || batchByComposite.get(compositeIdentity);
+      const existingItem = codeMatch || (!usesCode || !text(compositeMatch?.code) ? compositeMatch : null);
+      const compositeConflict = compositeMatch && (codeMatch
+        ? codeMatch.id !== compositeMatch.id
+        : usesCode && text(compositeMatch.code) && resourceCodeIdentity(compositeMatch) !== codeIdentity);
+      const conflictingExisting = codeMatch && codeMatch.resourceType !== resourceType
+        ? codeMatch
+        : compositeConflict ? compositeMatch : null;
+      return { index, raw, resource, price, errors, priceReview, codeIdentity, compositeIdentity, identity, existingItem, codeMatch, conflictingExisting };
+    });
+    const compositeByCode = new Map();
+    const ambiguousCodes = new Set();
+    for (const row of preparedRows) {
+      if (!row.codeIdentity || row.errors.length || row.conflictingExisting) continue;
+      const composite = compositeByCode.get(row.codeIdentity);
+      if (composite && composite !== row.compositeIdentity) ambiguousCodes.add(row.codeIdentity);
+      compositeByCode.set(row.codeIdentity, row.compositeIdentity);
+    }
+    const batchByCode = new Map();
+    const batchByComposite = new Map();
+    const previewRows = preparedRows.map(row => {
+      const { index, raw, resource, price, errors, priceReview, codeIdentity, compositeIdentity, identity, existingItem, codeMatch, conflictingExisting } = row;
+      const first = batchByCode.get(codeIdentity) || batchByComposite.get(compositeIdentity);
       const firstIndex = first?.index;
-      const conflictingExisting = codeMatch && compositeMatch && codeMatch.id !== compositeMatch.id
-        ? compositeMatch
-        : (!codeMatch && usesCode && compositeMatch && text(compositeMatch.code) && resourceCodeIdentity(compositeMatch) !== codeIdentity ? compositeMatch : null);
-      let action = errors.length ? 'invalid' : conflictingExisting ? 'conflict' : existingItem ? 'update' : 'create';
-      if (!errors.length && firstIndex != null) action = 'duplicate';
-      if (!errors.length && firstIndex == null && action !== 'conflict') {
+      const conflictingCode = ambiguousCodes.has(codeIdentity);
+      const hasConflict = conflictingCode || (conflictingExisting && (codeMatch || firstIndex == null));
+      let action = existingItem ? 'update' : 'create';
+      if (errors.length) action = 'invalid';
+      else if (hasConflict) {
+        action = 'conflict';
+        errors.push(conflictingCode ? BATCH_CODE_CONFLICT_MESSAGE : RESOURCE_CONFLICT_MESSAGE);
+      } else if (firstIndex != null) action = 'duplicate';
+      if (action === 'create' || action === 'update') {
         const entry = { index, identity };
-        if (usesCode) batchByCode.set(codeIdentity, entry);
+        if (codeIdentity) batchByCode.set(codeIdentity, entry);
         batchByComposite.set(compositeIdentity, entry);
       }
       return {
@@ -113,7 +136,8 @@ export const resourceImportService = {
       const invariantErrors = validateResourceRow(row.resource || {});
       if (row.action === 'invalid' || row.action === 'conflict' || invariantErrors.length) {
         report.counts.errors += 1;
-        report.rows.push({ index: row.index, status: 'error', errors: [...new Set([...(row.errors || []), ...(row.action === 'conflict' ? ['编码或规格身份与已有资源冲突'] : []), ...invariantErrors])] });
+        const errors = row.errors?.length ? row.errors : row.action === 'conflict' ? [RESOURCE_CONFLICT_MESSAGE] : [];
+        report.rows.push({ index: row.index, status: 'error', errors: [...new Set([...errors, ...invariantErrors])] });
         continue;
       }
       let resourceId = row.existingId || resolved.get(row.identity) || resolved.get(row.duplicateIdentity) || '';
@@ -304,7 +328,7 @@ function validateResourceRow(resource) {
 
 function priceIdentity(price) {
   return [price.resourceId, price.sourceType, price.priceBasis, price.unitPrice, price.currency || 'CNY', price.taxIncluded ? 1 : 0, price.taxRate || 0,
-    price.region?.province, price.region?.city, price.region?.district, price.priceDate, price.supplier, price.installationScope]
+    price.region?.province, price.region?.city, price.region?.district, price.priceDate, price.validFrom, price.validTo, price.supplier, price.installationScope]
     .map(value => String(value ?? '').trim().toLowerCase()).join('|');
 }
 

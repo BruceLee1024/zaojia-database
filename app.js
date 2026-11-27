@@ -1,8 +1,8 @@
 // 应用入口：路由 + 启动
 import * as dashboard from './assets/views/dashboard.js?v=6.15&build=20260814e';
-import * as importer  from './assets/views/importer.js?v=6.15';
+import * as importer  from './assets/views/importer.js?v=6.15&build=20261127';
 import * as quota     from './assets/views/quota.js?v=6.15';
-import * as projects  from './assets/views/projects.js?v=6.15';
+import * as projects  from './assets/views/projects.js?v=6.15&build=20261126c';
 import * as boq       from './assets/views/boq.js?v=6.15';
 import * as costEstimation from './assets/views/costEstimation.js?v=6.15&build=20260814f';
 import * as indicators from './assets/views/indicators.js?v=6.15';
@@ -54,13 +54,13 @@ const renderers = {
   },
   'boq-library': {
     render: async workspace => {
-      const module = await import('./assets/views/boqLibrary.js?v=6.15');
+      const module = await import('./assets/views/boqLibrary.js?v=6.15&build=20261127');
       return module.render(workspace);
     },
   },
   'ai-import': {
     render: async workspace => {
-      const module = await import('./assets/views/aiImportWizard.js?v=6.15&build=20260814');
+      const module = await import('./assets/views/aiImportWizard.js?v=6.15&build=20261127');
       return module.render(workspace);
     },
   },

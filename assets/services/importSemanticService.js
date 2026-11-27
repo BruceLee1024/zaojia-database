@@ -36,16 +36,16 @@ export function normalizeResourcePriceSemantics({ sourceType = '', priceBasis = 
 export function classifyResourcePriceReview(price) {
   if (!price) return [];
   const issues = [];
-  if (!['official', 'supplier_quote', 'transaction'].includes(price.sourceType)) issues.push('价格来源无法识别，价格已转入待确认');
-  if (!['ex_factory', 'delivered', 'installed_composite'].includes(price.priceBasis)) issues.push('价格口径无法识别，价格已转入待确认');
-  if (!(price.unitPrice > 0)) issues.push(price.unitPrice < 0 ? '负数单价可能是调整或冲销，价格已转入待确认' : '单价必须大于 0，价格已转入待确认');
-  if (!Number.isFinite(price.taxRate) || price.taxRate < 0 || price.taxRate > 100) issues.push('税率不在 0 到 100 之间，价格已转入待确认');
-  if (!isDate(price.priceDate)) issues.push('价格日期缺失或无效，价格已转入待确认');
-  if (!price.region?.province && !price.region?.city && !price.region?.district) issues.push('价格地区缺失，价格已转入待确认');
-  if (price.validFrom && !isDate(price.validFrom)) issues.push('生效日期无效，价格已转入待确认');
-  if (price.validTo && !isDate(price.validTo)) issues.push('失效日期无效，价格已转入待确认');
-  if (price.validFrom && price.validTo && price.validFrom > price.validTo) issues.push('失效日期不能早于生效日期，价格已转入待确认');
-  if (price.priceBasis === 'installed_composite' && !price.installationScope) issues.push('安装综合价缺少安装范围，价格已转入待确认');
+  if (!['official', 'supplier_quote', 'transaction'].includes(price.sourceType)) issues.push('价格来源无法识别');
+  if (!['ex_factory', 'delivered', 'installed_composite'].includes(price.priceBasis)) issues.push('价格口径无法识别');
+  if (!(price.unitPrice > 0)) issues.push(price.unitPrice < 0 ? '负数单价可能是调整或冲销' : '单价必须大于 0');
+  if (!Number.isFinite(price.taxRate) || price.taxRate < 0 || price.taxRate > 100) issues.push('税率不在 0 到 100 之间');
+  if (!isDate(price.priceDate)) issues.push('价格日期缺失或无效');
+  if (!price.region?.province && !price.region?.city && !price.region?.district) issues.push('价格地区缺失');
+  if (price.validFrom && !isDate(price.validFrom)) issues.push('生效日期无效');
+  if (price.validTo && !isDate(price.validTo)) issues.push('失效日期无效');
+  if (price.validFrom && price.validTo && price.validFrom > price.validTo) issues.push('失效日期不能早于生效日期');
+  if (price.priceBasis === 'installed_composite' && !price.installationScope) issues.push('安装综合价缺少安装范围');
   return issues;
 }
 

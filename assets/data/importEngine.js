@@ -10,6 +10,8 @@ const HEADER_TERMS = [
 const UNIT_RE = /^(?:m|m2|m3|m²|m³|㎡|㎥|t|kg|kw|kwh|h|米|平方米|立方米|吨|千克|台|套|项|个|根|座|块|组|工日|元|%|元\/[^\s]+)$/i;
 const TOTAL_RE = /^(?:其中[:：]?)?(?:分部小计|分项小计|本页小计|小计|合计|总计|累计|费用合计|合计金额)$/;
 const NOTE_RE = /^(?:说明|备注|注|注意|编制说明)[:：]/;
+const NAME_HEADER_RE = /^(?:(?:项目|清单|工程|材料|设备|定额|费用)?名称(?:项目特征|特征)?|项目内容|工作内容描述|name)$/;
+const UNIT_HEADER_RE = /^(?:计量单位|单位|计量|unit)$/;
 
 export function normalizeHeaderText(value) {
   return String(value ?? '')
@@ -25,7 +27,7 @@ export function expandMergedHeaderGrid(matrix = [], merges = [], headerStart = 0
   const warnings = [];
   const claimed = new Map();
   const maxRow = Math.max(0, grid.length - 1);
-  const maxColumn = Math.max(0, ...grid.map(row => row.length - 1));
+  const maxColumn = grid.reduce((max, row) => Math.max(max, row.length - 1), 0);
 
   for (const merge of merges || []) {
     const startRow = Number(merge?.s?.r);
@@ -58,7 +60,7 @@ export function buildHeaderTree({ sheetName = '', regionId = '', matrix = [], me
   const safeStart = Math.max(0, Number(headerStart) || 0);
   const safeEnd = Math.min(matrix.length - 1, Math.max(safeStart, Number(headerEnd) || safeStart));
   const { grid, warnings } = expandMergedHeaderGrid(matrix, merges, safeStart, safeEnd);
-  const columnCount = Math.max(0, ...matrix.slice(safeStart, safeEnd + 1).map(row => Array.isArray(row) ? row.length : 0));
+  const columnCount = matrix.slice(safeStart, safeEnd + 1).reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0);
   const titleRows = detectTitleRows(grid, merges, safeStart, safeEnd, columnCount);
   const columns = [];
 
@@ -105,9 +107,15 @@ export function buildHeaderTree({ sheetName = '', regionId = '', matrix = [], me
 export function detectImportRegions(workbook = {}, { maxHeaderDepth = MAX_HEADER_DEPTH, schema = null } = {}) {
   const regions = [];
   const schemaTerms = importSchemaTerms(schema);
-  for (const sheet of workbook.sheets || []) {
-    const matrix = Array.isArray(sheet.matrix) ? sheet.matrix : [];
+  for (const sourceSheet of workbook.sheets || []) {
+    const matrix = Array.isArray(sourceSheet.matrix) ? sourceSheet.matrix : [];
     if (!matrix.some(row => Array.isArray(row) && row.some(value => !isBlank(value)))) continue;
+    const { rowOffset = 0, columnOffset = 0 } = sourceSheet;
+    const merges = (sourceSheet.merges || []).map(range => ({
+      s: { r: range?.s?.r - rowOffset, c: range?.s?.c - columnOffset },
+      e: { r: range?.e?.r - rowOffset, c: range?.e?.c - columnOffset },
+    }));
+    const sheet = { ...sourceSheet, rowOffset, merges };
     const candidates = findHeaderCandidates(sheet, Math.min(MAX_HEADER_DEPTH, Math.max(1, maxHeaderDepth)), schemaTerms);
     const selected = selectHeaderCandidates(candidates);
     if (!selected.length) {
@@ -119,18 +127,19 @@ export function detectImportRegions(workbook = {}, { maxHeaderDepth = MAX_HEADER
       const next = selected[index + 1];
       const dataStart = candidate.headerEnd + 1;
       const dataEnd = next ? next.headerStart - 1 : matrix.length - 1;
-      const regionId = `${sheet.name || 'sheet'}:${candidate.headerStart + 1}-${candidate.headerEnd + 1}`;
+      const regionId = `${sheet.name || 'sheet'}:${candidate.headerStart + rowOffset + 1}-${candidate.headerEnd + rowOffset + 1}`;
       const header = buildHeaderTree({
         sheetName: sheet.name || '', regionId, matrix, merges: sheet.merges || [],
         headerStart: candidate.headerStart, headerEnd: candidate.headerEnd,
       });
-      const classified = classifyRegionRows(matrix, header.columns, dataStart, dataEnd);
+      const classified = classifyRegionRows(matrix, header.columns, dataStart, dataEnd, rowOffset);
       if (!classified.rows.length && !classified.skippedRows.length) return;
       regions.push({
         id: regionId,
         sheetName: sheet.name || '',
         hidden: Boolean(sheet.hidden),
         matrix,
+        rowOffset,
         merges: sheet.merges || [],
         headerStart: candidate.headerStart,
         headerEnd: candidate.headerEnd,
@@ -158,6 +167,12 @@ export function classifyImportRow(values = [], columns = []) {
   const combined = texts.join('');
   if (texts.some(text => TOTAL_RE.test(text.replace(/\s/g, '')))) return 'subtotal';
   if (texts.length === 1 && NOTE_RE.test(texts[0])) return 'note';
+  // 名称和单位均有数据时，即使没有数量或价格也是一条明细。
+  const nameColumn = columns.find(column => NAME_HEADER_RE.test(normalizeHeaderText(column.leaf)));
+  const unitColumn = columns.find(column => UNIT_HEADER_RE.test(normalizeHeaderText(column.leaf)));
+  const name = normalizeHeaderText(values[nameColumn?.columnIndex]);
+  const unit = normalizeHeaderText(values[unitColumn?.columnIndex]);
+  if (name && unit && !NAME_HEADER_RE.test(name) && !UNIT_HEADER_RE.test(unit)) return 'detail';
   const headerMatches = texts.filter(text => isHeaderTerm(text) || matchesImportColumn(text, columns)).length;
   if (headerMatches >= Math.min(2, Math.max(1, nonEmpty.length - 1))) return 'repeated_header';
   const numericMeasureCount = nonEmpty.filter(item => {
@@ -196,7 +211,7 @@ function findHeaderCandidates(sheet, maxDepth, schemaTerms = []) {
 
 function selectHeaderCandidates(candidates) {
   if (!candidates.length) return [];
-  const strongest = Math.max(...candidates.map(candidate => candidate.score));
+  const strongest = candidates.reduce((max, candidate) => Math.max(max, candidate.score), 0);
   // 一旦工作表存在可靠正式表头，只保留同等级候选。项目特征长文本常包含
   // “单位、工程量、专业”等词，但这类低分命中不应把标准清单切成多个数据区。
   const eligible = strongest >= 0.8
@@ -238,14 +253,14 @@ function scoreHeaderCandidate(matrix, header, dataStart, merges, schemaTerms = [
   );
 }
 
-function classifyRegionRows(matrix, columns, start, end) {
+export function classifyRegionRows(matrix, columns, start, end, rowOffset = 0) {
   const rows = [];
   const skippedRows = [];
   for (let sourceRow = start; sourceRow <= end; sourceRow += 1) {
     const raw = Array.isArray(matrix[sourceRow]) ? matrix[sourceRow] : [];
     const kind = classifyImportRow(raw, columns);
     const values = Object.fromEntries(columns.map(column => [column.id, raw[column.columnIndex] ?? '']));
-    const item = { sourceRow, sourceRowNumber: sourceRow + 1, kind, raw, values };
+    const item = { sourceRow, sourceRowNumber: sourceRow + rowOffset + 1, kind, raw, values };
     if (kind === 'detail') rows.push(item);
     else skippedRows.push(item);
   }
@@ -321,18 +336,21 @@ function matchesImportColumn(value, columns) {
 
 function createManualFallbackRegion(sheet) {
   const matrix = sheet.matrix || [];
+  const rowOffset = sheet.rowOffset || 0;
   const headerStart = matrix.findIndex(row => Array.isArray(row) && row.some(value => !isBlank(value)));
   if (headerStart < 0) return null;
-  const regionId = `${sheet.name || 'sheet'}:${headerStart + 1}-${headerStart + 1}:manual`;
+  const sourceHeaderRow = headerStart + rowOffset + 1;
+  const regionId = `${sheet.name || 'sheet'}:${sourceHeaderRow}-${sourceHeaderRow}:manual`;
   const header = buildHeaderTree({
     sheetName: sheet.name || '', regionId, matrix, merges: sheet.merges || [], headerStart, headerEnd: headerStart,
   });
-  const classified = classifyRegionRows(matrix, header.columns, headerStart + 1, matrix.length - 1);
+  const classified = classifyRegionRows(matrix, header.columns, headerStart + 1, matrix.length - 1, rowOffset);
   return {
     id: regionId,
     sheetName: sheet.name || '',
     hidden: Boolean(sheet.hidden),
     matrix,
+    rowOffset,
     merges: sheet.merges || [],
     headerStart,
     headerEnd: headerStart,

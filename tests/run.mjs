@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { testResourceHealth } from './resourceHealth.mjs';
+import { runImportWorkflowRegressions } from './importWorkflowRegressions.mjs';
 import { calculateAmount, hasMissingPrice } from '../assets/utils/costing.js?v=6.15';
 import { formatCurrency, normalizeCurrency, sumByCurrency } from '../assets/utils/currency.js?v=6.15';
-import { buildQuotaExportRows, decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
+import { buildQuotaExportRows, decodeCsvBuffer, detectCombinedNameFeatureMeta, detectRowKind, exportImportTemplate, parseImportFile, rowToBOQ, rowToQuotaItem, rowsFromSheetMatrix, summarizeSheetMatrices } from '../assets/data/excel.js?v=6.15';
 import { buildHeaderTree, classifyImportRow, detectImportRegions, expandMergedHeaderGrid } from '../assets/data/importEngine.js?v=6.15';
 import { applyMappingTemplate, buildImportColumnMapping, buildImportMapping, matchMappingTemplate, resolveImportPricing } from '../assets/services/importMappingService.js?v=6.15';
 import { getImportSchema, normalizeImportDate, normalizeImportNumber } from '../assets/services/importSchemaService.js?v=6.15';
-import { analyzeImport, detectProjectBoqRegionKind, isImportFieldRequired, mergeCommitRows } from '../assets/services/importWorkflowService.js?v=6.15';
+import { analyzeImport, commitImport, detectProjectBoqRegionKind, isImportFieldRequired, mergeCommitRows, reviewResourceImport } from '../assets/services/importWorkflowService.js?v=6.15';
 import { createMappingTemplate, deleteMappingTemplate, listMappingTemplates, saveMappingTemplate } from '../assets/services/importMappingTemplateService.js?v=6.15';
 import { findDuplicateLibraryItem, normalizeLibraryItem } from '../assets/services/boqLibraryService.js?v=6.15';
 import { createHierarchicalRecognitionRequest, createRecognitionRequest, validateColumnRecognitionPayload, validateRecognitionPayload } from '../assets/services/aiImportRecognitionService.js?v=6.15';
@@ -601,6 +602,23 @@ async function testPhysicalWorkbookParsing() {
     assert.equal(parsed.sheets[0].merges.length, 3);
     assert.equal(parsed.sheets[1].hidden, true);
   }
+  const offsetBook = XLSX.utils.book_new();
+  const offsetSheet = XLSX.utils.aoa_to_sheet([]);
+  XLSX.utils.sheet_add_aoa(offsetSheet, [
+    ['基本信息', '', '计价', ''],
+    ['项目名称', '单位', '工程量', '综合单价'],
+    ['水泵安装', '台', 2, 30],
+    ['风机安装', '台', 4, 50],
+  ], { origin: 'D5' });
+  offsetSheet['!ref'] = 'D5:G8';
+  offsetSheet['!merges'] = [XLSX.utils.decode_range('D5:E5'), XLSX.utils.decode_range('F5:G5')];
+  XLSX.utils.book_append_sheet(offsetBook, offsetSheet, '偏移表头');
+  const offsetBytes = new Uint8Array(XLSX.write(offsetBook, { type: 'array', bookType: 'biff8' }));
+  const offsetFile = await parseImportFile(new File([offsetBytes], 'offset.xls'));
+  const offsetRegion = detectImportRegions(offsetFile)[0];
+  assert.deepEqual(offsetRegion.rows.map(row => row.sourceRowNumber), [7, 8]);
+  assert.equal(offsetRegion.columns[1].displayName, '基本信息 / 单位');
+
   const csvBytes = new TextEncoder().encode('\ufeff项目名称;单位;工程量;综合单价\n池壁混凝土;m3;12.5;680');
   const decoded = decodeCsvBuffer(csvBytes.buffer);
   assert.equal(decoded.encoding, 'utf-8');
@@ -608,6 +626,35 @@ async function testPhysicalWorkbookParsing() {
   const csv = await parseImportFile(new File([csvBytes], 'sample.csv'));
   assert.equal(csv.csv.delimiter, ';');
   assert.equal(csv.sheets[0].matrix[1][0], '池壁混凝土');
+}
+
+async function testImportTemplateRoundTrip() {
+  const templates = [
+    ['project_boq', '工程量清单导入模板.xlsx', 1],
+    ['boq_library', '清单库模板.xlsx', 1],
+    ['boq_quota_bundle', '清单及定额组合导入模板.xlsx', 2],
+    ['quota', '定额库模板.xlsx', 1],
+    ['material', '材料库导入模板.xlsx', 1],
+    ['equipment', '设备库导入模板.xlsx', 1],
+  ];
+  const originalWriteFile = XLSX.writeFile;
+  let exported;
+  XLSX.writeFile = (workbook, name) => { exported = { workbook, name }; };
+  try {
+    for (const [targetType, fileName, validRows] of templates) {
+      exportImportTemplate(targetType);
+      assert.equal(exported.name, fileName);
+      const bytes = new Uint8Array(XLSX.write(exported.workbook, { type: 'array', bookType: 'xlsx' }));
+      const parsed = await parseImportFile(new File([bytes], fileName));
+      const regions = detectImportRegions(parsed, { schema: getImportSchema(targetType) });
+      const preview = analyzeImport(regions, { targetType });
+      assert.equal(preview.counts.valid, validRows, fileName);
+      assert.equal(preview.counts.invalid, 0, fileName);
+      if (targetType === 'boq_quota_bundle') assert.deepEqual(preview.rows.map(row => row.data.rowKind), ['boq', 'quota']);
+    }
+  } finally {
+    XLSX.writeFile = originalWriteFile;
+  }
 }
 
 function testHierarchicalAiRecognitionValidation() {
@@ -847,6 +894,7 @@ testUnifiedImportSchemaAndHierarchicalMapping();
 testUnifiedImportAnalysis();
 testHierarchicalAiRecognitionValidation();
 await testPhysicalWorkbookParsing();
+await testImportTemplateRoundTrip();
 testCombinedNameFeatureColumnMetadata();
 testAiImportRecognitionContract();
 testAiImportWizardSafety();
@@ -860,6 +908,9 @@ await testLocalFolderJsonStorage();
 await testVersions();
 await testArchiveEligibility();
 await testDataEngine();
+await testUnifiedImportReportCounts();
+await testResourceImportPreflight();
+await runImportWorkflowRegressions();
 await testGlobalSearch();
 await testAIAssistService();
 await testExperienceService();
@@ -877,6 +928,111 @@ await testFinalFixes();
 testAiCopilot();
 await testAiSessionPersistence();
 console.log('All tests passed');
+
+async function testUnifiedImportReportCounts() {
+  const memory = new Map();
+  globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+  globalThis.window = { idbKeyval: { get: async key => memory.get(key), set: async (key, value) => memory.set(key, value) } };
+  const { boqRepo, projectRepo } = await import('../assets/data/repository.js?v=6.15');
+  await projectRepo.replaceAll([{ id: 'import-project', name: '导入统计测试项目', totalCost: 0 }]);
+
+  const projectRegions = detectImportRegions({ sheets: [{ name: '清单', matrix: [
+    ['清单编码', '项目名称', '单位', '工程量', '综合单价'],
+    ['A01', '土方开挖', 'm³', 2, 30],
+    ['A02', '混凝土', 'm³', 1, 0],
+    ['A03', '钢筋', 't', 0, 5],
+    ['', '合计', '', '', 60],
+  ] }] });
+  const projectPreview = analyzeImport(projectRegions);
+  const projectReport = await commitImport(projectPreview, { projectId: 'import-project' });
+  assert.deepEqual(projectReport.counts, {
+    ...projectPreview.counts,
+    attempted: 2, committed: 2, notWritten: 1, added: 2,
+    updated: 0, duplicate: 0, pending: 1, conflict: 0,
+  });
+  assert.equal(projectReport.counts.skipped, 1);
+  assert.equal(projectReport.counts.total, projectReport.counts.committed + projectReport.counts.notWritten);
+  assert.equal(projectReport.outcome, 'success_with_warnings');
+  assert.equal((await boqRepo.byProject('import-project')).length, 2);
+  await projectRepo.update('import-project', { status: 'archived' });
+  await assert.rejects(() => commitImport(projectPreview, { projectId: 'import-project', mode: 'replace' }), { code: 'PROJECT_ARCHIVED_READONLY' });
+  assert.equal((await boqRepo.byProject('import-project')).length, 2);
+
+  const materialRegions = detectImportRegions({ sheets: [{ name: '材料', matrix: [
+    ['材料编码', '材料名称', '规格型号', '单位'],
+    ['M01', '水泥', 'P.O 42.5', 't'],
+    ['M01', '水泥', 'P.O 42.5', 't'],
+    ['M02', '河砂', '细砂', ''],
+  ] }] }, { schema: getImportSchema('material') });
+  const materialPreview = analyzeImport(materialRegions, { targetType: 'material' });
+  const materialReport = await commitImport(materialPreview);
+  assert.deepEqual(materialReport.counts, {
+    ...materialPreview.counts,
+    attempted: 2, committed: 1, notWritten: 2, added: 1,
+    updated: 0, duplicate: 1, pending: 0, conflict: 0,
+  });
+  assert.equal(materialReport.counts.total, materialReport.counts.committed + materialReport.counts.notWritten);
+}
+
+async function testResourceImportPreflight() {
+  const memory = new Map();
+  globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+  globalThis.window = { idbKeyval: { get: async key => memory.get(key), set: async (key, value) => memory.set(key, value) } };
+  const { resourceRepo, resourcePriceRepo } = await import('../assets/data/repository.js?v=6.15');
+  const existing = [
+    { id: 'pump', resourceType: 'equipment', code: 'E01', name: '潜水泵', specModel: 'Q20', unit: '台' },
+    { id: 'valve', resourceType: 'equipment', code: 'E02', name: '闸阀', specModel: 'DN80', unit: '台' },
+    { id: 'steel', resourceType: 'material', code: 'M01', name: '槽钢', specModel: '10号', unit: 't' },
+  ];
+  await resourceRepo.replaceAll(existing);
+
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['设备编码', '设备名称', '规格型号', '单位', '单价', '价格日期', '地区', '价格口径', '税率', '安装范围', '生效日期', '失效日期'],
+    ['E01', '潜水泵', 'Q20', '台', '', '', '', '', ''],
+    ['E01', '闸阀', 'DN80', '台', 90, '2026-07-01', '四川', '到场价', 13],
+    ['M01', '风机', 'F01', '台', 120, '2026-07-01', '四川', '到场价', 13],
+    ['E03', '过滤机', 'F20', '台', 0, '2026-07-01', '四川', '到场价', 13],
+    ['E04', '加药装置', 'A20', '台', 250, '2026-07-01', '四川', '安装综合价', 13, '含调试', '2026-07-01', '2026-07-31'],
+    ['E05', '鼓风机', 'F30', '台', 320, '2026-07-01', '四川', '安装综合价', 1.3],
+    ['E06', '搅拌器', 'S20', '台', 180, '2026-07-01', '四川', '到场价', 0.13],
+    ['E07', '气泵', 'Q15', '台', '—'],
+    ['E08', '刮泥机', 'D20', '台', 420, '2026-07-01', '四川', '到场价', 13, '', '2026-07-20', '2026-07-15'],
+  ]);
+  sheet.I7.z = '0%';
+  sheet.I8.z = '0%';
+  XLSX.utils.book_append_sheet(workbook, sheet, '设备价格');
+  const bytes = new Uint8Array(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }));
+  const file = await parseImportFile(new File([bytes], '设备价格.xlsx'), { keepPercentFormat: true });
+  const regions = detectImportRegions(file, { schema: getImportSchema('equipment') });
+  const preview = await reviewResourceImport(analyzeImport(regions, { targetType: 'equipment' }));
+  assert.equal(preview.counts.valid, 7);
+  assert.equal(preview.counts.invalid, 2);
+  assert.equal(preview.counts.pending, 3);
+  assert.deepEqual(preview.rows.slice(0, 3).map(row => row.resourceAction), ['update', 'conflict', 'conflict']);
+  assert.match(preview.rows[3].issues[0].message, /单价必须大于 0/);
+  assert.match(preview.rows[5].issues.map(issue => issue.message).join(' '), /税率.*安装范围/);
+  assert.equal(preview.rows[7].issues.length, 0);
+  assert.match(preview.rows[8].issues[0].message, /失效日期不能早于生效日期/);
+  assert.deepEqual(await resourceRepo.all(), existing);
+  assert.deepEqual(await resourcePriceRepo.all(), []);
+
+  // 提交前资料库可能已变化，重新检查会挡住新增的编码冲突。
+  await resourceRepo.replaceAll([...existing, { id: 'other', resourceType: 'material', code: 'E08', name: '预先新增材料', unit: '件' }]);
+  const report = await commitImport(preview);
+  assert.equal(report.counts.committed, 6);
+  assert.equal(report.counts.notWritten, 3);
+  assert.equal(report.counts.conflict, 3);
+  assert.equal(report.counts.pending, 2);
+  assert.equal(report.rows[1].sourceRowNumber, 3);
+  assert.equal(report.rows[5].priceStatus, 'pending');
+  assert.equal(report.rows[5].issues.length, 2);
+  assert.equal(report.rows[8].status, 'error');
+  const prices = await resourcePriceRepo.all();
+  assert.deepEqual(prices.map(price => price.taxRate), [13, 13]);
+  assert.equal(prices[0].installationScope, '含调试');
+  assert.equal(prices[0].validTo, '2026-07-31');
+}
 
 function testImportCompletionHandoff() {
   const result = normalizeHubImportResult({ projectId: 'project-1', success: '12', missingPrice: '3', total: '15', sourceName: '清单.xlsx' });

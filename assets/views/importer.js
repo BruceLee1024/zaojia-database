@@ -5,15 +5,23 @@ import { dataEngineService } from '../services/dataEngineService.js?v=6.15';
 import { quotaService } from '../services/quotaService.js?v=6.15';
 import { suggestImportMapping, suggestImportRepairs, suggestQuotaBatchCleanup } from '../services/aiAssistService.js?v=6.15';
 import { quotaRepo } from '../data/repository.js?v=6.15';
-import { parseExcel, exportQuotaTemplate } from '../data/excel.js?v=6.15';
+import { parseExcel, exportImportTemplate } from '../data/excel.js?v=6.15&build=20261127';
 import { getStorageStatus } from '../data/storage.js?v=6.15';
-import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=6.15';
+import { IMPORT_FIELD_DEFS, applyMappingTemplate, buildImportMapping, createHeaderFingerprint, matchMappingTemplate, resolveImportPricing } from '../services/importMappingService.js?v=6.15&build=20261127';
 import { createMappingTemplate, deleteMappingTemplate, duplicateMappingTemplate, getMappingTemplate, listMappingTemplates, markMappingTemplateUsed, saveMappingTemplate } from '../services/importMappingTemplateService.js?v=6.15';
 import { esc, fmtMoney, openModal, closeModal, toast } from '../utils/dom.js?v=6.15';
 import { hasMissingPrice } from '../utils/costing.js?v=6.15';
 import { categoryGuess } from '../utils/stats.js?v=6.15';
 
 const PREVIEW_PAGE_SIZES = [20, 50, 100];
+const HUB_TARGETS = {
+  project_boq: { label: '工程量清单', icon: 'list_alt', description: '指定项目的计价明细' },
+  boq_library: { label: '清单库', icon: 'format_list_bulleted', description: '可跨项目复用的清单' },
+  boq_quota_bundle: { label: '清单及定额组合', icon: 'account_tree', description: '清单与套用定额关系' },
+  quota: { label: '常用定额', icon: 'menu_book', description: '定额子目与综合单价' },
+  material: { label: '材料库', icon: 'category', description: '材料规格与价格' },
+  equipment: { label: '设备库', icon: 'precision_manufacturing', description: '设备型号与价格' },
+};
 
 const SAMPLE_ROWS = [
   { 序号: 1, 项目名称: '土方开挖（基坑）', 项目特征: '挖土深度 ≤3m，含支撑', 计量单位: 'm³', 工程数量: '125.600', 综合单价: '86.35', 工艺段: '生化池', 费用分类: '土建工程' },
@@ -52,28 +60,30 @@ const state = {
   previewPageSize: 50,
   selectedRows: new Set(),
   importMode: 'append',
-  hubSelectedType: 'boq',
+  hubSelectedType: 'project_boq',
   hubImportResult: null,
 };
 
 export async function render(workspace = document.getElementById('workspace')) {
   const params = window.__app?.state?.routeParams || {};
-  [state.projects, state.storageStatus] = await Promise.all([
+  const [projects, storageStatus] = await Promise.all([
     projectService.list(),
     getStorageStatus(),
   ]);
-  if (!state.projectId && state.projects.length) {
-    state.projectId = params.projectId || window.__app?.state?.currentProjectId || state.projects[0].id;
-  }
-  refreshTemplates();
-  state.draftAvailable = Boolean(readDraft());
+  if (workspace.isInvalidated) return;
+  state.projects = projects;
+  state.storageStatus = storageStatus;
   if (params.mode === 'boq') state.mode = 'boq';
   if (params.mode === 'hub') state.mode = 'hub';
   if (params.importResult) {
     state.hubImportResult = normalizeHubImportResult(params.importResult);
-    if (state.hubImportResult.projectId) state.projectId = state.hubImportResult.projectId;
   }
   else if (!Object.keys(params).length || params.mode === 'hub') state.hubImportResult = null;
+  const candidates = state.mode === 'hub' ? hubProjects() : projects;
+  state.projectId = [params.projectId, params.importResult?.projectId, state.projectId, window.__app?.state?.currentProjectId]
+    .find(id => candidates.some(project => project.id === id)) || candidates[0]?.id || '';
+  refreshTemplates();
+  state.draftAvailable = Boolean(readDraft());
   exposeImporterActions(workspace);
   if (params.action === 'quota') {
     window.__app.state.routeParams = {};
@@ -99,15 +109,7 @@ function exposeImporterActions(workspace) {
       state.mode = 'hub';
       renderHub(workspace);
     },
-    startBOQImport: () => {
-      if (!state.projects.length) {
-        toast('导入清单前需要先建立项目档案。');
-        window.__app.go('projects', { action: 'new', returnTo: 'importer' });
-        return;
-      }
-      window.__app.go('ai-import', { targetType: 'project_boq', projectId: state.projectId || state.projects[0].id });
-    },
-    importQuotaExcel,
+    createHubProject: () => window.__app.go('projects', { action: 'new', returnTo: 'importer' }),
     goBackup: () => {
       toast('JSON 备份导入仍在「数据与备份」中执行。');
       window.__app.go('settings');
@@ -117,24 +119,13 @@ function exposeImporterActions(workspace) {
       if (state.projectId) window.__app.go('boq', { projectId: state.projectId });
       else window.__app.go('boq');
     },
-    importMaterials: () => window.__app.go('ai-import', { targetType: 'material' }),
-    importEquipment: () => window.__app.go('ai-import', { targetType: 'equipment' }),
-    importBoqLibrary: () => window.__app.go('ai-import', { targetType: 'boq_library' }),
     selectHubType: type => {
-      if (!['boq', 'boq_library', 'quota', 'material', 'equipment'].includes(type)) return;
+      if (workspace.isInvalidated || !Object.hasOwn(HUB_TARGETS, type)) return;
       state.hubSelectedType = type;
       renderHub(workspace);
+      workspace.querySelector(`[data-hub-type="${type}"]`)?.focus({ preventScroll: true });
     },
-    continueHubImport: () => {
-      const actionByType = {
-        boq: 'startBOQImport',
-        boq_library: 'importBoqLibrary',
-        quota: 'importQuotaExcel',
-        material: 'importMaterials',
-        equipment: 'importEquipment',
-      };
-      window.__importer[actionByType[state.hubSelectedType]]?.();
-    },
+    continueHubImport: () => openHubImport(workspace),
     dismissHubImportResult: () => {
       state.hubImportResult = null;
       renderHub(workspace);
@@ -286,7 +277,7 @@ function exposeImporterActions(workspace) {
     repairUnitFromPrevious,
     mapUnknownCategory,
     mergeDuplicateRows,
-    downloadTemplate: exportQuotaTemplate,
+    downloadTemplate: () => exportImportTemplate(state.hubSelectedType),
     goBOQ: () => {
       if (state.projectId) window.__app.go('boq', { projectId: state.projectId });
     },
@@ -304,123 +295,38 @@ export function normalizeHubImportResult(result = {}) {
 }
 
 function renderHub(workspace = document.getElementById('workspace')) {
-  const projectCount = state.projects.length;
-  const usingFolder = state.storageStatus.mode === 'folder';
-  const storageLabel = usingFolder ? '本地文件夹' : '浏览器本地库';
-  const storageDetail = usingFolder
-    ? `当前数据同步到“${state.storageStatus.directoryName || '已选文件夹'}”，并保留浏览器镜像。`
-    : '当前数据保存在此浏览器的 IndexedDB 中。';
-  const activeProject = state.projects.find(project => project.id === state.projectId);
-  const importComplete = Boolean(state.hubImportResult);
+  const storageLabel = state.storageStatus.mode === 'folder' ? '本地文件夹' : '浏览器本地库';
+  const resultProject = state.projects.find(project => project.id === state.hubImportResult?.projectId);
   workspace.innerHTML = `
     <div class="page-frame min-h-full pb-5">
-      <header class="flex flex-col gap-3 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div class="flex items-center gap-2 text-xs font-medium text-teal-700">
-            <span class="material-symbols-outlined icon-inline">account_tree</span>
-            数据导入流程
-          </div>
-          <h1 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">导入资料</h1>
-          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-500">按步骤导入项目清单、清单库、定额、材料或设备数据。每份文件先经过字段识别与质检，确认后才会写入本地资料库。</p>
-        </div>
-        <div class="flex items-center gap-2 text-xs text-slate-500" aria-label="存储状态">
+      <header class="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <h1 class="text-2xl font-semibold tracking-tight text-slate-950">导入资料</h1>
+        <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500" aria-label="存储状态">
           <span class="pulse-dot" aria-hidden="true"></span>
           <span>数据保存在${esc(storageLabel)}</span>
-          <button type="button" onclick="window.__importer.goBackup()" class="ml-1 font-medium text-teal-700 hover:underline">备份与恢复</button>
+          <button type="button" onclick="window.__importer.goBackup()" class="font-medium text-teal-700 hover:underline">备份与恢复</button>
         </div>
       </header>
 
-      <section class="mt-5 rounded-xl border border-slate-200 bg-white" aria-labelledby="import-flow-title">
-        <h2 id="import-flow-title" class="sr-only">导入步骤</h2>
-        <ol class="grid grid-cols-1 divide-y divide-slate-200 md:grid-cols-4 md:divide-x md:divide-y-0">
-          ${hubStep('1', '选择数据类型', '确认要导入的资料', !importComplete, importComplete)}
-          ${hubStep('2', '上传文件', '选择 Excel 或 CSV 文件', false, importComplete)}
-          ${hubStep('3', '数据质检', '识别字段并生成报告', false, importComplete)}
-          ${hubStep('4', '确认写入', '确认后保存到本地库', false, importComplete)}
-        </ol>
-      </section>
+      ${state.hubImportResult ? hubImportResultBanner(resultProject) : ''}
 
-      ${importComplete ? hubImportResultBanner(activeProject) : ''}
-
-      <div class="${importComplete ? 'mt-4' : 'mt-5'} grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <main class="min-w-0 space-y-5">
-          <section class="rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="import-type-title">
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 id="import-type-title" class="text-base font-semibold text-slate-900">第 1 步：选择数据类型</h2>
-                <p class="mt-1 text-sm text-slate-500">选择后进入对应的上传与预检流程。不同类型会使用适合它的字段规则和模板。</p>
-              </div>
-              <button type="button" onclick="window.__importer.downloadTemplate()" class="inline-flex items-center gap-1.5 text-sm font-medium text-teal-700 hover:underline">
-                <span class="material-symbols-outlined icon-inline">download</span>
-                下载定额 Excel 模板
-              </button>
-            </div>
-            <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              ${hubTypeCard({ type: 'boq', icon: 'list_alt', title: '工程量清单', desc: '导入项目清单、分部分项与计价信息。', meta: activeProject ? `目标项目：${activeProject.name}` : '需先选择或建立目标项目', tone: 'teal' })}
-              ${hubTypeCard({ type: 'boq_library', icon: 'format_list_bulleted', title: '清单库', desc: '导入可跨项目复用的标准清单。', meta: '支持编码优先和复合身份去重', tone: 'blue' })}
-              ${hubTypeCard({ type: 'quota', icon: 'menu_book', title: '常用定额', desc: '导入定额项目及其综合单价、消耗量和特征。', meta: '支持 Excel 模板与字段映射', tone: 'blue' })}
-              ${hubTypeCard({ type: 'material', icon: 'category', title: '材料库', desc: '导入材料编码、规格、品牌和价格历史。', meta: '按编码优先，预览后再写入', tone: 'slate' })}
-              ${hubTypeCard({ type: 'equipment', icon: 'precision_manufacturing', title: '设备库', desc: '导入设备参数、购置价与安装价口径。', meta: '支持设备购置与综合安装价', tone: 'slate' })}
-            </div>
-            ${hubUploadPanel()}
-          </section>
-
-          <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(310px,.85fr)]">
-            <section class="rounded-xl border border-slate-200 bg-white" aria-labelledby="recent-import-title">
-              <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
-                <div><h2 id="recent-import-title" class="font-semibold text-slate-900">最近导入记录</h2><p class="mt-1 text-xs text-slate-500">仅记录当前浏览器最近完成的导入摘要。</p></div>
-              </div>
-              <div class="divide-y divide-slate-100">
-                ${hubRecentImports()}
-              </div>
-            </section>
-            <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="quality-context-title">
-              <div class="flex items-center justify-between"><h2 id="quality-context-title" class="font-semibold text-slate-900">本次导入质检概览</h2><span class="text-xs text-slate-500">未开始</span></div>
-              <div class="mt-4 grid grid-cols-4 overflow-hidden rounded-lg border border-slate-200 text-center text-xs"><div class="border-r border-slate-200 p-3"><b class="block text-base text-slate-800">—</b>预计记录数</div><div class="border-r border-slate-200 p-3"><b class="block text-base text-slate-800">—</b>通过</div><div class="border-r border-slate-200 p-3"><b class="block text-base text-slate-800">—</b>部分通过</div><div class="p-3"><b class="block text-base text-slate-800">—</b>未通过</div></div>
-              <ul class="mt-4 space-y-2 text-xs leading-5 text-slate-600">${hubCheck('check_circle', '必填字段与数据格式')}${hubCheck('check_circle', '编码、单位与重复项')}${hubCheck('check_circle', '价格口径与缺失价格')}</ul>
-            </section>
+      <div class="mt-5 grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <section class="min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-5" aria-labelledby="import-type-title">
+          <h2 id="import-type-title" class="text-base font-semibold text-slate-900">资料类型</h2>
+          <div class="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3" role="group" aria-labelledby="import-type-title">
+            ${Object.entries(HUB_TARGETS).map(([type, target]) => hubTypeCard(type, target)).join('')}
           </div>
-        </main>
+          ${hubUploadPanel()}
+        </section>
 
-        <aside class="space-y-4">
-          <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="project-context-title">
-            <div class="flex items-center justify-between gap-3">
-              <h2 id="project-context-title" class="font-semibold text-slate-900">当前项目</h2>
-              <button type="button" onclick="window.__app.go('projects')" class="text-xs font-medium text-teal-700 hover:underline">切换项目</button>
-            </div>
-            <dl class="mt-4 space-y-3 text-sm">
-              <div class="flex items-start justify-between gap-3"><dt class="text-slate-500">项目名称</dt><dd class="max-w-[170px] text-right font-medium text-slate-800">${esc(activeProject?.name || '尚未选择项目')}</dd></div>
-              <div class="flex items-start justify-between gap-3"><dt class="text-slate-500">可导入清单</dt><dd class="text-right font-medium text-slate-800">${projectCount ? '可以' : '先新建项目'}</dd></div>
-              <div class="flex items-start justify-between gap-3"><dt class="text-slate-500">当前存储</dt><dd class="text-right font-medium text-slate-800">${esc(storageLabel)}</dd></div>
-            </dl>
-          </section>
-
-          <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="storage-context-title">
-            <h2 id="storage-context-title" class="font-semibold text-slate-900">数据保存位置</h2>
-            <dl class="mt-4 space-y-3 text-sm"><div class="flex justify-between gap-3"><dt class="text-slate-500">保存方式</dt><dd class="text-right font-medium text-slate-800">${esc(storageLabel)}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">存储引擎</dt><dd class="font-medium text-slate-800">IndexedDB</dd></div></dl>
-            <button type="button" onclick="window.__importer.goBackup()" class="mt-4 text-xs font-medium text-teal-700 hover:underline">管理存储与备份</button>
-          </section>
-
-          <section class="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="template-context-title">
-            <h2 id="template-context-title" class="font-semibold text-slate-900">模板与说明</h2>
-            <div class="mt-3 space-y-2 text-sm"><button type="button" onclick="window.__importer.downloadTemplate()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>下载定额 Excel 模板</button><button type="button" onclick="window.__importer.importBoqLibrary()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入清单库</button><button type="button" onclick="window.__importer.importMaterials()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入材料库模板</button><button type="button" onclick="window.__importer.importEquipment()" class="flex items-center gap-2 text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline">description</span>导入设备库模板</button></div>
-          </section>
-
-          <section class="rounded-xl border border-amber-200 bg-amber-50/60 p-4" aria-label="备份提醒">
-            <div class="flex gap-2 text-sm font-medium text-amber-900"><span class="material-symbols-outlined icon-inline">info</span> 导入前提醒</div>
-            <p class="mt-2 text-xs leading-5 text-amber-800">恢复 JSON 或 ZIP 备份会替换当前资料。更换设备前，请先在「数据与备份」中导出完整备份。</p>
-          </section>
-        </aside>
+        <section class="min-w-0 rounded-xl border border-slate-200 bg-white" aria-labelledby="recent-import-title">
+          <h2 id="recent-import-title" class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">最近导入记录</h2>
+          <div class="divide-y divide-slate-100">${hubRecentImports()}</div>
+        </section>
       </div>
     </div>
   `;
-}
-
-function hubStep(number, title, desc, active = false, complete = false) {
-  return `<li class="flex items-center gap-3 px-5 py-4 ${active ? 'bg-teal-50/70' : ''}">
-    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${active || complete ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'} text-sm font-semibold">${complete ? '<span class="material-symbols-outlined icon-inline">check</span>' : number}</span>
-    <span><span class="block text-sm font-semibold ${active || complete ? 'text-teal-800' : 'text-slate-800'}">${title}</span><span class="mt-0.5 block text-xs text-slate-500">${desc}</span></span>
-  </li>`;
+  bindHubUpload(workspace);
 }
 
 function hubImportResultBanner(activeProject) {
@@ -434,37 +340,68 @@ function hubImportResultBanner(activeProject) {
   </section>`;
 }
 
-function hubTypeCard({ type, icon, title, desc, meta, tone }) {
-  const tones = {
-    teal: 'border-teal-200 bg-teal-50 text-teal-700',
-    blue: 'border-blue-200 bg-blue-50 text-blue-700',
-    slate: 'border-slate-200 bg-slate-50 text-slate-700',
-  };
+function hubTypeCard(type, { label, icon, description }) {
   const selected = state.hubSelectedType === type;
-  return `<button type="button" onclick="window.__importer.selectHubType('${type}')" aria-pressed="${selected}" class="min-h-[130px] rounded-lg border p-4 text-left transition-colors ${selected ? 'border-teal-500 bg-teal-50/60 ring-1 ring-teal-100' : 'border-slate-200 bg-white hover:border-teal-300'}">
-    <span class="flex items-start justify-between gap-3"><span class="icon-surface ${tones[tone] || tones.slate}"><span class="material-symbols-outlined icon-kpi">${icon}</span></span>${selected ? '<span class="material-symbols-outlined icon-inline text-teal-700">check_circle</span>' : ''}</span>
-    <span class="mt-3 block text-base font-semibold text-slate-900">${esc(title)}</span>
-    <span class="mt-1 block text-xs leading-5 text-slate-500">${esc(desc)}</span>
-    <span class="mt-2 block text-xs text-slate-500">${esc(meta)}</span>
+  return `<button type="button" data-hub-type="${type}" onclick="window.__importer.selectHubType('${type}')" aria-pressed="${selected}" class="flex min-h-[68px] min-w-0 items-start gap-2 rounded-lg border px-2 py-3 text-left transition-colors sm:px-3 ${selected ? 'border-teal-600 bg-teal-50 text-teal-950' : 'border-slate-200 bg-white text-slate-900 hover:border-teal-300'}">
+    <span class="material-symbols-outlined icon-inline shrink-0 ${selected ? 'text-teal-700' : 'text-slate-500'}" aria-hidden="true">${icon}</span>
+    <span class="min-w-0"><span class="block text-sm font-semibold">${label}</span><span class="mt-0.5 block text-xs leading-4 text-slate-600">${description}</span></span>
   </button>`;
 }
 
 function hubUploadPanel() {
-  const copyByType = {
-    boq: ['工程量清单', 'Excel / CSV', '开始清单导入'],
-    boq_library: ['清单库', 'Excel / CSV', '开始清单库导入'],
-    quota: ['常用定额', 'Excel / CSV', '开始定额导入'],
-    material: ['材料库', 'Excel / CSV', '开始材料导入'],
-    equipment: ['设备库', 'Excel / CSV', '开始设备导入'],
-  };
-  const [type, formats, action] = copyByType[state.hubSelectedType] || copyByType.boq;
-  return `<section class="mt-4 border-t border-slate-200 pt-4" aria-labelledby="upload-file-title">
-    <div class="flex items-center justify-between gap-3"><h3 id="upload-file-title" class="text-sm font-semibold text-slate-800">第 2 步：上传 ${type} 文件</h3><span class="text-xs text-slate-500">支持 ${formats}，单文件不超过 200MB</span></div>
-    <button type="button" onclick="window.__importer.continueHubImport()" class="mt-3 flex min-h-[92px] w-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50/70 px-4 text-center hover:border-teal-400 hover:bg-teal-50/40">
-      <span class="material-symbols-outlined icon-page text-teal-600">cloud_upload</span><span class="mt-2 text-sm font-semibold text-slate-800">将文件拖拽到此处，或 <span class="text-teal-700">点击上传</span></span><span class="mt-1 text-xs text-slate-500">${esc(action)}后将自动进入字段识别与数据质检</span>
-    </button>
-    <div class="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500"><span class="flex items-center gap-1.5"><span class="material-symbols-outlined icon-inline text-blue-600">info</span>建议先下载模板填写数据，确保字段规范。</span><button type="button" onclick="window.__importer.downloadTemplate()" class="font-medium text-teal-700 hover:underline">下载 Excel 模板</button></div>
+  const target = HUB_TARGETS[state.hubSelectedType];
+  const projectImport = state.hubSelectedType === 'project_boq';
+  const projects = projectImport ? hubProjects() : [];
+  const canUpload = !projectImport || projects.length > 0;
+  return `<section class="mt-5 border-t border-slate-200 pt-4" aria-labelledby="upload-file-title">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h3 id="upload-file-title" class="text-sm font-semibold text-slate-900">上传${target.label}</h3>
+      <div class="flex flex-wrap gap-3">
+        ${canUpload ? '<button type="button" onclick="window.__importer.continueHubImport()" class="text-sm text-slate-600 hover:text-teal-700">CSV 设置</button>' : ''}
+        <button type="button" onclick="window.__importer.downloadTemplate()" class="inline-flex items-center gap-1 text-sm font-medium text-teal-700 hover:underline"><span class="material-symbols-outlined icon-inline" aria-hidden="true">download</span>下载模板</button>
+      </div>
+    </div>
+    ${projectImport ? `<div class="mt-3 flex flex-wrap items-center gap-2">
+      ${projects.length ? `<label for="hubImportProject" class="text-sm text-slate-700">导入项目</label><select id="hubImportProject" name="projectId" class="h-9 min-w-0 max-w-full rounded border border-slate-300 bg-white px-2 text-sm">${projects.map(project => `<option value="${esc(project.id)}" ${project.id === state.projectId ? 'selected' : ''}>${esc(project.name)}</option>`).join('')}</select>` : '<span class="text-sm text-slate-600">工程量清单需要关联一个可编辑项目。</span>'}
+      <button type="button" onclick="window.__importer.createHubProject()" class="h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">新建项目</button>
+    </div>` : ''}
+    ${canUpload ? `<label id="hubImportDrop" for="hubImportFile" class="mt-3 flex min-h-[112px] w-full cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50/70 px-3 py-3 text-center hover:border-teal-500 focus-within:ring-2 focus-within:ring-teal-600 focus-within:ring-offset-2">
+      <span class="material-symbols-outlined icon-page text-teal-700" aria-hidden="true">cloud_upload</span>
+      <span id="hubImportPrompt" class="mt-2 text-sm font-semibold text-slate-800" aria-live="polite">选择文件或拖到这里</span>
+      <span id="hubImportFileHelp" class="mt-1 text-xs text-slate-500">.xlsx、.xls、.csv · 单文件不超过 200 MB</span>
+      <input id="hubImportFile" name="importFile" type="file" accept=".xlsx,.xls,.csv" aria-labelledby="hubImportPrompt" aria-describedby="hubImportFileHelp" class="sr-only">
+    </label>` : ''}
   </section>`;
+}
+
+function hubProjects() {
+  return state.projects.filter(project => project.status !== 'archived');
+}
+
+function bindHubUpload(workspace) {
+  const projectPicker = workspace.querySelector('#hubImportProject');
+  projectPicker?.addEventListener('change', () => {
+    if (workspace.isInvalidated) return;
+    state.projectId = projectPicker.value;
+    window.__app.state.currentProjectId = projectPicker.value;
+  });
+  bindFileControls(workspace.querySelector('#hubImportFile'), workspace.querySelector('#hubImportDrop'), file => openHubImport(workspace, file));
+}
+
+function openHubImport(workspace, file) {
+  if (workspace.isInvalidated) return;
+  const targetType = state.hubSelectedType;
+  const projectId = targetType === 'project_boq' ? state.projectId : '';
+  if (targetType === 'project_boq' && !hubProjects().some(project => project.id === projectId)) return;
+  const params = { targetType, projectId, returnTo: 'importer' };
+  if (file) {
+    params.importFile = file;
+    const prompt = workspace.querySelector('#hubImportPrompt');
+    if (prompt) prompt.textContent = '正在读取表格…';
+    const input = workspace.querySelector('#hubImportFile');
+    if (input) input.disabled = true;
+  } else params.openUpload = true;
+  return window.__app.go('ai-import', params);
 }
 
 function hubRecentRow(icon, fileName, type, count, status, badgeClass) {
@@ -477,7 +414,7 @@ function hubRecentRow(icon, fileName, type, count, status, badgeClass) {
 
 function hubRecentImports() {
   const meta = {
-    project_boq: ['list_alt', '项目清单'], boq_library: ['format_list_bulleted', '清单库'], quota: ['menu_book', '常用定额'],
+    project_boq: ['list_alt', '项目清单'], boq_library: ['format_list_bulleted', '清单库'], boq_quota_bundle: ['account_tree', '清单及定额组合'], quota: ['menu_book', '常用定额'],
     material: ['category', '材料库'], equipment: ['precision_manufacturing', '设备库'],
   };
   let records = [];
@@ -488,10 +425,6 @@ function hubRecentImports() {
     const warning = record.outcome === 'success_with_warnings' || Number(record.notWritten || 0) > 0;
     return hubRecentRow(icon, record.sourceName || '未命名文件', label, `${Number(record.committed || 0).toLocaleString('zh-CN')} 条写入`, warning ? '有警告' : '已完成', warning ? 'badge-yellow' : 'badge-green');
   }).join('');
-}
-
-function hubCheck(icon, text) {
-  return `<li class="flex items-center gap-2"><span class="material-symbols-outlined icon-inline text-emerald-600">${icon}</span>${esc(text)}</li>`;
 }
 
 function paint(workspace = document.getElementById('workspace')) {
@@ -997,19 +930,33 @@ function issueCard(issue) {
 }
 
 function bindUploadEvents(workspace = document.getElementById('workspace')) {
-  const input = workspace.querySelector('#importFileInput');
-  const dropZone = workspace.querySelector('#importDropZone');
+  bindFileControls(workspace.querySelector('#importFileInput'), workspace.querySelector('#importDropZone'), file => handleFile(file, workspace));
+}
+
+function bindFileControls(input, dropZone, onFile) {
   if (!input || !dropZone) return;
-  input.onchange = () => handleFile(input.files?.[0], workspace);
-  dropZone.ondragover = e => {
-    e.preventDefault();
-    dropZone.classList.add('ring-2', 'ring-blue-300');
+  const selectFile = files => {
+    if (!files?.length || input.disabled) return;
+    if (files.length > 1) return toast('一次只能导入一个表格文件。', 'error');
+    return onFile(files[0]);
   };
-  dropZone.ondragleave = () => dropZone.classList.remove('ring-2', 'ring-blue-300');
-  dropZone.ondrop = e => {
-    e.preventDefault();
-    dropZone.classList.remove('ring-2', 'ring-blue-300');
-    handleFile(e.dataTransfer?.files?.[0], workspace);
+  input.onchange = () => {
+    selectFile(input.files);
+    input.value = '';
+  };
+  dropZone.ondragover = event => {
+    if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    dropZone.classList.add('ring-2', 'ring-teal-300');
+  };
+  dropZone.ondragleave = event => {
+    if (!dropZone.contains(event.relatedTarget)) dropZone.classList.remove('ring-2', 'ring-teal-300');
+  };
+  dropZone.ondrop = event => {
+    event.preventDefault();
+    dropZone.classList.remove('ring-2', 'ring-teal-300');
+    selectFile(event.dataTransfer?.files);
   };
 }
 

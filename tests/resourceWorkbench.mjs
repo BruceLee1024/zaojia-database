@@ -232,7 +232,7 @@ async function testPreviewUsesCodeFirstIdentityAndExactFallback() {
 async function testCommitDeduplicatesResourcesAndPrices() {
   const rows = [
     { 编码: 'E-01', 分类: '泵类', 名称: '潜水泵', 规格型号: 'Q=10', 单位: '台', 品牌: '甲', 单价: '12000', 价格日期: '2026-07-01', 省: '四川', 市: '成都', 价格来源: '供应商报价', 价格口径: '到场价', 供应商: '甲厂' },
-    { 编码: ' e-01 ', 名称: '重复行', 单位: '台', 单价: '12000', 价格日期: '2026-07-01', 省: '四川', 市: '成都', 价格来源: '供应商报价', 价格口径: '到场价', 供应商: '甲厂' },
+    { 编码: ' e-01 ', 名称: '潜水泵', 规格型号: 'Q=10', 单位: '台', 品牌: '甲', 单价: '12000', 价格日期: '2026-07-01', 省: '四川', 市: '成都', 价格来源: '供应商报价', 价格口径: '到场价', 供应商: '甲厂' },
   ];
   const preview = await resourceImportService.preview(rows, 'equipment');
   assert.equal(preview.rows[1].action, 'duplicate');

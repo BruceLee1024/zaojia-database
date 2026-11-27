@@ -1,4 +1,4 @@
-// 五类导入目标的统一 Schema 与值转换。
+// 导入目标的统一字段定义与值转换。
 
 const COMMON_NAME = ['项目名称', '清单名称', '工程名称', '名称', '项目内容', '工作内容描述'];
 const COMMON_UNIT = ['计量单位', '单位', '计量'];
@@ -74,18 +74,18 @@ export function normalizeImportValue(value, kind = 'text') {
   return String(value ?? '').replace(/\r\n?/g, '\n').trim();
 }
 
-export function normalizeImportNumber(value, { percent = false } = {}) {
-  if (value === undefined || value === null || value === '') return 0;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+export function normalizeImportNumber(value, { percent = false, fallback = 0 } = {}) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
   let text = String(value).trim();
-  if (!text || /^(?:-|--|—|无|n\/?a)$/i.test(text)) return 0;
+  if (!text || /^(?:-|--|—|无|n\/?a)$/i.test(text)) return fallback;
   const negative = /^[（(].*[）)]$/.test(text);
   const hasPercent = /[%％]$/.test(text);
   text = text.replace(/[（）()]/g, '').replace(/[,，¥￥$\s]/g, '').replace(/[％%]$/, '');
   const match = text.match(/[-+]?\d+(?:\.\d+)?/);
-  if (!match) return 0;
+  if (!match) return fallback;
   let number = Number(match[0]);
-  if (!Number.isFinite(number)) return 0;
+  if (!Number.isFinite(number)) return fallback;
   if (negative) number = -Math.abs(number);
   if (percent || hasPercent) number /= 100;
   return number;
@@ -108,17 +108,34 @@ function resourceSchema(key, label) {
   return schema(key, `${label}库`, [
     field('code', `${label}编码`, ['编码', `${label}编码`, 'code'], 'text'),
     field('category', '分类', ['分类', `${label}分类`, 'category'], 'text', false, { inheritContext: true }),
-    field('name', `${label}名称`, ['名称', `${label}名称`, 'name'], 'text', true),
+    field('name', `${label}名称`, [`${label}名称`, '名称', 'name'], 'text', true),
     field('specModel', '规格型号', ['规格型号', '规格', '型号', 'specModel'], 'text'),
     field('unit', '单位', COMMON_UNIT, 'unit', true),
-    field('brand', '品牌', ['品牌', 'brand'], 'text'), field('manufacturer', '生产厂家', ['生产厂家', '制造商', 'manufacturer'], 'text'),
+    field('brand', '品牌', ['品牌', 'brand'], 'text'),
+    field('manufacturer', '生产厂家', ['生产厂家', '制造商', 'manufacturer'], 'text'),
+    field('standard', '执行标准', ['执行标准', '标准', 'standard'], 'text'),
+    field('processStage', '工艺段', ['工艺段', 'processStage'], 'text'),
+    field('tags', '标签', ['标签', 'tags'], 'text'),
+    field('status', '状态', ['状态', 'status'], 'text'),
+    field('note', '备注', ['备注', '说明', 'note'], 'text'),
     field('unitPrice', '单价', ['单价', '不含税单价', '含税单价', '价格', 'unitPrice'], 'money'),
+    field('priceDate', '价格日期', ['价格日期', '日期', 'priceDate'], 'date'),
+    field('validFrom', '生效日期', ['生效日期', 'validFrom'], 'date'),
+    field('validTo', '失效日期', ['失效日期', 'validTo'], 'date'),
+    field('province', '省份', ['省', '省份', '地区', '区域', 'province', 'region'], 'text'),
+    field('city', '城市', ['市', '城市', 'city'], 'text'),
+    field('district', '区县', ['区县', '区', 'district'], 'text'),
     field('sourceType', '价格来源', ['价格来源', '来源类型', 'sourceType'], 'text'),
     field('priceBasis', '价格口径', ['价格口径', '口径', 'priceBasis'], 'text'),
-    field('taxIncluded', '含税', ['含税', 'taxIncluded'], 'boolean'), field('taxRate', '税率', ['税率', 'taxRate'], 'percent'),
-    field('province', '省份', ['省', '省份', '地区', '区域', 'province', 'region'], 'text'), field('city', '城市', ['市', '城市', 'city'], 'text'), field('district', '区县', ['区县', '区', 'district'], 'text'),
-    field('priceDate', '价格日期', ['价格日期', '日期', 'priceDate'], 'date'), field('supplier', '供应商', ['供应商', 'supplier'], 'text'),
-    field('note', '备注', ['备注', '说明', 'note'], 'text'),
+    field('taxIncluded', '含税', ['含税', '是否含税', 'taxIncluded'], 'boolean'),
+    field('taxRate', '税率', ['税率', '税率(%)', 'taxRate'], 'percent'),
+    field('supplier', '供应商', ['供应商', 'supplier'], 'text'),
+    field('installationScope', '安装范围', ['安装范围', 'installationScope'], 'text'),
+    field('base', '基础价', ['基础价', 'base'], 'money'),
+    field('freight', '运杂费', ['运杂费', '运费', 'freight'], 'money'),
+    field('installation', '安装费', ['安装费', 'installation'], 'money'),
+    field('commissioning', '调试费', ['调试费', 'commissioning'], 'money'),
+    field('priceNote', '价格备注', ['价格备注', 'priceNote'], 'text'),
   ]);
 }
 

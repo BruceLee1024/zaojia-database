@@ -2,7 +2,7 @@ import { boqLibraryQuotaRelationRepo, boqLibraryRepo, quotaRepo } from '../data/
 import { uid } from '../utils/dom.js?v=6.15';
 import { categoryGuess } from '../utils/stats.js?v=6.15';
 import { quotaPriceStatus } from '../utils/costing.js?v=6.15';
-import { findDuplicateLibraryItem, normalizeLibraryItem } from './boqLibraryService.js?v=6.15';
+import { findDuplicateLibraryItem, normalizeLibraryItem } from './boqLibraryService.js?v=6.15&build=20261127';
 import { normalizeQuotaRelation, parseQuotaUnit, quotaSnapshot } from './boqQuotaRelationService.js?v=6.15';
 
 export function normalizeBundleLayer(value = '') {
@@ -16,14 +16,19 @@ export function groupBundleRows(rows = []) {
   const groups = [];
   const orphans = [];
   let current = null;
+  let previous = null;
   rows.forEach(row => {
+    if (previous?.sheetName !== row.sheetName || previous?.regionId !== row.regionId) current = null;
+    previous = row;
     const kind = normalizeBundleLayer(row.layer);
     if (kind === 'boq') {
-      current = { parent: row, children: [] };
-      groups.push(current);
+      current = row.importable === false ? null : { parent: row, children: [] };
+      if (current) groups.push(current);
     } else if (kind === 'quota') {
-      if (current) current.children.push(row);
-      else orphans.push(row);
+      if (row.importable !== false) {
+        if (current) current.children.push(row);
+        else orphans.push(row);
+      }
     } else {
       current = null;
     }
@@ -42,7 +47,7 @@ export async function importBoqQuotaBundle(rows = [], { sourceName = '组合表�
   const libraries = structuredCloneSafe(originalLibraries);
   const quotas = structuredCloneSafe(originalQuotas);
   let relations = structuredCloneSafe(originalRelations);
-  const result = { total: rows.length, success: 0, added: 0, updated: 0, skipped: 0, failed: 0, relationsAdded: 0, quotaAdded: 0, quotaUpdated: 0, warnings: [] };
+  const result = { total: rows.filter(row => row.importable !== false).length, success: 0, added: 0, updated: 0, skipped: 0, failed: 0, relationsAdded: 0, quotaAdded: 0, quotaUpdated: 0, warnings: [] };
 
   try {
     grouped.groups.forEach(group => {

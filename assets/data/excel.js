@@ -4,8 +4,9 @@
 //   B] 工程量清单：序号/项目编码/项目名称/项目特征/计量单位/工程数量/综合单价/合价
 import { categoryGuess } from '../utils/stats.js?v=6.15';
 import { calculateAmount } from '../utils/costing.js?v=6.15';
-import { normalizeImportHeader } from '../services/importMappingService.js?v=6.15&build=20260814';
-import { detectImportRegions } from './importEngine.js?v=6.15&build=20260814';
+import { normalizeImportHeader } from '../services/importMappingService.js?v=6.15&build=20261127';
+import { getImportSchema } from '../services/importSchemaService.js?v=6.15&build=20261127';
+import { detectImportRegions } from './importEngine.js?v=6.15&build=20261127';
 
 const HEADER_QUOTA  = ['清单名称', '项目特征', '工作内容', '工程量计算规则', '单位', '综合单价', '综合单价组成'];
 const HEADER_BOQ    = ['序号', '项目编码', '项目名称', '项目特征', '计量单位', '工程数量', '综合单价', '合价'];
@@ -68,7 +69,10 @@ export async function parseImportFile(file, options = {}) {
   }
   const sheets = (workbook.SheetNames || []).map((name, index) => {
     const worksheet = workbook.Sheets[name];
+    const ref = worksheet?.['!ref'] || '';
+    const start = ref ? XLSX.utils.decode_range(ref).s : { r: 0, c: 0 };
     const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: true, blankrows: true });
+    if (ref && options.keepPercentFormat && extension !== 'csv') keepExcelPercentCells(worksheet, matrix, start);
     const formulaWarnings = findFormulaWarnings(worksheet, name);
     return {
       name,
@@ -76,8 +80,10 @@ export async function parseImportFile(file, options = {}) {
       hidden: Number(workbook.Workbook?.Sheets?.[index]?.Hidden || 0) > 0,
       visibility: Number(workbook.Workbook?.Sheets?.[index]?.Hidden || 0),
       matrix,
+      rowOffset: start.r,
+      columnOffset: start.c,
       merges: (worksheet?.['!merges'] || []).map(range => ({ s: { ...range.s }, e: { ...range.e } })),
-      ref: worksheet?.['!ref'] || '',
+      ref,
       fullRef: worksheet?.['!fullref'] || '',
       warnings: formulaWarnings,
     };
@@ -92,6 +98,17 @@ export async function parseImportFile(file, options = {}) {
     warnings: [...new Set(warnings)],
     csv: csvMeta,
   };
+}
+
+function keepExcelPercentCells(worksheet, matrix, start) {
+  for (const [address, cell] of Object.entries(worksheet)) {
+    if (!Number.isFinite(cell?.v) || typeof cell.z !== 'string' || !cell.w?.includes('%')) continue;
+    const format = cell.z.replace(/"[^"]*"|\\./g, '');
+    if (!format.includes('%')) continue;
+    const { r, c } = XLSX.utils.decode_cell(address);
+    const row = matrix[r - start.r];
+    if (row) row[c - start.c] = `${cell.v * 100}%`;
+  }
 }
 
 /**
@@ -544,16 +561,20 @@ export function exportBoqLibraryTemplate() {
 
 export function getResourceTemplateData(resourceType) {
   const equipment = resourceType === 'equipment';
-  const nameHeader = equipment ? '设备名称' : '材料名称';
-  const headers = [
-    '编码', '分类', nameHeader, '规格型号', '单位', '品牌', '生产厂家', '执行标准', '工艺段', '标签', '状态', '备注',
-    '单价', '价格日期', '生效日期', '失效日期', '省', '市', '区县', '价格来源', '价格口径', '含税', '税率', '供应商', '安装范围', '基础价', '运杂费', '安装费', '调试费', '价格备注',
-  ];
-  const sample = equipment
-    ? ['E-001', '泵类', '潜水排污泵', 'Q=25m³/h H=15m', '台', '示例品牌', '示例厂家', 'GB/T 24674', '污泥泵房', '泵,污泥', 'active', '', 12800, '2026-07-01', '', '', '四川', '成都', '', '供应商报价', '到场价', '是', 13, '示例供应商', '', 11000, 800, 800, 200, '']
-    : ['M-001', '管材', 'UPVC 管', 'DN200 PN1.0', 'm', '示例品牌', '示例厂家', 'GB/T 10002.1', '生化池', '管材,UPVC', 'active', '', 126, '2026-07-01', '', '', '四川', '成都', '', '官方信息价', '到场价', '否', 13, '', '', 110, 16, 0, 0, ''];
+  const fields = getImportSchema(equipment ? 'equipment' : 'material').fields;
+  const templateLabels = { code: '编码', province: '省', city: '市' };
+  const common = { brand: '示例品牌', manufacturer: '示例厂家', status: 'active', priceDate: '2026-07-01', province: '四川', city: '成都', priceBasis: '到场价', taxRate: 13 };
+  const sample = equipment ? {
+    ...common, code: 'E-001', category: '泵类', name: '潜水排污泵', specModel: 'Q=25m³/h H=15m', unit: '台',
+    standard: 'GB/T 24674', processStage: '污泥泵房', tags: '泵,污泥', unitPrice: 12800, sourceType: '供应商报价',
+    taxIncluded: '是', supplier: '示例供应商', base: 11000, freight: 800, installation: 800, commissioning: 200,
+  } : {
+    ...common, code: 'M-001', category: '管材', name: 'UPVC 管', specModel: 'DN200 PN1.0', unit: 'm',
+    standard: 'GB/T 10002.1', processStage: '生化池', tags: '管材,UPVC', unitPrice: 126, sourceType: '官方信息价',
+    taxIncluded: '否', base: 110, freight: 16, installation: 0, commissioning: 0,
+  };
   return {
-    rows: [headers, sample],
+    rows: [fields.map(field => templateLabels[field.key] || field.label), fields.map(field => sample[field.key] ?? '')],
     sheetName: equipment ? '设备库模板' : '材料库模板',
     fileName: equipment ? '设备库导入模板.xlsx' : '材料库导入模板.xlsx',
   };
@@ -570,3 +591,39 @@ export function exportResourceTemplate(resourceType) {
 
 export const exportMaterialTemplate = () => exportResourceTemplate('material');
 export const exportEquipmentTemplate = () => exportResourceTemplate('equipment');
+
+export function exportImportTemplate(targetType) {
+  const exporters = {
+    project_boq: exportProjectBoqTemplate,
+    boq_library: exportBoqLibraryTemplate,
+    boq_quota_bundle: exportBoqQuotaBundleTemplate,
+    quota: exportQuotaTemplate,
+    material: exportMaterialTemplate,
+    equipment: exportEquipmentTemplate,
+  };
+  if (!Object.hasOwn(exporters, targetType)) throw new Error('不支持的导入模板');
+  return exporters[targetType]();
+}
+
+function exportProjectBoqTemplate() {
+  writeImportTemplate('工程量清单导入模板', [
+    HEADER_BOQ,
+    [1, '示例-001', '示例混凝土垫层', 'C15，厚100mm', 'm³', 10, 320, 3200],
+  ], [6, 18, 28, 34, 10, 12, 12, 12]);
+}
+
+function exportBoqQuotaBundleTemplate() {
+  writeImportTemplate('清单及定额组合导入模板', [
+    ['层级', '编码', '名称', '项目特征', '单位', '工程量', '综合单价', '合价', '人工费', '材料费', '机械费', '管理费', '利润'],
+    ['清单', '示例-001', '示例混凝土垫层', 'C15，厚100mm', 'm³', 10, 320, 3200],
+    ['定额', '示例-A01', '示例现浇混凝土垫层', '同上清单的定额子目', 'm³', 10, 320, 3200, 58, 210, 20, 18, 14],
+  ], [10, 18, 30, 34, 10, 12, 12, 12, 10, 10, 10, 10, 10]);
+}
+
+function writeImportTemplate(name, rows, widths) {
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  sheet['!cols'] = widths.map(wch => ({ wch }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, name);
+  XLSX.writeFile(workbook, `${name}.xlsx`);
+}

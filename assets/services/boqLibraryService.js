@@ -1,6 +1,6 @@
 // 独立清单库：标准清单条目维护与套用到项目
 import { boqLibraryQuotaRelationRepo, boqLibraryRepo, boqRepo, projectBoqQuotaRelationRepo, projectRepo, quotaRepo } from '../data/repository.js?v=6.15';
-import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.15';
+import { parseExcel, rowToBoqLibraryItem } from '../data/excel.js?v=6.15&build=20261127';
 import { calculateAmount, hasMissingPrice } from '../utils/costing.js?v=6.15';
 import { uid } from '../utils/dom.js?v=6.15';
 import { groupForLine, recomputeProjectCost } from './boqService.js?v=6.15';
@@ -120,28 +120,60 @@ export const boqLibraryService = {
     return this.importRows(rows.map(rowToBoqLibraryItem));
   },
   async importRows(rows = []) {
-    const [items, quotas, originalRelations] = await Promise.all([boqLibraryRepo.all(), quotaRepo.all(), boqLibraryQuotaRelationRepo.all()]);
-    const relations = [...originalRelations];
-    const result = { total: rows.length, success: 0, added: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    const [originalItems, quotas, originalRelations] = await Promise.all([boqLibraryRepo.all(), quotaRepo.all(), boqLibraryQuotaRelationRepo.all()]);
+    const items = originalItems.map(item => ({ ...item }));
+    const updatedRelations = new Map();
+    const result = { total: rows.length, success: 0, added: 0, updated: 0, skipped: 0, failed: 0, warnings: [], rows: [] };
     rows.forEach((raw, index) => {
       const item = normalizeLibraryItem(raw);
-      if (!item.name || !item.unit) { result.failed++; result.warnings.push(`第 ${index + 2} 行缺少清单名称或单位`); return; }
+      const location = `${raw.sheetName ? `${raw.sheetName} · ` : ''}第 ${raw.sourceRowNumber || index + 2} 行`;
+      const issues = [];
+      if (!item.name || !item.unit) {
+        const message = '缺少清单名称或单位';
+        result.failed++;
+        result.warnings.push(`${location} ${message}`);
+        result.rows.push({ index, status: 'error', issues: [{ severity: 'error', message }] });
+        return;
+      }
       const quotaRefs = raw.quotaRefs || raw.quotaItemIds || [];
-      const refs = Array.isArray(quotaRefs) ? quotaRefs : clean(quotaRefs).split(/[，,;；\s]+/);
-      item.quotaItemIds = refs.map(ref => quotas.find(q => q.id === ref || q.code === ref || q.name === ref)?.id).filter(Boolean);
-      if (refs.length && !item.quotaItemIds.length) result.warnings.push(`第 ${index + 2} 行关联定额未匹配：${refs.join('、')}`);
+      const refs = (Array.isArray(quotaRefs) ? quotaRefs : clean(quotaRefs).split(/[，,;；\s]+/)).map(clean).filter(Boolean);
+      const matched = refs.map(ref => quotas.find(q => q.id === ref || q.code === ref) || quotas.find(q => q.name === ref));
+      const unmatched = refs.filter((ref, refIndex) => !matched[refIndex]);
+      if (unmatched.length) {
+        const message = `关联定额未匹配 ${unmatched.join('、')}，本次未更新定额关系`;
+        result.warnings.push(`${location} ${message}`);
+        issues.push({ severity: 'warning', code: 'unmatched_quota_refs', message });
+      }
       const existing = findDuplicateLibraryItem(items, item);
+      const replaceRelations = refs.length > 0 && !unmatched.length;
+      item.quotaItemIds = replaceRelations ? [...new Set(matched.map(quota => quota.id))] : existing?.quotaItemIds || [];
       if (existing) { Object.assign(existing, { ...item, id: existing.id, createdAt: existing.createdAt }); result.updated++; }
       else { item.id = uid(); items.push(item); result.added++; }
       const owner = existing || item;
-      const nextRelations = item.quotaItemIds.map((quotaItemId, relationIndex) => normalizeQuotaRelation({
-        quotaItemId, quotaSnapshot: quotaSnapshot(quotas.find(row => row.id === quotaItemId) || { id: quotaItemId }),
-      }, { ownerId: owner.id, order: relationIndex }));
-      relations.splice(0, relations.length, ...relations.filter(row => row.boqLibraryItemId !== owner.id), ...nextRelations);
+      if (replaceRelations) {
+        const oldRelations = updatedRelations.get(owner.id) || originalRelations.filter(row => row.boqLibraryItemId === owner.id);
+        const nextRelations = item.quotaItemIds.map((quotaItemId, sortOrder) => {
+          const previous = oldRelations.find(row => row.quotaItemId === quotaItemId);
+          return previous ? { ...previous, sortOrder } : normalizeQuotaRelation({
+            quotaItemId, quotaSnapshot: quotaSnapshot(matched.find(row => row.id === quotaItemId)),
+          }, { ownerId: owner.id, order: sortOrder });
+        });
+        updatedRelations.set(owner.id, nextRelations);
+      }
       result.success++;
+      result.rows.push({ index, status: 'committed', issues });
     });
-    await boqLibraryRepo.replaceAll(items);
-    await boqLibraryQuotaRelationRepo.replaceAll(relations);
+    const relations = originalRelations.filter(row => !updatedRelations.has(row.boqLibraryItemId)).concat([...updatedRelations.values()].flat());
+    try {
+      await boqLibraryRepo.replaceAll(items);
+      if (updatedRelations.size) await boqLibraryQuotaRelationRepo.replaceAll(relations);
+    } catch (cause) {
+      const rollback = await Promise.allSettled([boqLibraryRepo.replaceAll(originalItems), boqLibraryQuotaRelationRepo.replaceAll(originalRelations)]);
+      const message = rollback.some(result => result.status === 'rejected')
+        ? '清单导入失败，原数据未能完全恢复'
+        : '清单导入失败，已恢复导入前数据';
+      throw new Error(message, { cause });
+    }
     return result;
   },
   async applyToProject(libraryItemId, projectId) {

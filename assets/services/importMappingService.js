@@ -1,5 +1,5 @@
 // Excel 导入字段映射：表头语义与样本值双重校验，默认只确认高置信字段。
-import { getImportSchema } from './importSchemaService.js?v=6.15&build=20260814';
+import { getImportSchema } from './importSchemaService.js?v=6.15&build=20261127';
 
 export const IMPORT_FIELD_DEFS = [
   { key: 'name', label: '清单名称', required: true, aliases: ['项目名称', '清单名称', '工程名称', '名称', '项目名称项目特征'], kind: 'text' },
@@ -15,12 +15,13 @@ export const IMPORT_FIELD_DEFS = [
 const SERIAL_HEADER_RE = /^(序号|编号|编码|项目编码|清单编码|id)$/;
 
 export function normalizeImportHeader(value) {
-  return String(value || '')
+  const header = String(value || '')
     .toLowerCase()
     .replace(/[\r\n\s　]/g, '')
     .replace(/[()（）\[\]［］【】]/g, '')
-    .replace(/[\\/_-]/g, '')
-    .replace(/(含税|不含税|税前|税后|人民币|元)/g, '');
+    .replace(/[\\/_-]/g, '');
+  if (/^(?:是否)?含税$/.test(header)) return header;
+  return header.replace(/(含税|不含税|税前|税后|人民币|元)/g, '');
 }
 
 export function buildImportMapping(headers = [], sampleRows = []) {
@@ -222,7 +223,7 @@ function scoreImportColumn(def, column, rows) {
   if ((def.negativeContext || []).some(value => normalizeImportHeader(fullPath).includes(normalizeImportHeader(value)))) semantic -= 25;
   const values = rows.slice(0, 50).map(row => row?.values?.[column.id]).filter(value => value !== '' && value != null);
   if (def.kind === 'number' || def.kind === 'money' || def.kind === 'percent') {
-    const numericRate = values.length ? values.filter(isNumericValue).length / values.length : 0;
+    const numericRate = values.length ? values.filter(value => isNumericValue(value, def.kind === 'percent')).length / values.length : 0;
     if (values.length && numericRate < 0.5) return null;
     semantic += numericRate >= 0.8 ? 8 : 0;
   }
@@ -247,7 +248,7 @@ function semanticHeaderScore(aliases, normalizedHeader) {
 function profileColumn(header, rows) {
   const values = rows.slice(0, 30).map(row => row?.[header]).filter(value => value !== undefined && value !== null && String(value).trim() !== '');
   if (!values.length) return { nonEmptyRate: 0, numericRate: 0, unitRate: 0 };
-  const numericCount = values.filter(isNumericValue).length;
+  const numericCount = values.filter(value => isNumericValue(value)).length;
   const unitCount = values.filter(value => /^(m|m2|m3|㎡|m²|m³|t|kg|套|台|项|根|座|块|个|组|kW|kw|h|小时|工日)$/i.test(String(value).trim())).length;
   const sampleSize = Math.min(rows.length, 30) || values.length;
   return {
@@ -257,8 +258,9 @@ function profileColumn(header, rows) {
   };
 }
 
-function isNumericValue(value) {
-  const normalized = String(value).replace(/[,，¥￥\s]/g, '');
+function isNumericValue(value, percent = false) {
+  let normalized = String(value).replace(/[,，¥￥\s]/g, '');
+  if (percent) normalized = normalized.replace(/[%％]$/, '');
   return normalized !== '' && Number.isFinite(Number(normalized));
 }
 

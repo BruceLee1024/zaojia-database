@@ -166,7 +166,7 @@ export async function render(workspace = document.getElementById('workspace')) {
   });
   if (params.action === 'new') {
     window.__app.state.routeParams = {};
-    editForm({ id: '', name: '', code: '', client: '', type: '', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing', currency: 'CNY' });
+    editForm({ id: '', name: '', code: '', client: '', type: '', scale: '', dailyCapacity: '', area: '', structure: '', process: '', region: '', priceYear: String(new Date().getFullYear()), stage: '投标报价', status: 'doing', currency: 'CNY' }, { returnToImporter: params.returnTo === 'importer' });
   }
 }
 
@@ -360,7 +360,7 @@ function statusBadge(s) {
        : '<span class="badge badge-gray">未开始</span>';
 }
 
-function editForm(p) {
+function editForm(p, { returnToImporter = false } = {}) {
   const isCustomType = Boolean(p.type && !TYPES.includes(p.type));
   const selectedType = isCustomType ? '__custom__' : (p.type || '');
   const showWaterMetrics = isWaterProjectType(p.type);
@@ -525,11 +525,12 @@ function editForm(p) {
       return;
     }
     try {
-      await projectService.save(obj);
+      const saved = await projectService.save(obj);
       if (obj.status === 'archived') await indicatorService.recompute();
       closeModal();
       toast('已保存', 'success');
-      render();
+      if (returnToImporter) await window.__app.go('importer', { mode: 'hub', projectId: saved.id });
+      else render();
     } catch (err) {
       if (err?.code === 'ARCHIVE_BLOCKED') {
         toast(`暂不能收录：${archiveBlockerText(err.eligibility)}`, 'error');
