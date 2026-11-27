@@ -101,7 +101,6 @@ export async function render(workspace = document.getElementById('workspace')) {
   workspace.innerHTML = `
     <div class="page-frame h-full min-h-0 flex flex-col gap-3">
       ${boqWorkbenchHeader(proj, projects, workbench)}
-      ${boqWorkspaceTabs(workbench)}
       ${boqState.workspaceTab === 'boq' ? `${boqToolbar(selectedCount)}
       <div class="boq-main-grid grid grid-cols-[minmax(0,1fr)_380px] gap-3 flex-1 min-h-0">
         <div class="min-w-0 min-h-0 flex flex-col gap-3">
@@ -552,19 +551,20 @@ function boqWorkflowStrip(status) {
 }
 
 function boqWorkbenchHeader(project, projects, status) {
-  return `<section class="rounded-lg border border-slate-200 bg-white p-4 shrink-0">
-    <div class="flex items-center gap-4">
-      <div>
-        <h1 class="text-xl font-semibold text-slate-950">报价编制工作台</h1>
-        <div class="mt-1 text-xs text-slate-500">按工作主题切换，专注处理当前任务。</div>
+  return `<section class="overflow-hidden rounded-lg border border-slate-200 bg-white shrink-0">
+    <div class="flex min-h-12 items-center gap-3 px-4">
+      <div class="flex min-w-0 items-baseline gap-2">
+        <h1 class="shrink-0 text-base font-semibold text-slate-950">报价编制</h1>
+        <span class="hidden truncate text-xs text-slate-500 xl:inline">${esc(project.name || '当前项目')} · 按工作主题处理清单、风险和版本</span>
       </div>
-      <label class="ml-auto h-10 min-w-[300px] rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 flex items-center gap-2">
+      <label class="ml-auto flex h-8 min-w-[260px] max-w-[420px] items-center gap-2 rounded border border-slate-300 bg-slate-50 px-2.5 text-sm text-slate-700">
         <span class="material-symbols-outlined text-[18px] text-teal-700">domain</span>
         <select id="projSel" class="w-full bg-transparent outline-none">
           ${projects.map(p => `<option value="${p.id}" ${p.id === project.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
         </select>
       </label>
     </div>
+    ${boqWorkspaceTabs(status)}
   </section>`;
 }
 
@@ -575,11 +575,11 @@ function boqWorkspaceTabs(status) {
     ['versions', 'history', '报价版本', `${status.versionCount} 个`],
     ['overview', 'dashboard', '项目概览', `${status.completion}% 完整`],
   ];
-  return `<nav class="boq-workspace-tabs rounded-lg border border-slate-200 bg-white px-2 pt-2 shrink-0" aria-label="报价工作区">
+  return `<nav class="boq-workspace-tabs border-t border-slate-200 bg-slate-50 px-2" aria-label="报价工作区">
     <div class="flex gap-1 overflow-x-auto">
       ${tabs.map(([id, icon, label, note]) => {
         const active = boqState.workspaceTab === id;
-        return `<button type="button" data-boq-workspace-tab="${id}" class="${active ? 'border-teal-600 bg-teal-50 text-teal-800' : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'} inline-flex min-w-[136px] flex-1 items-center justify-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold whitespace-nowrap" aria-current="${active ? 'page' : 'false'}"><span class="material-symbols-outlined text-[18px]">${icon}</span><span>${label}</span><span class="text-[11px] font-medium ${active ? 'text-teal-700' : 'text-slate-400'}">${note}</span></button>`;
+        return `<button type="button" data-boq-workspace-tab="${id}" class="${active ? 'border-teal-600 bg-teal-50 text-teal-800' : 'border-transparent text-slate-500 hover:bg-white hover:text-slate-800'} inline-flex h-10 min-w-[124px] flex-1 items-center justify-center gap-1.5 border-b-2 px-3 text-xs font-semibold whitespace-nowrap" aria-current="${active ? 'page' : 'false'}"><span class="material-symbols-outlined text-[17px]">${icon}</span><span>${label}</span><span class="text-[11px] font-medium ${active ? 'text-teal-700' : 'text-slate-400'}">${note}</span></button>`;
       }).join('')}
     </div>
   </nav>`;
